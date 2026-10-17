@@ -39,6 +39,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Persist history using a mix of inline database storage and external payload files as needed.
 - Deduplicate equivalent content instead of blindly creating duplicate rows.
 - Keep externally backed captures restart-replayable until their SQLite mutation is committed and acknowledged. Replaying the same durable ingest envelope must not duplicate the item-side mutation, increment usage twice, or resurrect an item that was later deleted.
+- If a captured item's files cannot be read, retain it and retry automatically in order; show that capture is waiting rather than silently deleting or overtaking it. A capture whose spool files were deleted outside Scopy cannot recover; it is set aside so it does not block later captures.
 - Keep image/file payload handling safe by validating external storage references before filesystem operations.
 - Preserve exact logical byte counts across filesystem metadata, persistence, reload, search/recent hydration, cleanup planning, and display, including legitimate files above 2 GiB. An unrepresentable aggregate must fail safely rather than crash or wrap.
 
@@ -46,7 +47,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 - Show recent history in a floating panel driven by a global hotkey; the panel remembers its last size, clamped to the current screen.
 - A left click on the status item toggles the panel; a right click opens a menu with Open Scopy, Settings…, Check for Updates…, and Quit Scopy.
-- Support incremental loading for large histories instead of blocking on full-history reads; pinned rows are loaded separately and do not consume the initial recent-page quota.
+- Support incremental loading for large histories instead of blocking on full-history reads; pinned rows do not consume the recent-page quota. Recopies and concurrent changes must not produce duplicate rows, skip rows or collapse the requested paging depth.
 - Keep an idle history row passive: preview, note, Markdown export, image optimization, popover, and feedback state should be created only for real interaction or owned work, then released when every owned task is idle.
 - Keep stable context-menu content predicates out of repeated row-body work. Cache the fast Markdown menu signal by content revision, keep it bounded, and preserve separately cached exact export capability as the authoritative result.
 - Coordinate scrolling with one list-owned active slot and one tokenized suppressed-hover candidate rather than broadcasting scroll state through every visible row. A stationary pointer should regain its valid hover after scroll cooldown, while stale tokens must never revive another row.
@@ -55,6 +56,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - ⌘1–⌘9 act on the first nine displayed rows with the same semantics as Enter (copy and close; a failed copy keeps the panel open). While ⌘ is held, those rows show their ⌘n hint in place of the relative time without changing row height.
 - Deleting a row removes it from the panel at once but sends the backend delete only after a 5 s undo window. During that window the footer shows "Deleted · Undo" and ⌘Z restores the row; outside it, ⌘Z stays text undo. Closing the panel, the next delete, or Clear All commits the pending delete immediately, and a backend republish of the same row inside the window (identical content copied again) undoes it implicitly. A pinned preview of the deleted item closes and does not reopen on undo.
 - A pin, delete, clear, share, or reveal action that fails is reported in the panel footer; it is never only logged.
+- Normal Quit waits for deletions already shown in the panel to commit, including a deletion still inside its undo window. If a deletion fails, restore the row and keep the app open with its error; logout, restart, and shutdown still quit and keep the restored row. Quit never waits more than a few seconds; a shutdown that hangs longer is treated like force quit. This does not cover force quit or power loss.
 - Allow file items to carry editable notes.
 
 ### Search And Filtering
@@ -95,6 +97,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - The UI follows the system language; English and Simplified Chinese are provided, and other languages fall back to English.
 - Provide settings pages for General, Shortcuts, Clipboard, Appearance, Storage, and About.
 - Preserve explicit Save/Cancel semantics for settings changes.
+- Showing an already-open settings window preserves its unsaved draft; reopening a closed window starts a fresh session. Saving unrelated fields must preserve a hotkey changed while the draft was open.
 - Apply recorded hotkeys immediately after capture while keeping the rest of settings transactional.
 - Show About-page version/build information; lightweight performance and ingest metrics sit in a collapsed Diagnostics group. The history list itself shows no timing telemetry.
 
@@ -104,7 +107,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 | --- | --- |
 | Modes | Exact / Fuzzy / Fuzzy+ / Regex |
 | Filters | App filter, single-type filter, grouped multi-type filter |
-| Pagination | Pinned items are independent of recent pagination; the first recent unpinned page is 50 items and each automatic load-more page fetches 300 unpinned items, applied to the list in 20-row chunks |
+| Pagination | Pinned items are independent of recent pagination; the first recent unpinned page is 50 items and each automatic load-more page fetches 300 unpinned items, applied to the list in 50-row chunks |
 | Responsiveness | Production search dispatch uses `0ms` debounce; queries of at most two characters use a minimum `16ms` coalescing delay |
 | Fuzzy / Fuzzy+ | May return a staged first page, but must converge to complete full-history results |
 | Exact | After trimming surrounding whitespace, `>= 3` characters search complete history; `<= 2` characters intentionally search only the most recent `2000` items and must say so in the UI |

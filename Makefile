@@ -1,7 +1,7 @@
 # Scopy Makefile: build, test, measurement, and release entry points (see doc/current/development-guide.md).
 
 .PHONY: all setup build release run clean quick-build xcode help stats format lint
-.PHONY: test-unit test-strict test-tsan test-snapshot-perf-release test-tooling
+.PHONY: test-unit test-tsan test-snapshot-perf-release test-tooling
 .PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-scroll-tools perf-scroll-wheel perf-search-type perf-capture
 .PHONY: perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full
 .PHONY: tag-release push-release release-validate release-bump-patch test-release-policy docs-validate
@@ -14,7 +14,7 @@ LOG_DIR := logs
 # strict concurrency, sanitizers, and perf defines never invalidates another variant's
 # incremental state. Isolate explicit paths by checkout as well: simultaneous
 # worktrees must never contend for the same build database or test products.
-# Plain build/test/test-unit share Xcode's default, project-path-scoped DerivedData.
+# Plain builds use Xcode's default, project-path-scoped DerivedData.
 CHECKOUT_ID := $(shell printf '%s' '$(CURDIR)' | shasum | cut -c1-12)
 DERIVED_DATA_BASE := $(HOME)/Library/Developer/Xcode/DerivedData/Scopy-$(CHECKOUT_ID)
 FRONTEND_PROFILE_SMOKE_ARGS := --skip-setup --repeats 1 --duration 3 --min-samples 50
@@ -66,15 +66,18 @@ quick-build: markdown-assets-verify
 # =================== 测试命令 ===================
 
 
-# Unit tests: every ScopyTests class, including the product-setting and polling tests.
+# One native correctness gate, including strict concurrency compilation.
 test-unit: markdown-assets-verify setup
-	@echo "Running unit tests..."
+	@echo "Running native tests (strict concurrency; any Swift warning fails)..."
 	@mkdir -p $(LOG_DIR)
 	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Strict \
+		SWIFT_STRICT_CONCURRENCY=complete \
+		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-unit.log'
 
@@ -129,21 +132,6 @@ test-tsan:
 			2>&1 | tee $(LOG_DIR)/test-tsan.log'; \
 		;; \
 	esac
-
-# Swift 6 Strict Concurrency regression (tests target only)
-test-strict: markdown-assets-verify setup
-	@echo "Running Strict Concurrency tests (any Swift warning fails)..."
-	@mkdir -p $(LOG_DIR)
-	bash -o pipefail -c 'xcodebuild test \
-		-project Scopy.xcodeproj \
-		-scheme Scopy \
-		-destination platform=macOS \
-		-only-testing:ScopyTests \
-		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Strict \
-		SWIFT_STRICT_CONCURRENCY=complete \
-		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
-		$(VERSION_ARGS) \
-		2>&1 | tee $(LOG_DIR)/strict-concurrency-test.log'
 
 
 
@@ -286,8 +274,7 @@ help:
 	@echo "  make clean        - Remove SwiftPM and DerivedData outputs (keeps the tracked project)"
 	@echo ""
 	@echo "Required gates:"
-	@echo "  make test-unit    - All ScopyTests classes"
-	@echo "  make test-strict  - Unit tests under strict concurrency; any Swift warning fails"
+	@echo "  make test-unit    - Native correctness with strict concurrency"
 	@echo "  make test-tsan    - Hosted ThreadSanitizer test bundle"
 	@echo "  make test-tooling - Project generation, worktree isolation, and script checks"
 	@echo "  make docs-validate / make release-validate / make test-release-policy"

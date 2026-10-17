@@ -92,8 +92,8 @@ final class SearchSQLGoldenTests: XCTestCase {
         await scanEngine.close()
 
         #if DEBUG
-        // With the short index built, ASCII candidates rank in Swift and non-ASCII bigram
-        // candidates rank in SQL; a single non-ASCII character still scans.
+        // With the short index built, ASCII and safe non-ASCII bigram candidates share the
+        // Swift matcher; a single non-ASCII character still scans.
         let shortEngine = SearchEngineImpl(dbPath: dbPath)
         try await shortEngine.open()
         await shortEngine.debugStartShortQueryIndexBuild(force: true)

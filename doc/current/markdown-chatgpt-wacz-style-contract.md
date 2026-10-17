@@ -490,7 +490,6 @@ npm run verify:assets
 cd ../..
 make build
 make test-unit
-make test-strict
 scripts/perf-frontend-profile.sh --include-hover
 make docs-validate
 git diff --check

@@ -1419,32 +1419,63 @@ final class ClipboardMonitorTests: XCTestCase {
         }, message: "Envelope should be acknowledged after validation")
     }
 
-    func testCorruptPendingEnvelopeWithoutPayloadIsDiscardedOnReplay() async throws {
-        let envelopeURL = try writePendingEnvelopeFixture(
-            type: .image,
-            plainText: "[Image: 256 KB]",
-            sizeBytes: 256 * 1024,
-            imageDataWasTIFF: true,
-            payloadFileName: "\(UUID().uuidString).payload"
-        )
-
-        let unexpectedContent = XCTestExpectation(description: "Corrupt pending envelope should not emit content")
-        unexpectedContent.isInverted = true
-        let task = Task {
-            for await _ in monitor.contentStream {
-                unexpectedContent.fulfill()
-                break
-            }
-        }
-        defer { task.cancel() }
-
+    func testEnvelopeWhosePayloadIsGoneIsQuarantinedAndLaterCapturesContinue() async throws {
+        let (envelopeURL, payloadURL) = try persistHTMLEnvelope("payload deleted outside Scopy")
+        try FileManager.default.removeItem(at: payloadURL)
+        let log = collectContents()
+        defer { log.consumer?.cancel() }
         monitor.startMonitoring()
+        pasteboard.clearContents()
+        pasteboard.setString("after missing payload", forType: .string)
+        await monitor.checkClipboard()
 
-        await fulfillment(of: [unexpectedContent], timeout: 0.6)
-        await assertEventually(timeout: 2.0, pollInterval: 0.05, {
-            self.pendingEnvelopeCount() == 0 &&
-            !FileManager.default.fileExists(atPath: envelopeURL.path)
-        }, message: "Corrupt envelope should be discarded and cleaned up during replay")
+        await assertEventually(timeout: 2.0, pollInterval: 0.01, {
+            log.items.count == 1
+        }, message: "A payload that no longer exists must not block later captures")
+        XCTAssertEqual(log.items.map(\.plainText), ["after missing payload"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: envelopeURL.path + ".quarantine"))
+        XCTAssertFalse(monitor.isCaptureReadBlocked)
+    }
+
+    func testMalformedEnvelopeIsQuarantinedWithoutDeletingItsPayload() async throws {
+        let bytes = Data("owned source survives quarantine".utf8)
+        let (envelopeURL, payloadURL) = try persistHTMLEnvelope("source", bytes: bytes)
+        try Data("{".utf8).write(to: envelopeURL)
+        // An earlier copy of the same envelope is already isolated under the plain quarantine name.
+        let earlierQuarantine = URL(fileURLWithPath: envelopeURL.path + ".quarantine")
+        try Data("earlier".utf8).write(to: earlierQuarantine)
+        let log = collectContents()
+        defer { log.consumer?.cancel() }
+        monitor.startMonitoring()
+        pasteboard.clearContents()
+        pasteboard.setString("after quarantine", forType: .string)
+        await monitor.checkClipboard()
+
+        await assertEventually(timeout: 2.0, pollInterval: 0.01, {
+            log.items.count == 1
+        }, message: "A malformed envelope should not permanently block later captures")
+        XCTAssertEqual(log.items.map(\.plainText), ["after quarantine"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: envelopeURL.path))
+        XCTAssertEqual(try Data(contentsOf: earlierQuarantine), Data("earlier".utf8))
+        let quarantined = try FileManager.default.contentsOfDirectory(atPath: ingestSpoolDirectory.path)
+            .filter { $0.hasSuffix(".quarantine") }
+        XCTAssertEqual(quarantined.count, 2)
+        XCTAssertEqual(try Data(contentsOf: payloadURL), bytes)
+        XCTAssertFalse(monitor.isCaptureReadBlocked)
+    }
+
+    private func persistHTMLEnvelope(_ plainText: String, bytes: Data? = nil) throws -> (envelope: URL, payload: URL) {
+        let bytes = bytes ?? Data("<p>\(plainText)</p>".utf8)
+        let envelopeURL = try IngestSpool.persistPendingEnvelope(
+            for: ClipboardMonitor.RawClipboardData(
+                type: .html, plainText: plainText, rawData: bytes, appBundleID: nil, sizeBytes: bytes.count
+            ),
+            in: ingestSpoolDirectory
+        )
+        let envelope = try IngestSpool.loadValidatedEnvelope(
+            from: envelopeURL, ingestDirectory: ingestSpoolDirectory, suffix: IngestSpool.pendingEnvelopeSuffix
+        )
+        return (envelopeURL, ingestSpoolDirectory.appendingPathComponent(try XCTUnwrap(envelope.payloadFileName)))
     }
 
 
@@ -1624,40 +1655,6 @@ final class ClipboardMonitorTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("image-\(UUID().uuidString).png")
         try Data([0x89, 0x50, 0x4E, 0x47]).write(to: url, options: .atomic)
-        return url
-    }
-
-    private func writePendingEnvelopeFixture(
-        type: ClipboardItemType,
-        plainText: String,
-        sizeBytes: Int,
-        imageDataWasTIFF: Bool,
-        payloadFileName: String?
-    ) throws -> URL {
-        struct PendingEnvelopeFixture: Codable {
-            let id: UUID
-            let typeRawValue: String
-            let plainText: String
-            let appBundleID: String?
-            let sizeBytes: Int
-            let precomputedHash: String?
-            let imageDataWasTIFF: Bool
-            let payloadFileName: String?
-        }
-
-        let fixture = PendingEnvelopeFixture(
-            id: UUID(),
-            typeRawValue: type.rawValue,
-            plainText: plainText,
-            appBundleID: "com.test.fixture",
-            sizeBytes: sizeBytes,
-            precomputedHash: nil,
-            imageDataWasTIFF: imageDataWasTIFF,
-            payloadFileName: payloadFileName
-        )
-        let url = ingestSpoolDirectory.appendingPathComponent("\(fixture.id.uuidString).envelope.json")
-        let data = try JSONEncoder().encode(fixture)
-        try data.write(to: url, options: .atomic)
         return url
     }
 

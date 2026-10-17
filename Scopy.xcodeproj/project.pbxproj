@@ -47,7 +47,6 @@
 		0E35E9B208BDFBB26FE28364 /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18510662ACE6AFE5DEB66283 /* HistoryViewModel.swift */; };
 		0ED32BD6F61F4ED6BBC6EC3B /* atx-headings.md in Resources */ = {isa = PBXBuildFile; fileRef = E02C5F3DACDF4A0532BFC0CE /* atx-headings.md */; };
 		0EFE49BD8634937BD92E51EC /* HoverPreviewImageQualityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CFA9E9A2101790657BF92E8 /* HoverPreviewImageQualityPolicy.swift */; };
-		0F008FE00FA588F058BFC382 /* HistoryRowPixelSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62A3A218EDA8A30B0973BFF5 /* HistoryRowPixelSnapshotTests.swift */; };
 		0F2B4AFBDEADB8BFC90399E7 /* HotKeyRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A8A6276630C764728D88F6 /* HotKeyRecorderView.swift */; };
 		0FD74D15059EA77E63270E96 /* HotKeyRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1E175FDD120FFDD7F1D4E4 /* HotKeyRecorder.swift */; };
 		10546EB3FD62A7EF581DD47E /* loose-latex.md in Resources */ = {isa = PBXBuildFile; fileRef = A9D3AC27CB4291833F0B994C /* loose-latex.md */; };
@@ -93,7 +92,6 @@
 		1FEB478C0658AD26B88060AA /* SettingsWindowCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC9E381D80883D5EBE1BB301 /* SettingsWindowCoordinator.swift */; };
 		1FFB7A983AB8EF6F0C11C682 /* HistoryHoverPreviewPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C2BA5B5D81920839FB6B44 /* HistoryHoverPreviewPipeline.swift */; };
 		201A5FCE10F2F4D44B342551 /* HistoryItemMarkdownExportControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6165569F3708B3E387C69609 /* HistoryItemMarkdownExportControllerTests.swift */; };
-		204A0399CB52DBC9CC2EF8D1 /* SearchQueryNormalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12BEDFBB5B0A5170C5F7C25 /* SearchQueryNormalizationTests.swift */; };
 		2113C30857A8E7A4D7B87232 /* HistoryProfileDatasetFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19856E3226649AA62C7FB114 /* HistoryProfileDatasetFingerprint.swift */; };
 		21985918A6A3032287546E9E /* FullIndexColdBuildTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A46FFE9923DEC0F427B770A6 /* FullIndexColdBuildTests.swift */; };
 		2207A9DD7F81B4E16DE39B19 /* cases.json in Resources */ = {isa = PBXBuildFile; fileRef = A5BFA4CCE67918642BDD2DB1 /* cases.json */; };
@@ -110,7 +108,6 @@
 		24EC360C4FF5220FBE10B5C7 /* KaTeX_AMS-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AB54E903D484FE44C7F78B86 /* KaTeX_AMS-Regular.ttf */; };
 		25005375453C41B0CF6927C6 /* KaTeX_SansSerif-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 291DBFC6B0FAC7CE6CFCBE90 /* KaTeX_SansSerif-Regular.woff */; };
 		25AE62F314DF091C809D5899 /* ScrollCursorSetCoalescer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA72B55409DC71EB7E570D7 /* ScrollCursorSetCoalescer.swift */; };
-		25E65E89562C69CCB539F548 /* SearchQueryNormalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12BEDFBB5B0A5170C5F7C25 /* SearchQueryNormalizationTests.swift */; };
 		25EAB1843BC73ADEDF662E4A /* StorageSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF6837577946B91862943880 /* StorageSettingsPage.swift */; };
 		262269F64423C3104B626FEB /* ListLiveScrollObserverHarnessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57771FBF3191EFF510978EB1 /* ListLiveScrollObserverHarnessView.swift */; };
 		2632B8019CA2C30481A14A4F /* MarkdownPreviewWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D861CAAB54D3FB78AB36051 /* MarkdownPreviewWebView.swift */; };
@@ -225,6 +222,7 @@
 		507578187BE947202BD63D0B /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */; };
 		5082B800977E5C57A4AEB835 /* MarkdownComputedStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560C361190AB8C1F6C867B31 /* MarkdownComputedStyleTests.swift */; };
 		51BEF3DA181A60F93EC31417 /* MarkdownSourceProfileDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E51C0270C21BC4765F97A16 /* MarkdownSourceProfileDetector.swift */; };
+		51E377480DE8263490F928BA /* mixed-image-run.md in Resources */ = {isa = PBXBuildFile; fileRef = EBC42A4D18C615ECDEAA783E /* mixed-image-run.md */; };
 		52349B93FE20FDACBA2992A8 /* ShortQueryIndexDiskCacheHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF519408C137227E5F1B8226 /* ShortQueryIndexDiskCacheHardeningTests.swift */; };
 		52B6DB95C6CEC0805C3A2714 /* HoverPreviewIntentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1B869A2AD61B9EF2050898 /* HoverPreviewIntentController.swift */; };
 		52BE6C5FACF17DDE6BCE4F91 /* SearchSessionMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473048CFE7D0920E72A2D4A2 /* SearchSessionMemoryTests.swift */; };
@@ -245,6 +243,7 @@
 		57C1FB3E5765F41546C7AD5E /* ScopyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493362158599490B2914D1A5 /* ScopyColors.swift */; };
 		581E100F0C019A1FC5F55926 /* KaTeX_Main-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = CD4A5EB48C1E9F4E3F3926CC /* KaTeX_Main-Bold.woff2 */; };
 		58756FBB91CD1B78A6B09707 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BACD4A1BF6DABAE83D2073AE /* EmptyStateView.swift */; };
+		5898657717CD37DA485ED708 /* mixed-image-run.md in Resources */ = {isa = PBXBuildFile; fileRef = EBC42A4D18C615ECDEAA783E /* mixed-image-run.md */; };
 		592F3B9027D4B1BFF844AEB0 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
 		59573EDF6D2EF92F90650CAC /* scopy-document.css in Resources */ = {isa = PBXBuildFile; fileRef = E103EFED8D5ACFF786A265AA /* scopy-document.css */; };
 		5957B8762A9A3A45F1E3AC86 /* HistoryItemTextPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */; };
@@ -266,7 +265,6 @@
 		60CE434763A73C85700FF131 /* raw-html-literal-markdown.md in Resources */ = {isa = PBXBuildFile; fileRef = 8B2D906C211948F48A3A1046 /* raw-html-literal-markdown.md */; };
 		61C325464B3E5B9C919E50AB /* SettingsPageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C977DE6F35EC7F84B1462BF9 /* SettingsPageHeader.swift */; };
 		628C752FC5E272700514F736 /* QuickLookPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585DF08062DBC58156906C87 /* QuickLookPreviewView.swift */; };
-		6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */; };
 		6318D07F305B862D80F2ACE9 /* KaTeX_SansSerif-Italic.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = D5BB0068AA3C9002124DE49D /* KaTeX_SansSerif-Italic.woff2 */; };
 		63C8383E6BE7E609B663AF8C /* HoverPreviewIntentPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E56E5F337D3748313865480 /* HoverPreviewIntentPolicy.swift */; };
 		63F8737A7F299364FB94BCC3 /* ClipboardServiceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD904A65C1DC7FE485A48945 /* ClipboardServiceCleanupTests.swift */; };
@@ -284,10 +282,8 @@
 		68B83CCF39A03A2E827039E6 /* chatgpt_rich_copy_sample.md in Resources */ = {isa = PBXBuildFile; fileRef = 30ED7ABC96A3F3EC3C1AF535 /* chatgpt_rich_copy_sample.md */; };
 		68DCB77F6F20942281A5E05B /* StorageSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF6837577946B91862943880 /* StorageSettingsPage.swift */; };
 		69784CE09C50940070AEF63A /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 844C4C084D60F319E545D8E0 /* AppDelegateTests.swift */; };
-		6A809348FFD42D91CD907005 /* MockClipboardServiceHistoryListIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B3FCCDA93A7993C6B7B2BD7 /* MockClipboardServiceHistoryListIntegrationTests.swift */; };
 		6A99FB613348407E1116DAB4 /* ClipboardItemDisplayText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46B24B2682039001EA7F2A7 /* ClipboardItemDisplayText.swift */; };
 		6AA3D796C9C757DFCC178313 /* HistoryItemPreviewCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7854D4BF872E9A35EDC0F3E2 /* HistoryItemPreviewCoordinator.swift */; };
-		6B322E6344E429837C1AD94B /* ContextMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */; };
 		6B9C5FE2F55120A7F883D39C /* GeneralSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFEC5C5952694258B5B6FF4 /* GeneralSettingsPage.swift */; };
 		6BA530E07B6F896B7BC0E439 /* HistoryRelativeTimeClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110E1C880F438F88E561BCB0 /* HistoryRelativeTimeClock.swift */; };
 		6C2FC5117C492DDB46A890AF /* asset-manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 1A4241D7C868D4CFCA4B6CCE /* asset-manifest.json */; };
@@ -347,7 +343,6 @@
 		7D547894B05F8069CA7A3DD2 /* StorageServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6146C28BE595B15CFD414140 /* StorageServiceTests.swift */; };
 		7D69F4EFE1199AC3FB188867 /* ShortcutsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961091813A2F9C555BE37BAC /* ShortcutsSettingsPage.swift */; };
 		7D84A0E463D35F38C998C915 /* HistoryHoverPreviewPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C2BA5B5D81920839FB6B44 /* HistoryHoverPreviewPipeline.swift */; };
-		7D8663AC235F6A996745106C /* HistoryRowPixelSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62A3A218EDA8A30B0973BFF5 /* HistoryRowPixelSnapshotTests.swift */; };
 		7D9ADD6F95062EFD3547400B /* UITestWaits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791C51A3902AB70F1262DA2D /* UITestWaits.swift */; };
 		7DC1631464AD89BF706E9247 /* HistoryItemPreviewCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7854D4BF872E9A35EDC0F3E2 /* HistoryItemPreviewCoordinator.swift */; };
 		7DC66EDCE0E45DFC84BEE089 /* ScopySize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A71D183AE552D5A0722779D /* ScopySize.swift */; };
@@ -365,7 +360,6 @@
 		83C6F37CC243FC98B4DA9096 /* KaTeX_AMS-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 3B27D58B30D7E42FD5A09A9F /* KaTeX_AMS-Regular.woff */; };
 		83FD16DEED8306D6A70DB755 /* chatgpt-file-links.md in Resources */ = {isa = PBXBuildFile; fileRef = A196CA0115E4C671A45AD88A /* chatgpt-file-links.md */; };
 		8428066FF2584ACB44D935FD /* KaTeX_Fraktur-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 9A4492992CF21106308EF239 /* KaTeX_Fraktur-Regular.woff */; };
-		84545D8DEA775E702773B41A /* MockClipboardServiceFixedDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04BBAB06BBBEFAD9C75F1425 /* MockClipboardServiceFixedDatasetTests.swift */; };
 		847904181954981532FFE71E /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72C7E22A4D3725C49208C650 /* SectionHeader.swift */; };
 		849089F007FB3D528DFDF598 /* HistoryItemMarkdownExportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A9EE21DB9627ADA27E99B3 /* HistoryItemMarkdownExportController.swift */; };
 		8490E8B273E3D76DA6B8BAEA /* HistoryViewModelRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */; };
@@ -375,7 +369,6 @@
 		8523D35465AD9E7E4E77DAA6 /* KaTeX_Main-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = CD4A5EB48C1E9F4E3F3926CC /* KaTeX_Main-Bold.woff2 */; };
 		8536241DF4D7B262D51F90F1 /* currency-shell-vars.md in Resources */ = {isa = PBXBuildFile; fileRef = 896E7E53DDFA91945E5BF7A2 /* currency-shell-vars.md */; };
 		853EF38AB91E82B09C9C8C8A /* KaTeX_Fraktur-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B71324125BE1417C5D4E6E9D /* KaTeX_Fraktur-Bold.ttf */; };
-		8562093745014C51C25C304A /* MockClipboardServiceFixedDatasetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04BBAB06BBBEFAD9C75F1425 /* MockClipboardServiceFixedDatasetTests.swift */; };
 		859C94EC8BFEC36ED148AEDC /* KaTeX_SansSerif-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = C4CA466F95629B4628DF59F6 /* KaTeX_SansSerif-Bold.woff2 */; };
 		85A16946BECCA384901005A8 /* KaTeX_SansSerif-Italic.woff in Resources */ = {isa = PBXBuildFile; fileRef = 7C24E103BDCF71EDB9EA8167 /* KaTeX_SansSerif-Italic.woff */; };
 		863A94CDF7181ADC07232B79 /* ExportMarkdownPNGUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A07BE2D7E32049F721CA02A8 /* ExportMarkdownPNGUITests.swift */; };
@@ -387,7 +380,6 @@
 		8819DE47B0864E39DF44F165 /* SourceIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C5CB69A5654AB258FE2835 /* SourceIconTests.swift */; };
 		884E86217C2B9383A211B56E /* ScrollCursorSetCoalescer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA72B55409DC71EB7E570D7 /* ScrollCursorSetCoalescer.swift */; };
 		887B19F1D0F5F5E002B880EF /* news-openai-jalapeno.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D9BAB40563618D6302671819 /* news-openai-jalapeno.jpg */; };
-		88F77496CFB21A88BF0D8745 /* AppStateTestCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */; };
 		89206DFC41EE5CF428FA8868 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = D022F8113E684307FAD99300 /* README.md */; };
 		8936CEA202269770DD286AC6 /* ShortcutsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 961091813A2F9C555BE37BAC /* ShortcutsSettingsPage.swift */; };
 		89C6F6585F448AF4EAD81976 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
@@ -501,7 +493,6 @@
 		B0019D19B2F765954C062A28 /* reference-link.md in Resources */ = {isa = PBXBuildFile; fileRef = E15DF921CD907AE377BF0826 /* reference-link.md */; };
 		B017701D03D47A65C0CDDD81 /* favicon-hsbc-hk-32.png in Resources */ = {isa = PBXBuildFile; fileRef = D36DE21BEADC8495515B8CB0 /* favicon-hsbc-hk-32.png */; };
 		B0B69389973463A9B81155A4 /* chatgpt_copy_chinese_table.md in Resources */ = {isa = PBXBuildFile; fileRef = B22069E741707A2786C30E5F /* chatgpt_copy_chinese_table.md */; };
-		B0F8C23D7B1B5DBE7FDB6F6B /* HotKeyServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */; };
 		B10FF3B8AEEE28985C6B79F4 /* KaTeX_SansSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */; };
 		B117329827CF92730C60B45F /* favicon-reuters-32.png in Resources */ = {isa = PBXBuildFile; fileRef = 373B2F77284B3AF79F40DCDB /* favicon-reuters-32.png */; };
 		B172F287F17BCDD44888EE59 /* KaTeX_Main-Bold.woff in Resources */ = {isa = PBXBuildFile; fileRef = A0EECF53173B59CAB3D8C65E /* KaTeX_Main-Bold.woff */; };
@@ -512,7 +503,6 @@
 		B2A004A96EE90C54752354FC /* ThumbnailSweepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB1D13EFC529239B84442AB2 /* ThumbnailSweepTests.swift */; };
 		B2CEFE7289E25259D522B888 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29361DE1A42C04AB601DE /* ContentView.swift */; };
 		B30749B2C013AFC0516644ED /* HistoryListRetainedInteractionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29488D9B883A9FC09B596141 /* HistoryListRetainedInteractionUITests.swift */; };
-		B3C734CCAE60F3A7E0BDA924 /* MockClipboardServiceHistoryListIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B3FCCDA93A7993C6B7B2BD7 /* MockClipboardServiceHistoryListIntegrationTests.swift */; };
 		B3F747B985FA50B14271B179 /* PinnedPreviewWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BA4429AD8887915F23E586F /* PinnedPreviewWindowView.swift */; };
 		B482798191935F54DE9F7DE1 /* SettingsWindowCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F2E1F457E9164BB4772826 /* SettingsWindowCoordinatorTests.swift */; };
 		B4ADD9D45E76589E4B83DBE3 /* katex.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 1F95016417AE5066D641D49C /* katex.min.css */; };
@@ -542,7 +532,6 @@
 		BF54B8E26A16E46E840CAE76 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A2BAEF33A56AB9DC5808252 /* main.swift */; };
 		BF5E207263E1819780AFE98E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */; };
 		BF8520468C6BFDB8742FF88C /* HoverPreviewIntentPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03865B5A388CC531994D0492 /* HoverPreviewIntentPolicyTests.swift */; };
-		C04B9C8ED256D30C0771F3E8 /* AppStateTestCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */; };
 		C0A51AA7E4BEC084FC3D231D /* ResourceCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */; };
 		C0E12FF2817EA6ED14ACC3A2 /* KaTeX_Caligraphic-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = D44765DCFEC088D84D51037F /* KaTeX_Caligraphic-Regular.woff */; };
 		C1331931990CB336FE0D878C /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79CC4C77E31D9CE886C254D /* SettingsViewModel.swift */; };
@@ -726,6 +715,13 @@
 			remoteGlobalIDString = 9FE7B01C9C96A9A5A0ACFA78;
 			remoteInfo = ScopyTestHost;
 		};
+		661507F1F005166D22A738A8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 881EAC4E17987F3E27B9F996 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9FE7B01C9C96A9A5A0ACFA78;
+			remoteInfo = ScopyTestHost;
+		};
 		758654CF8038B5B7D8BB2D1B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 881EAC4E17987F3E27B9F996 /* Project object */;
@@ -758,7 +754,6 @@
 		024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Script-Regular.woff"; sourceTree = "<group>"; };
 		0369BFC689675CC6D741D885 /* temp.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = temp.txt; sourceTree = "<group>"; };
 		03865B5A388CC531994D0492 /* HoverPreviewIntentPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewIntentPolicyTests.swift; sourceTree = "<group>"; };
-		04BBAB06BBBEFAD9C75F1425 /* MockClipboardServiceFixedDatasetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockClipboardServiceFixedDatasetTests.swift; sourceTree = "<group>"; };
 		0561A157ADE4BA245A49A9E1 /* HoverPreviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPreviewModel.swift; sourceTree = "<group>"; };
 		094F7E96DC5DC3FD8002CD7E /* ScopyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C442EB6B998A8961A987D12 /* KaTeX_Main-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Main-Regular.woff2"; sourceTree = "<group>"; };
@@ -876,14 +871,12 @@
 		5901BA87F11FC6F4D1E7C673 /* HistoryItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemView.swift; sourceTree = "<group>"; };
 		593FFA8E5E4F1C431B42F670 /* favicon-investing-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-investing-32.png"; sourceTree = "<group>"; };
 		5AAB1963DA04B41B525FE8EF /* raw-html-literal.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "raw-html-literal.md"; sourceTree = "<group>"; };
-		5B3FCCDA93A7993C6B7B2BD7 /* MockClipboardServiceHistoryListIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockClipboardServiceHistoryListIntegrationTests.swift; sourceTree = "<group>"; };
 		5F236FB16D44AFE08ACBC9C5 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
 		60CF1C183B3F302D5E620DB2 /* HistoryItemImagePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemImagePreviewView.swift; sourceTree = "<group>"; };
 		6119B6CED24CEDFCE2AA9419 /* KaTeX_SansSerif-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_SansSerif-Regular.ttf"; sourceTree = "<group>"; };
 		6146C28BE595B15CFD414140 /* StorageServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageServiceTests.swift; sourceTree = "<group>"; };
 		6165569F3708B3E387C69609 /* HistoryItemMarkdownExportControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemMarkdownExportControllerTests.swift; sourceTree = "<group>"; };
 		61DF2BC8CEEFB6DBC2A87609 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
-		62A3A218EDA8A30B0973BFF5 /* HistoryRowPixelSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRowPixelSnapshotTests.swift; sourceTree = "<group>"; };
 		62C29361DE1A42C04AB601DE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		64F67E7978679E2B6026F8F5 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		65BB06386EF12AEE9E081825 /* MockClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockClipboardService.swift; sourceTree = "<group>"; };
@@ -965,7 +958,6 @@
 		A07BE2D7E32049F721CA02A8 /* ExportMarkdownPNGUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportMarkdownPNGUITests.swift; sourceTree = "<group>"; };
 		A0EECF53173B59CAB3D8C65E /* KaTeX_Main-Bold.woff */ = {isa = PBXFileReference; path = "KaTeX_Main-Bold.woff"; sourceTree = "<group>"; };
 		A106B3D9CF8BA1181A7AE0D7 /* HistoryItemPreviewCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemPreviewCoordinatorTests.swift; sourceTree = "<group>"; };
-		A12BEDFBB5B0A5170C5F7C25 /* SearchQueryNormalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchQueryNormalizationTests.swift; sourceTree = "<group>"; };
 		A196CA0115E4C671A45AD88A /* chatgpt-file-links.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "chatgpt-file-links.md"; sourceTree = "<group>"; };
 		A37481D3662BD7A5717D1395 /* ScopyTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopyTypography.swift; sourceTree = "<group>"; };
 		A3B7B7C569A2A465F8FD6E0B /* KaTeX_Fraktur-Bold.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Fraktur-Bold.woff2"; sourceTree = "<group>"; };
@@ -985,7 +977,6 @@
 		AB54E903D484FE44C7F78B86 /* KaTeX_AMS-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_AMS-Regular.ttf"; sourceTree = "<group>"; };
 		ADE6D1D5A7EB19AB201B6BD5 /* favicon-help-openai-32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "favicon-help-openai-32.png"; sourceTree = "<group>"; };
 		AE65E2E804A2670FCF17404B /* HistoryListInteractionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListInteractionCoordinator.swift; sourceTree = "<group>"; };
-		AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMenuUITests.swift; sourceTree = "<group>"; };
 		AFF722C65B960E0E5627CF4A /* COPYRIGHT */ = {isa = PBXFileReference; path = COPYRIGHT; sourceTree = "<group>"; };
 		B07691C802480ACD52B76823 /* HistoryHoverPreviewPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryHoverPreviewPipelineTests.swift; sourceTree = "<group>"; };
 		B1D884F45B497E86587BF725 /* KaTeX_Size3-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Size3-Regular.woff"; sourceTree = "<group>"; };
@@ -1020,7 +1011,6 @@
 		C7E55F940607C8C9FC85A39D /* KaTeX_Size2-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Size2-Regular.woff2"; sourceTree = "<group>"; };
 		C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTests.swift; sourceTree = "<group>"; };
 		C977DE6F35EC7F84B1462BF9 /* SettingsPageHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPageHeader.swift; sourceTree = "<group>"; };
-		C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateTestCompatibility.swift; sourceTree = "<group>"; };
 		CBE2D342D5B027E53089C35D /* KaTeX_Script-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_Script-Regular.ttf"; sourceTree = "<group>"; };
 		CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KaTeX_SansSerif-Italic.ttf"; sourceTree = "<group>"; };
 		CD4A5EB48C1E9F4E3F3926CC /* KaTeX_Main-Bold.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Main-Bold.woff2"; sourceTree = "<group>"; };
@@ -1060,6 +1050,7 @@
 		E6C6716450CA8DB3E379A58D /* HistoryContentRevisionRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryContentRevisionRegistryTests.swift; sourceTree = "<group>"; };
 		E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceCleanupTests.swift; sourceTree = "<group>"; };
 		EA7C6CDC077B8CCDFF0DD486 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EBC42A4D18C615ECDEAA783E /* mixed-image-run.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "mixed-image-run.md"; sourceTree = "<group>"; };
 		EBEA6A2C67F9BCC973129D90 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		ECF9CB366C11BAFE2E261C4D /* KaTeX_Math-Italic.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Math-Italic.woff2"; sourceTree = "<group>"; };
 		EDC5FBA53642C492695FC35E /* KaTeX_Size4-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Size4-Regular.woff"; sourceTree = "<group>"; };
@@ -1080,7 +1071,6 @@
 		FDB96A7AFFA7702E6909CB64 /* weather-mostly-cloudy-light.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "weather-mostly-cloudy-light.png"; sourceTree = "<group>"; };
 		FE0803F8876C714967D88EA9 /* KaTeX_Main-BoldItalic.woff */ = {isa = PBXFileReference; path = "KaTeX_Main-BoldItalic.woff"; sourceTree = "<group>"; };
 		FEF3E0E34D5570E1123BDF3C /* KaTeX_Size1-Regular.woff */ = {isa = PBXFileReference; path = "KaTeX_Size1-Regular.woff"; sourceTree = "<group>"; };
-		FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyServiceTests.swift; sourceTree = "<group>"; };
 		FF66BCA00380B574D43BB7A5 /* KaTeX_Script-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Script-Regular.woff2"; sourceTree = "<group>"; };
 		FF6837577946B91862943880 /* StorageSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageSettingsPage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1187,7 +1177,6 @@
 		465B69F83B7A249C89419E10 /* ScopyUITests */ = {
 			isa = PBXGroup;
 			children = (
-				AEF8649A162AEF1B81D32EE6 /* ContextMenuUITests.swift */,
 				A07BE2D7E32049F721CA02A8 /* ExportMarkdownPNGUITests.swift */,
 				13DBDC4F836AC20C38FC273F /* HistoryItemViewUITests.swift */,
 				29488D9B883A9FC09B596141 /* HistoryListRetainedInteractionUITests.swift */,
@@ -1395,7 +1384,6 @@
 			isa = PBXGroup;
 			children = (
 				844C4C084D60F319E545D8E0 /* AppDelegateTests.swift */,
-				C9D55BDCEE3B396CBE2DC623 /* AppStateTestCompatibility.swift */,
 				C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */,
 				023E68BDF955E586D8078DC5 /* AsyncPermitPoolTests.swift */,
 				199A898A7754BB5CF5B53D8A /* ChatGPTMarkdownRendererTests.swift */,
@@ -1429,10 +1417,8 @@
 				0E5BC3C78931E99A757A8DCD /* HistoryProfileDatasetFingerprintTests.swift */,
 				97AEC3DECAB492AFD333ADA1 /* HistoryRelativeTimeClockTests.swift */,
 				3FFF81A7DE5C6D3C011EC259 /* HistoryRowLiveStateFanoutTests.swift */,
-				62A3A218EDA8A30B0973BFF5 /* HistoryRowPixelSnapshotTests.swift */,
 				DCAFF6323AF4A9FC1D16EA57 /* HistoryRowThumbnailLifecycleSchedulerTests.swift */,
 				F6BE3CC7D9AF7FCC5B679F92 /* HistoryViewModelRegressionTests.swift */,
-				FF08A6073418036ABAC09144 /* HotKeyServiceTests.swift */,
 				747759CE91D4B8639F351272 /* HoverPreviewImageCacheTests.swift */,
 				C209900B7E5E934B26F5B7AC /* HoverPreviewImageQualityPolicyTests.swift */,
 				03865B5A388CC531994D0492 /* HoverPreviewIntentPolicyTests.swift */,
@@ -1449,8 +1435,6 @@
 				69C8E31A934581C57B87146A /* MarkdownPreviewNavigationPolicyTests.swift */,
 				2BC9ED706E8AA30BAE151DB6 /* MarkdownRenderingCorpusContractTests.swift */,
 				D46D30575F2F7DFC342AA626 /* MarkdownSourceProfileDetectorTests.swift */,
-				04BBAB06BBBEFAD9C75F1425 /* MockClipboardServiceFixedDatasetTests.swift */,
-				5B3FCCDA93A7993C6B7B2BD7 /* MockClipboardServiceHistoryListIntegrationTests.swift */,
 				753E825FB74D799376C6A8B4 /* PinnedPreviewControllerTests.swift */,
 				32D999A7588A12D89B127388 /* PngquantServiceTests.swift */,
 				E89CCE301327084364FDFDE1 /* ResourceCleanupTests.swift */,
@@ -1461,7 +1445,6 @@
 				38F054DBA6041F727FF82864 /* SearchIndexMaintenanceTests.swift */,
 				FAC505D8FF686AA5BB8557AE /* SearchMatchContextBuilderTests.swift */,
 				153370FC30C96C172F3FC68C /* SearchMatchPresentationTests.swift */,
-				A12BEDFBB5B0A5170C5F7C25 /* SearchQueryNormalizationTests.swift */,
 				15EBBE158869225275AB5F98 /* SearchServiceTests.swift */,
 				473048CFE7D0920E72A2D4A2 /* SearchSessionMemoryTests.swift */,
 				7B94C983B9B91BBBEB7653A2 /* SearchSQLGoldenTests.swift */,
@@ -1583,6 +1566,7 @@
 				2F7F44BEE8331E04053300B0 /* explicit-math.md */,
 				3A173A25023331BD475CAC8A /* image-path.md */,
 				A9D3AC27CB4291833F0B994C /* loose-latex.md */,
+				EBC42A4D18C615ECDEAA783E /* mixed-image-run.md */,
 				8B2D906C211948F48A3A1046 /* raw-html-literal-markdown.md */,
 				5AAB1963DA04B41B525FE8EF /* raw-html-literal.md */,
 				E15DF921CD907AE377BF0826 /* reference-link.md */,
@@ -1781,6 +1765,7 @@
 			);
 			dependencies = (
 				20C89F60F910C36A30EEF77E /* PBXTargetDependency */,
+				F20ED053178E87F9975A835C /* PBXTargetDependency */,
 			);
 			name = ScopyTests;
 			packageProductDependencies = (
@@ -1796,6 +1781,7 @@
 			buildConfigurationList = DBC576CA88919644A120E37B /* Build configuration list for PBXNativeTarget "ScopyTestHost" */;
 			buildPhases = (
 				8FD60F4F2E6F5F3BD6C58865 /* Sources */,
+				40907C2F5453B94CA67ECB76 /* Stage MarkdownPreview Assets */,
 			);
 			buildRules = (
 			);
@@ -1860,9 +1846,9 @@
 			projectRoot = "";
 			targets = (
 				90B6CBB50728B252BCF53636 /* Scopy */,
-				185ABD5F0CC3DBE69D9FA902 /* ScopyTSanTests */,
-				9FE7B01C9C96A9A5A0ACFA78 /* ScopyTestHost */,
 				9A0B704F71C1FBCD2F637B6F /* ScopyTests */,
+				9FE7B01C9C96A9A5A0ACFA78 /* ScopyTestHost */,
+				185ABD5F0CC3DBE69D9FA902 /* ScopyTSanTests */,
 				339889D95358A277D7803586 /* ScopyUITests */,
 			);
 		};
@@ -2001,6 +1987,7 @@
 				E5E48BF00A05543D680924B1 /* katex.min.css in Resources */,
 				9EC9FE1918E38DF2BFD2250F /* loose-latex.md in Resources */,
 				C13E26F0304C0709BF895F07 /* markdown_delimiter_repro.md in Resources */,
+				5898657717CD37DA485ED708 /* mixed-image-run.md in Resources */,
 				39650A6D9C8A53B7FF7260D5 /* news-openai-hugging-face.jpg in Resources */,
 				887B19F1D0F5F5E002B880EF /* news-openai-jalapeno.jpg in Resources */,
 				502D3B7B7330D9F79C5F5980 /* news-openai-kiro.jpg in Resources */,
@@ -2106,6 +2093,7 @@
 				B4ADD9D45E76589E4B83DBE3 /* katex.min.css in Resources */,
 				10546EB3FD62A7EF581DD47E /* loose-latex.md in Resources */,
 				B9B2F7E3EF426DDC9B2E188D /* markdown_delimiter_repro.md in Resources */,
+				51E377480DE8263490F928BA /* mixed-image-run.md in Resources */,
 				DF2872C04F3E5F7404ECC8F1 /* news-openai-hugging-face.jpg in Resources */,
 				C441AA732D8C3F44350E1C79 /* news-openai-jalapeno.jpg in Resources */,
 				E341CC78A9C56921CBBDDB73 /* news-openai-kiro.jpg in Resources */,
@@ -2147,6 +2135,27 @@
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\nSRC_TOOL=\"${SRCROOT}/Scopy/Resources/Tools/pngquant\"\nDST_TOOL_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Tools\"\nDST_TOOL=\"${DST_TOOL_DIR}/pngquant\"\nif [ ! -f \"$SRC_TOOL\" ]; then\n  echo \"Missing bundled tool: $SRC_TOOL\" >&2\n  if [ \"${CONFIGURATION:-Debug}\" = \"Release\" ]; then\n    exit 1\n  fi\n  exit 0\nfi\nmkdir -p \"$DST_TOOL_DIR\"\nif [ ! -f \"$DST_TOOL\" ] || ! cmp -s \"$SRC_TOOL\" \"$DST_TOOL\"; then\n  ditto \"$SRC_TOOL\" \"$DST_TOOL\"\nfi\nchmod +x \"$DST_TOOL\" || true\n\nSRC_TP_DIR=\"${SRCROOT}/Scopy/Resources/ThirdParty/pngquant\"\nDST_TP_PARENT=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/ThirdParty\"\nDST_TP_DIR=\"${DST_TP_PARENT}/pngquant\"\nif [ -d \"$SRC_TP_DIR\" ]; then\n  mkdir -p \"$DST_TP_PARENT\"\n  mkdir -p \"$DST_TP_DIR\"\n  rsync -a --delete \"$SRC_TP_DIR\"/ \"$DST_TP_DIR\"/\nfi\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/fix_bundled_tool_permissions.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
 		};
+		40907C2F5453B94CA67ECB76 /* Stage MarkdownPreview Assets */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Scopy/Resources/MarkdownPreview",
+			);
+			name = "Stage MarkdownPreview Assets";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/stage_markdown_preview_assets.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nSRC_DIR=\"${SRCROOT}/Scopy/Resources/MarkdownPreview\"\nDST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/MarkdownPreview\"\nif [ ! -d \"$SRC_DIR\" ]; then\n  echo \"Missing MarkdownPreview assets: $SRC_DIR\" >&2\n  exit 1\nfi\nmkdir -p \"$DST_DIR\"\nrsync -a --delete \"$SRC_DIR\"/ \"$DST_DIR\"/\nSTAMP_FILE=\"${DERIVED_FILE_DIR}/stage_markdown_preview_assets.stamp\"\nmkdir -p \"$(dirname \"$STAMP_FILE\")\"\ntouch \"$STAMP_FILE\"\n";
+		};
 		F0C3468392507EFD43747E33 /* Stage MarkdownPreview Assets */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -2178,7 +2187,6 @@
 				E5270518B011F1F6F8D7F407 /* AboutSettingsPage.swift in Sources */,
 				69784CE09C50940070AEF63A /* AppDelegateTests.swift in Sources */,
 				04D00AA12169910C80C28CF9 /* AppState.swift in Sources */,
-				C04B9C8ED256D30C0771F3E8 /* AppStateTestCompatibility.swift in Sources */,
 				05C95008A01E020F43D3988B /* AppStateTests.swift in Sources */,
 				D4C231881F5CF33E0C69832A /* AppVersion.swift in Sources */,
 				058BFCE0B478C3A010F211C5 /* AppearanceSettingsPage.swift in Sources */,
@@ -2246,14 +2254,12 @@
 				961A8067959A2A01B2A61976 /* HistoryRelativeTimeClockTests.swift in Sources */,
 				9247AB2C011D2F19ADC32B14 /* HistoryRowLiveStateFanout.swift in Sources */,
 				DAD775383AE3C0CD9CB3A37D /* HistoryRowLiveStateFanoutTests.swift in Sources */,
-				0F008FE00FA588F058BFC382 /* HistoryRowPixelSnapshotTests.swift in Sources */,
 				FB3E2869AFC1A526CCFB26EC /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */,
 				F1736ED3E5D923DFA48453E0 /* HistoryRowThumbnailLifecycleSchedulerTests.swift in Sources */,
 				22CAC8D2216EF5F939B413B0 /* HistoryViewModel.swift in Sources */,
 				EB332D5EDFB4358652AFBBA7 /* HistoryViewModelRegressionTests.swift in Sources */,
 				8E09FFE67101D5769C94AB65 /* HotKeyRecorder.swift in Sources */,
 				0F2B4AFBDEADB8BFC90399E7 /* HotKeyRecorderView.swift in Sources */,
-				B0F8C23D7B1B5DBE7FDB6F6B /* HotKeyServiceTests.swift in Sources */,
 				C6EEE36D11D5EFFD32E725A5 /* HoverPreviewImageCache.swift in Sources */,
 				91572AC4926207BC1B1A2C4B /* HoverPreviewImageCacheTests.swift in Sources */,
 				0EFE49BD8634937BD92E51EC /* HoverPreviewImageQualityPolicy.swift in Sources */,
@@ -2300,8 +2306,6 @@
 				C8473283146F6137FFE45BFD /* MarkdownSourceProfileDetector.swift in Sources */,
 				1A284A8CDADDC723F949AB74 /* MarkdownSourceProfileDetectorTests.swift in Sources */,
 				E63159F823967F078650F36A /* MockClipboardService.swift in Sources */,
-				8562093745014C51C25C304A /* MockClipboardServiceFixedDatasetTests.swift in Sources */,
-				B3C734CCAE60F3A7E0BDA924 /* MockClipboardServiceHistoryListIntegrationTests.swift in Sources */,
 				D2FE58267F3FCB1C5696CED6 /* MockServices.swift in Sources */,
 				0AD305C3B070786AC4309A0C /* PerformanceMetrics.swift in Sources */,
 				E7D7B9A19C8BA12474E8E19F /* PinnedPreviewController.swift in Sources */,
@@ -2328,7 +2332,6 @@
 				5C77038F243CD87DDEF1C842 /* SearchMatchContextBuilderTests.swift in Sources */,
 				EB43D7CBC2F788C69B949939 /* SearchMatchPresentation.swift in Sources */,
 				7E75331D9DE3B1B922F0374B /* SearchMatchPresentationTests.swift in Sources */,
-				25E65E89562C69CCB539F548 /* SearchQueryNormalizationTests.swift in Sources */,
 				A9414F4914003F658DE370D9 /* SearchSQLGoldenTests.swift in Sources */,
 				DF15A575AEB6BFFC571AA648 /* SearchServiceTests.swift in Sources */,
 				9BD17A5F5417A8C5ED29F1E9 /* SearchSessionMemoryTests.swift in Sources */,
@@ -2366,7 +2369,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6B322E6344E429837C1AD94B /* ContextMenuUITests.swift in Sources */,
 				863A94CDF7181ADC07232B79 /* ExportMarkdownPNGUITests.swift in Sources */,
 				721B08ED96F0637678325967 /* HistoryItemViewUITests.swift in Sources */,
 				B30749B2C013AFC0516644ED /* HistoryListRetainedInteractionUITests.swift in Sources */,
@@ -2387,7 +2389,6 @@
 				1A2F33F96B65B19147B7E6DA /* AppDelegate.swift in Sources */,
 				71EAAA7CEFEBB43FBF1D9E88 /* AppDelegateTests.swift in Sources */,
 				BF5E207263E1819780AFE98E /* AppState.swift in Sources */,
-				88F77496CFB21A88BF0D8745 /* AppStateTestCompatibility.swift in Sources */,
 				F57DEF5DFEC07FE9586910EA /* AppStateTests.swift in Sources */,
 				7166E945AC8A16163CC7B924 /* AppVersion.swift in Sources */,
 				9746B0E3394739E5BF814BA8 /* AppearanceSettingsPage.swift in Sources */,
@@ -2455,14 +2456,12 @@
 				C74D62F02BC8E3CCA5135949 /* HistoryRelativeTimeClockTests.swift in Sources */,
 				0DE03FCF2BE916DEB10C363C /* HistoryRowLiveStateFanout.swift in Sources */,
 				DC7CCB8214221E6C84AF1EBB /* HistoryRowLiveStateFanoutTests.swift in Sources */,
-				7D8663AC235F6A996745106C /* HistoryRowPixelSnapshotTests.swift in Sources */,
 				8D97DFF3F3FF7D3AEEB5CF51 /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */,
 				4D8AE220728D3AE17D6674EE /* HistoryRowThumbnailLifecycleSchedulerTests.swift in Sources */,
 				18A0B29008644A161F357EEA /* HistoryViewModel.swift in Sources */,
 				8490E8B273E3D76DA6B8BAEA /* HistoryViewModelRegressionTests.swift in Sources */,
 				0FD74D15059EA77E63270E96 /* HotKeyRecorder.swift in Sources */,
 				DC47D328E3CF656FBF9EB59A /* HotKeyRecorderView.swift in Sources */,
-				6290407CDC493685A38B5DED /* HotKeyServiceTests.swift in Sources */,
 				7205559FC328F834C2700177 /* HoverPreviewImageCache.swift in Sources */,
 				2F483FB5F05DC1F003816DFB /* HoverPreviewImageCacheTests.swift in Sources */,
 				E9BACFF205BFA960AE6194FD /* HoverPreviewImageQualityPolicy.swift in Sources */,
@@ -2509,8 +2508,6 @@
 				51BEF3DA181A60F93EC31417 /* MarkdownSourceProfileDetector.swift in Sources */,
 				142854A1D6160DAD2D9A9FA2 /* MarkdownSourceProfileDetectorTests.swift in Sources */,
 				710C4F7150633C7506E67949 /* MockClipboardService.swift in Sources */,
-				84545D8DEA775E702773B41A /* MockClipboardServiceFixedDatasetTests.swift in Sources */,
-				6A809348FFD42D91CD907005 /* MockClipboardServiceHistoryListIntegrationTests.swift in Sources */,
 				4F1BE0CF444C5F07BEE16E97 /* MockServices.swift in Sources */,
 				06DE2B57F5979778D2F7F1A1 /* PerformanceMetrics.swift in Sources */,
 				578579304D888A7FCDF76ED0 /* PinnedPreviewController.swift in Sources */,
@@ -2537,7 +2534,6 @@
 				70A1FC6F4E56D30E19E536DE /* SearchMatchContextBuilderTests.swift in Sources */,
 				8D33A0FB154093009BEDC469 /* SearchMatchPresentation.swift in Sources */,
 				900BDD9ACCB88B299F8066ED /* SearchMatchPresentationTests.swift in Sources */,
-				204A0399CB52DBC9CC2EF8D1 /* SearchQueryNormalizationTests.swift in Sources */,
 				FAB3E9917D9310E3D196EE64 /* SearchSQLGoldenTests.swift in Sources */,
 				D0DCBABCC3717C48EAF8A18C /* SearchServiceTests.swift in Sources */,
 				52BE6C5FACF17DDE6BCE4F91 /* SearchSessionMemoryTests.swift in Sources */,
@@ -2704,6 +2700,11 @@
 			target = 90B6CBB50728B252BCF53636 /* Scopy */;
 			targetProxy = D11981CE26BB42085EF77ACB /* PBXContainerItemProxy */;
 		};
+		F20ED053178E87F9975A835C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9FE7B01C9C96A9A5A0ACFA78 /* ScopyTestHost */;
+			targetProxy = 661507F1F005166D22A738A8 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -2748,7 +2749,7 @@
 		3124B18EA38DA16E1E9E7FB6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "";
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Scopy/Info.plist;
@@ -2761,7 +2762,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.scopy.tests;
 				PRODUCT_NAME = ScopyTests;
 				SDKROOT = macosx;
-				TEST_HOST = "";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ScopyTestHost.app/Contents/MacOS/ScopyTestHost";
 			};
 			name = Release;
 		};
@@ -3003,7 +3004,7 @@
 		F0AE10B77432899C6DD11C55 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "";
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Scopy/Info.plist;
@@ -3016,7 +3017,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.scopy.tests;
 				PRODUCT_NAME = ScopyTests;
 				SDKROOT = macosx;
-				TEST_HOST = "";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ScopyTestHost.app/Contents/MacOS/ScopyTestHost";
 			};
 			name = Debug;
 		};

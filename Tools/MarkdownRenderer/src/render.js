@@ -499,6 +499,7 @@ function protectTableCodeSpanPipes(source) {
 function findTableLineIndexes(lines) {
   const indexes = new Set();
   const fences = createFenceTracker();
+  let bodyEnd = 0;
 
   for (let i = 0; i < lines.length; i += 1) {
     if (fences.skip(lines[i]) || !isTableDelimiterLine(lines[i])) {
@@ -509,9 +510,13 @@ function findTableLineIndexes(lines) {
     if (headerIndex >= 0 && isTableContentLine(lines[headerIndex])) {
       indexes.add(headerIndex);
     }
-    for (let bodyIndex = i + 1; bodyIndex < lines.length && isTableContentLine(lines[bodyIndex]); bodyIndex += 1) {
+    // Prior delimiter scans already covered this prefix. Still visit every line above so
+    // fence state and the header check keep their original behavior.
+    let bodyIndex = Math.max(i + 1, bodyEnd);
+    for (; bodyIndex < lines.length && isTableContentLine(lines[bodyIndex]); bodyIndex += 1) {
       indexes.add(bodyIndex);
     }
+    bodyEnd = bodyIndex;
   }
 
   return indexes;

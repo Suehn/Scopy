@@ -402,191 +402,207 @@ final class SearchReadStore {
         return try runPage(sql, params: params, window: window)
     }
 
-    /// Every token must occur in the plain text or note, case-insensitively, through the
-    /// trigram index; every token needs at least three characters, the tokenizer's minimum.
+    /// The trigram index supplies candidates and Swift decides substring membership, with the
+    /// canonical equivalence the full index uses, in both sort modes; ASCII tokens are decided on the
+    /// row's bytes, and a field is lowercased only when they cannot be. The tokenizer folds case but
+    /// compares code points, so each token is looked up in its composed and decomposed forms; only a
+    /// single word that mixes both forms is missed. Never scan the table: a non-ASCII query without
+    /// trigram hits would lowercase every row (seconds on a real history).
     func searchTrigram(tokens: [String], sortMode: SearchSortMode, filters: Filters, window: PageWindow) throws -> Page {
-        let tokens = tokens.filter { !$0.isEmpty }
+        let tokens = tokens.filter { !$0.isEmpty }.map { $0.lowercased() }
         guard let primary = tokens.first else { return .empty }
-
-        var sql: String
-        var params: [String] = []
-
-        switch sortMode {
-        case .recent:
-            sql = """
-                SELECT \(ClipboardItemRow.qualifiedSummaryColumns)
-                FROM clipboard_fts_trigram
-                JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
-                WHERE clipboard_fts_trigram MATCH ?
-            """
-            params.append(Self.trigramFTSQuery(tokens: tokens))
-        case .relevance:
-            sql = """
-                SELECT \(ClipboardItemRow.summaryColumns)
-                FROM (
-                    SELECT \(ClipboardItemRow.qualifiedSummaryColumns),
-                           instr(lower(clipboard_items.plain_text), ?) AS plainPos,
-                           instr(lower(coalesce(clipboard_items.note, '')), ?) AS notePos
-                    FROM clipboard_fts_trigram
-                    JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
-                    WHERE clipboard_fts_trigram MATCH ?
-            """
-            let primaryLower = primary.lowercased()
-            params.append(primaryLower)
-            params.append(primaryLower)
-            params.append(Self.trigramFTSQuery(tokens: tokens))
-        }
-
-        filters.append(to: &sql, params: &params)
-
-        switch sortMode {
-        case .recent:
-            sql += " ORDER BY is_pinned DESC, last_used_at DESC, id ASC"
-            sql += " LIMIT ? OFFSET ?"
-        case .relevance:
-            sql += Self.earliestPositionOrderTail
-        }
-
-        return try runPage(sql, params: params, window: window)
-    }
-
-    // MARK: - Short queries (one or two characters)
-
-    /// Full scan for a short token. Ranks a note-only match as if it followed the plain text
-    /// and one separator, so plain-text matches outrank note-only matches.
-    func searchShortQuerySubstring(tokenLower: String, sortMode: SearchSortMode, filters: Filters, window: PageWindow) throws -> Page {
-        let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !tokenLower.isEmpty else { return .empty }
-
-        var params: [String] = [tokenLower, tokenLower]
         var sql = """
-            SELECT \(ClipboardItemRow.summaryColumns)
-            FROM (
-                SELECT \(ClipboardItemRow.summaryColumns),
-                       \(Self.shortQueryPositionColumns(tokenLower: tokenLower))
-                FROM clipboard_items INDEXED BY idx_pinned
-                WHERE 1 = 1
+            SELECT clipboard_items.id, clipboard_items.last_used_at, clipboard_items.is_pinned,
+                   clipboard_items.plain_text, clipboard_items.note
+            FROM clipboard_fts_trigram
+            JOIN clipboard_items ON clipboard_items.rowid = clipboard_fts_trigram.rowid
+            WHERE clipboard_fts_trigram MATCH ?
         """
+        var params = [Self.trigramFTSQuery(tokens: tokens)]
         filters.append(to: &sql, params: &params)
-        sql += Self.shortQueryOrderTail(sortMode: sortMode)
-
-        return try runPage(sql, params: params, window: window)
-    }
-
-    /// The short index's candidate ids, filtered and ranked in SQL by match position.
-    func searchShortQuerySubstringCandidatesSQL(
-        tokenLower: String,
-        candidateIDStrings: [String],
-        sortMode: SearchSortMode,
-        filters: Filters,
-        window: PageWindow
-    ) throws -> Page {
-        let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !tokenLower.isEmpty else { return .empty }
-        guard !candidateIDStrings.isEmpty else { return .empty }
-
-        var params: [String] = [Self.jsonArray(candidateIDStrings), tokenLower, tokenLower]
-        var sql = """
-            WITH candidates(id) AS (SELECT value FROM json_each(?))
-            SELECT \(ClipboardItemRow.summaryColumns)
-            FROM (
-                SELECT \(ClipboardItemRow.qualifiedSummaryColumns),
-                       \(Self.shortQueryPositionColumns(tokenLower: tokenLower))
-                FROM clipboard_items
-                JOIN candidates ON clipboard_items.id = candidates.id
-                WHERE 1 = 1
-        """
-        filters.append(to: &sql, params: &params)
-        sql += Self.shortQueryOrderTail(sortMode: sortMode)
-
-        return try runPage(sql, params: params, window: window)
-    }
-
-    /// The short index's candidate ids for a one- or two-byte ASCII token, matched
-    /// case-insensitively over the raw UTF-8 bytes and ranked in Swift, which avoids SQLite's
-    /// `lower()` over long texts.
-    func searchShortQuerySubstringCandidates(
-        tokenLower: String,
-        candidateIDStrings: [String],
-        sortMode: SearchSortMode,
-        filters: Filters,
-        window: PageWindow
-    ) throws -> Page {
-        let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !tokenLower.isEmpty else { return .empty }
-        guard !candidateIDStrings.isEmpty else { return .empty }
-
-        let needleLowerBytes = Array(tokenLower.utf8)
-        guard (needleLowerBytes.count == 1 || needleLowerBytes.count == 2),
-              needleLowerBytes.allSatisfy({ $0 < 128 }) else {
-            return try searchShortQuerySubstring(
-                tokenLower: tokenLower,
-                sortMode: sortMode,
-                filters: filters,
-                window: window
-            )
+        if sortMode == .recent {
+            sql += " ORDER BY clipboard_items.is_pinned DESC, clipboard_items.last_used_at DESC, clipboard_items.id ASC"
         }
-
-        var sql = """
-            WITH candidates(id) AS (SELECT value FROM json_each(?))
-            SELECT clipboard_items.id,
-                   clipboard_items.last_used_at,
-                   clipboard_items.is_pinned,
-                   clipboard_items.plain_text,
-                   clipboard_items.note
-            FROM clipboard_items
-            JOIN candidates ON clipboard_items.id = candidates.id
-            WHERE 1 = 1
-        """
-        var params: [String] = [Self.jsonArray(candidateIDStrings)]
-        filters.append(to: &sql, params: &params)
-
         let stmt = try prepare(sql)
         defer { stmt.reset() }
         try Self.bind(params, to: stmt)
 
+        let matchers = tokens.map { LoweredTextMatcher(charactersOf: $0) }
+        let keepCount = window.offset + window.limit + 1
+        var selector = TopKSelector<SearchRankKey>(capacity: keepCount) { lhs, rhs in
+            SearchRankKey.isBetter(lhs, than: rhs, sortMode: sortMode)
+        }
+        var recentIDs: [UUID] = []
+        var matchedCount = 0
+        while try stmt.step() {
+            try Task.checkCancellation()
+            guard let idString = stmt.columnText(0), let id = UUID(uuidString: idString) else { continue }
+            var row = LoweredRowText(plain: Self.bytes(stmt.columnTextBytes(3)), note: Self.bytes(stmt.columnTextBytes(4)))
+            let plainPos = row.firstOffset(of: primary, matcher: matchers[0], inNote: false)
+            let notePos = row.firstOffset(of: primary, matcher: matchers[0], inNote: true)
+            guard plainPos != nil || notePos != nil else { continue }
+            var matchesEveryToken = true
+            for index in tokens.indices.dropFirst()
+            where row.firstOffset(of: tokens[index], matcher: matchers[index], inNote: false) == nil
+                && row.firstOffset(of: tokens[index], matcher: matchers[index], inNote: true) == nil {
+                matchesEveryToken = false
+                break
+            }
+            guard matchesEveryToken else { continue }
+
+            if sortMode == .recent {
+                if matchedCount >= window.offset { recentIDs.append(id) }
+                matchedCount += 1
+                // Already in final recency order: stop after the next reachable page is known.
+                if recentIDs.count > window.limit { break }
+            } else {
+                let position = min(plainPos ?? Int.max, notePos ?? Int.max)
+                selector.offer(SearchRankKey(
+                    isPinned: stmt.columnInt(2) != 0,
+                    lastUsedAt: Date(timeIntervalSince1970: stmt.columnDouble(1)),
+                    score: -position,
+                    id: id
+                ))
+            }
+        }
+        if sortMode == .recent {
+            return try fetchPage(recentIDs[...], window: window)
+        }
+        return try rankedPage(selector.sortedElements(), window: window)
+    }
+
+    // MARK: - Short queries (one or two characters)
+
+    /// The same matcher and UTF-16 position scores as the full index, over either all rows or
+    /// the short index's conservative candidates. Each row's normalized text is released at once.
+    func searchShortQuerySubstring(
+        tokenLower: String,
+        candidateIDStrings: [String]? = nil,
+        sortMode: SearchSortMode,
+        filters: Filters,
+        window: PageWindow
+    ) throws -> Page {
+        let tokenLower = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tokenLower.isEmpty else { return .empty }
+        var params: [String] = []
+        var sql = ""
+        if let candidateIDStrings {
+            guard !candidateIDStrings.isEmpty else { return .empty }
+            sql = "WITH candidates(id) AS (SELECT value FROM json_each(?)) "
+            params.append(Self.jsonArray(candidateIDStrings))
+        }
+        sql += """
+            SELECT clipboard_items.id, clipboard_items.last_used_at, clipboard_items.is_pinned,
+                   clipboard_items.plain_text, clipboard_items.note
+            FROM clipboard_items
+        """
+        if candidateIDStrings != nil {
+            sql += " JOIN candidates ON clipboard_items.id = candidates.id"
+        }
+        sql += " WHERE 1 = 1"
+        filters.append(to: &sql, params: &params)
+        let stmt = try prepare(sql)
+        defer { stmt.reset() }
+        try Self.bind(params, to: stmt)
+
+        let scorer = FuzzyMatcher.Scorer(queryLower: tokenLower, mode: .fuzzy)
+        let matcher = FuzzyMatcher.prepare(queryLower: tokenLower).substringMatcher
+        let needleUnits = tokenLower.utf16.count
+        let baseScore = needleUnits * 10 - (needleUnits - 1)
         let keepCount = window.offset + window.limit + 1
         var selector = TopKSelector<SearchRankKey>(capacity: keepCount) { lhs, rhs in
             SearchRankKey.isBetter(lhs, than: rhs, sortMode: sortMode)
         }
         selector.reserveCapacity(min(keepCount, 8192))
-
         while try stmt.step() {
+            try Task.checkCancellation()
             guard let idString = stmt.columnText(0), let id = UUID(uuidString: idString) else { continue }
-
-            let lastUsedAt = Date(timeIntervalSince1970: stmt.columnDouble(1))
-            let isPinned = stmt.columnInt(2) != 0
-
-            let plainRes = Self.instrASCIIInsensitiveUTF8(
-                haystack: stmt.columnTextBytes(3),
-                needleLower: needleLowerBytes
-            )
-            let matchPos: Int
-            if plainRes.pos > 0 {
-                matchPos = plainRes.pos
-            } else {
-                let noteRes = Self.instrASCIIInsensitiveUTF8(
-                    haystack: stmt.columnTextBytes(4),
-                    needleLower: needleLowerBytes
-                )
-                guard noteRes.pos > 0 else { continue }
-                // A note match ranks as if it followed the plain text and one separator.
-                matchPos = plainRes.lengthIfNoMatch + 1 + noteRes.pos
+            let matchedScore: Int?
+            switch matcher.map({
+                Self.combinedMatch($0, plain: Self.bytes(stmt.columnTextBytes(3)), note: Self.bytes(stmt.columnTextBytes(4)))
+            }) {
+            case .hit(let offset):
+                matchedScore = baseScore - offset
+            case .miss:
+                matchedScore = nil
+            case .undecided, nil:
+                var combined = stmt.columnText(3) ?? ""
+                if let note = stmt.columnText(4), !note.isEmpty {
+                    combined.append("\n")
+                    combined.append(note)
+                }
+                matchedScore = scorer.score(textLower: combined.lowercased())
             }
-            selector.offer(SearchRankKey(isPinned: isPinned, lastUsedAt: lastUsedAt, score: -matchPos, id: id))
+            guard let score = matchedScore else { continue }
+            selector.offer(SearchRankKey(
+                isPinned: stmt.columnInt(2) != 0,
+                lastUsedAt: Date(timeIntervalSince1970: stmt.columnDouble(1)),
+                score: score,
+                id: id
+            ))
+        }
+        return try rankedPage(selector.sortedElements(), window: window)
+    }
+
+    /// The matcher's verdict on `plain + "\n" + note`, as the scorer joins them, without joining.
+    private static func combinedMatch(
+        _ matcher: LoweredTextMatcher,
+        plain: UnsafeBufferPointer<UInt8>,
+        note: UnsafeBufferPointer<UInt8>
+    ) -> LoweredTextMatcher.Outcome {
+        let plainOutcome = matcher.firstMatch(in: plain)
+        guard plainOutcome == .miss, !note.isEmpty else { return plainOutcome }
+        let noteOutcome = matcher.firstMatch(in: note)
+        guard case .hit(let offset) = noteOutcome else { return noteOutcome }
+        guard let plainUnits = LoweredTextMatcher.loweredUTF16Length(of: plain) else { return .undecided }
+        return .hit(utf16Offset: plainUnits + 1 + offset)
+    }
+
+    private static func bytes(_ column: (ptr: UnsafePointer<UInt8>, length: Int)?) -> UnsafeBufferPointer<UInt8> {
+        UnsafeBufferPointer(start: column?.ptr, count: column?.length ?? 0)
+    }
+
+    /// One row's plain text and note as SQLite bytes; a field is decoded and lowercased only for a
+    /// token the byte matcher leaves undecided.
+    private struct LoweredRowText {
+        let plain: UnsafeBufferPointer<UInt8>
+        let note: UnsafeBufferPointer<UInt8>
+        private var plainLower: String?
+        private var noteLower: String?
+
+        init(plain: UnsafeBufferPointer<UInt8>, note: UnsafeBufferPointer<UInt8>) {
+            self.plain = plain
+            self.note = note
         }
 
-        let hits = selector.sortedElements()
-        let start = min(window.offset, hits.count)
-        let end = min(window.offset + window.limit + 1, hits.count)
-        var pageIDs: [UUID] = (start < end) ? hits[start..<end].map(\.id) : []
-
-        let hasMore = hits.count == keepCount
-        if hasMore {
-            pageIDs.removeLast()
+        /// The token's first `String.range(of:)` hit in the lowercased field, as a UTF-16 offset.
+        mutating func firstOffset(of token: String, matcher: LoweredTextMatcher?, inNote: Bool) -> Int? {
+            switch matcher?.firstMatch(in: inNote ? note : plain) {
+            case .hit(let offset): return offset
+            case .miss: return nil
+            case .undecided, nil: break
+            }
+            let text = inNote ? Self.lowered(note, cache: &noteLower) : Self.lowered(plain, cache: &plainLower)
+            return FuzzyMatcher.firstOffset(of: token, in: text, matcher: nil)
         }
 
-        let items = try fetchItemsByIDs(pageIDs)
+        private static func lowered(_ bytes: UnsafeBufferPointer<UInt8>, cache: inout String?) -> String {
+            if let cache { return cache }
+            let text = String(decoding: bytes, as: UTF8.self).lowercased()
+            cache = text
+            return text
+        }
+    }
+
+    private func rankedPage(_ hits: [SearchRankKey], window: PageWindow) throws -> Page {
+        try fetchPage(hits.dropFirst(window.offset).map(\.id)[...], window: window)
+    }
+
+    /// Fetches the window's rows; one more id than the window decides `hasMore`. The scan decided the
+    /// window, so a row deleted before this fetch shortens the page without ending pagination.
+    private func fetchPage(_ ids: ArraySlice<UUID>, window: PageWindow) throws -> Page {
+        let hasMore = ids.count > window.limit
+        let items = try fetchItemsByIDs(Array(ids.prefix(window.limit)))
         return Page(items: items, total: hasMore ? -1 : window.offset + items.count, hasMore: hasMore)
     }
 
@@ -686,51 +702,22 @@ final class SearchReadStore {
         LIMIT ? OFFSET ?
     """
 
-    /// `plainPos`, `notePos`, `plainLen` for a short token; ASCII tokens compare case-insensitively.
-    private static func shortQueryPositionColumns(tokenLower: String) -> String {
-        let useLower = tokenLower.canBeConverted(to: .ascii)
-        let plainSearchExpr = useLower ? "lower(plain_text)" : "plain_text"
-        let noteSearchExpr = useLower ? "lower(coalesce(note, ''))" : "coalesce(note, '')"
-        return """
-            instr(\(plainSearchExpr), ?) AS plainPos,
-                   instr(\(noteSearchExpr), ?) AS notePos,
-                   length(coalesce(plain_text, '')) AS plainLen
-        """
-    }
-
-    private static func shortQueryOrderTail(sortMode: SearchSortMode) -> String {
-        var sql = """
-                ) t
-            WHERE plainPos > 0 OR notePos > 0
-            ORDER BY is_pinned DESC,
-        """
-        if sortMode == .recent {
-            sql += " last_used_at DESC,"
-        }
-        sql += """
-                     CASE
-                       WHEN plainPos > 0 THEN plainPos
-                       ELSE plainLen + 1 + notePos
-                     END ASC,
-        """
-        if sortMode == .relevance {
-            sql += " last_used_at DESC,"
-        }
-        sql += """
-                     id ASC
-            LIMIT ? OFFSET ?
-        """
-        return sql
-    }
-
     private static func trigramCanMatch(_ tokens: [String]) -> Bool {
         !tokens.isEmpty && tokens.allSatisfy { $0.count >= 3 }
     }
 
     /// Each non-empty token as a quoted phrase, joined with `AND`.
     private static func trigramFTSQuery(tokens: [String]) -> String {
-        tokens.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
-            .joined(separator: " AND ")
+        tokens.map { token in
+            var forms = [token]
+            for form in [token.precomposedStringWithCanonicalMapping, token.decomposedStringWithCanonicalMapping]
+            where !forms.contains(where: { $0.unicodeScalars.elementsEqual(form.unicodeScalars) }) {
+                forms.append(form)
+            }
+            let phrases = forms.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+            return phrases.count == 1 ? phrases[0] : "(" + phrases.joined(separator: " OR ") + ")"
+        }
+        .joined(separator: " AND ")
     }
 
     private static func jsonArray(_ strings: [String]) -> String {
@@ -744,65 +731,6 @@ final class SearchReadStore {
         }
         json.append("]")
         return json
-    }
-
-    /// 1-based code point position of the ASCII needle in the UTF-8 haystack, ignoring ASCII
-    /// case; `lengthIfNoMatch` is the haystack's code point count when nothing matched.
-    private static func instrASCIIInsensitiveUTF8(
-        haystack: (ptr: UnsafePointer<UInt8>, length: Int)?,
-        needleLower: [UInt8]
-    ) -> (pos: Int, lengthIfNoMatch: Int) {
-        guard let haystack else { return (pos: 0, lengthIfNoMatch: 0) }
-        guard !needleLower.isEmpty else { return (pos: 1, lengthIfNoMatch: 0) }
-
-        @inline(__always)
-        func lowerASCII(_ b: UInt8) -> UInt8 {
-            if b >= 65 && b <= 90 { return b | 0x20 }
-            return b
-        }
-
-        let n0 = needleLower[0]
-        let n1 = (needleLower.count >= 2) ? needleLower[1] : 0
-
-        var i = 0
-        var codepointPos = 1
-        var prevLower: UInt8? = nil
-        var prevPos = 0
-
-        while i < haystack.length {
-            let byte = haystack.ptr[i]
-            if byte < 128 {
-                let lower = lowerASCII(byte)
-
-                if needleLower.count == 1 {
-                    if lower == n0 { return (pos: codepointPos, lengthIfNoMatch: 0) }
-                } else if let prevLower, prevLower == n0, lower == n1 {
-                    return (pos: prevPos, lengthIfNoMatch: 0)
-                }
-
-                prevLower = lower
-                prevPos = codepointPos
-
-                i += 1
-                codepointPos += 1
-                continue
-            }
-
-            prevLower = nil
-
-            let adv: Int
-            switch byte {
-            case 0xC0...0xDF: adv = 2
-            case 0xE0...0xEF: adv = 3
-            case 0xF0...0xF7: adv = 4
-            default: adv = 1
-            }
-
-            i += adv
-            codepointPos += 1
-        }
-
-        return (pos: 0, lengthIfNoMatch: codepointPos - 1)
     }
 
     private static func bind(_ params: [String], to stmt: SQLiteStatement) throws {

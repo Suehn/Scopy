@@ -81,10 +81,10 @@ final class ClipboardServiceCleanupTests: XCTestCase {
         }
         defer { eventTask.cancel() }
 
-        var reducedSettings = await service.getSettings()
-        reducedSettings.maxItems = 1
+        var patch = SettingsPatch()
+        patch.maxItems = 1
         let updateTask = Task {
-            try await service.updateSettings(reducedSettings)
+            try await service.updateSettings(patch)
         }
 
         await gate.waitUntilPaused()

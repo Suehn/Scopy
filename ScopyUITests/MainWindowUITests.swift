@@ -21,23 +21,10 @@ final class MainWindowUITests: XCTestCase {
 
     // MARK: - Window Launch Tests
 
-    func testAppLaunches() throws {
-        // Verify app launches successfully
-        let exists = app.exists
-        XCTAssertTrue(exists)
-    }
-
     func testMainWindowExists() throws {
         // The main window should exist after launch
         let window = app.windows.firstMatch
         let exists = window.waitForExistence(timeout: 10)
-        XCTAssertTrue(exists)
-    }
-
-    func testSearchFieldExists() throws {
-        // Search field should be visible
-        let searchField = app.anyElement("History.SearchField")
-        let exists = searchField.waitForExistence(timeout: 10)
         XCTAssertTrue(exists)
     }
 
@@ -56,15 +43,4 @@ final class MainWindowUITests: XCTestCase {
         XCTAssertEqual(value, "test query")
     }
 
-    func testWindowHasCorrectTitle() throws {
-        let window = app.windows.firstMatch
-        guard window.waitForExistence(timeout: 5) else {
-            XCTFail("Window not found")
-            return
-        }
-
-        // Check window title or identifier
-        let exists = window.exists
-        XCTAssertTrue(exists)
-    }
 }

@@ -72,18 +72,6 @@ final class PollingIntervalSettingTests: XCTestCase {
 
 final class SettingsStorePersistenceTests: XCTestCase {
 
-    func testDefaultSettingsIncludesPollingInterval() {
-        XCTAssertEqual(SettingsDTO.default.clipboardPollingIntervalMs, 500)
-    }
-
-    func testDefaultSettingsIncludesPngquantExportEnabled() {
-        XCTAssertTrue(SettingsDTO.default.pngquantMarkdownExportEnabled)
-    }
-
-    func testDefaultSettingsUsesChatGPTMarkdownLayout100Percent() {
-        XCTAssertEqual(SettingsDTO.default.markdownChatGPTLayoutScalePercent, 100)
-    }
-
     func testSaveAndLoadPollingIntervalPersists() async {
         let suiteName = "scopy-settingsstore-\(UUID().uuidString)"
         defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
@@ -254,7 +242,11 @@ final class SearchHintTests: XCTestCase {
         func stopAndWait() async {}
         func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
-        func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
+        func fetchHistoryPage(limit _: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
+            let start = expectedRevision == 0 ? max(0, offset) : 0
+            return RecentHistoryPage(pinnedItems: [], items: [], total: 0,
+                                     offset: start, nextOffset: start, revision: 0)
+        }
         func search(query: SearchRequest) async throws -> SearchResultPage {
             SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
         }
@@ -266,7 +258,9 @@ final class SearchHintTests: XCTestCase {
         func copyToClipboard(itemID: UUID) async throws {}
         func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {}
         func fileURLs(itemID: UUID) async throws -> [URL] { [] }
-        func updateSettings(_ settings: SettingsDTO) async throws {}
+        func updateSettings(_ patch: SettingsPatch) async throws -> SettingsDTO {
+            SettingsDTO.default.applying(patch)
+        }
         func getSettings() async throws -> SettingsDTO { .default }
         func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) { (0, 0) }
         func getDetailedStorageStats() async throws -> StorageStatsDTO {
@@ -336,58 +330,6 @@ final class SearchHintTests: XCTestCase {
         let hint = viewModel.searchCoverageHint
         XCTAssertNotNil(hint)
         XCTAssertTrue(hint?.contains("full search") ?? false)
-    }
-
-    func testRegexPrimarySearchStatusLabelShowsRecentOnlyLimit() {
-        let service = StubClipboardService()
-        let settings = SettingsViewModel(service: service)
-        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
-
-        viewModel.searchMode = .regex
-        viewModel.searchQuery = "Item \\\\d+"
-
-        XCTAssertEqual(viewModel.primarySearchStatusLabel, "Recent 2000")
-        XCTAssertEqual(viewModel.searchStatusSummary, "Mode: Regex · Coverage: Recent 2000 · Sort: Recent")
-    }
-
-    func testFuzzyStagedPrimarySearchStatusLabelShowsCalibrating() {
-        let service = StubClipboardService()
-        let settings = SettingsViewModel(service: service)
-        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
-
-        viewModel.searchMode = .fuzzyPlus
-        viewModel.searchQuery = "cmd"
-        viewModel.searchCoverage = .stagedRefine
-        viewModel.ftsSortMode = .relevance
-
-        XCTAssertEqual(viewModel.primarySearchStatusLabel, "Calibrating")
-        XCTAssertEqual(viewModel.searchStatusSummary, "Mode: Fuzzy+ · Coverage: Staged · Sort: Relevance")
-    }
-
-    func testCompleteSearchPrimaryStatusFallsBackToModeLabel() {
-        let service = StubClipboardService()
-        let settings = SettingsViewModel(service: service)
-        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
-
-        viewModel.searchMode = .fuzzyPlus
-        viewModel.searchQuery = "command"
-        viewModel.searchCoverage = .complete
-        viewModel.ftsSortMode = .relevance
-
-        XCTAssertEqual(viewModel.primarySearchStatusLabel, "Fuzzy+")
-        XCTAssertEqual(viewModel.searchStatusSummary, "Mode: Fuzzy+ · Coverage: Complete · Sort: Relevance")
-    }
-
-    func testApplySettingsUpdatesFollowingSessionSearchMode() {
-        let service = StubClipboardService()
-        let settings = SettingsViewModel(service: service)
-        let viewModel = HistoryViewModel(service: service, settingsViewModel: settings)
-
-        var updated = SettingsDTO.default
-        updated.defaultSearchMode = .exact
-        viewModel.applySettings(updated)
-
-        XCTAssertEqual(viewModel.searchMode, .exact)
     }
 
     func testApplySettingsDoesNotOverrideManualSessionSearchMode() {

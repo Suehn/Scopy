@@ -4,6 +4,15 @@ import Foundation
 /// validation, terminal markers, quarantine, stale-artifact sweeps and the legacy Caches
 /// migration. Every function takes the spool directory explicitly and touches nothing else.
 enum IngestSpool {
+    enum ReadError: Error {
+        /// The bytes may still exist but cannot be read now (I/O or permission failure, unreachable spool).
+        case unavailable
+        /// The spool directory is reachable and the artifact is gone; nothing will bring it back.
+        case missing
+        case invalidEnvelope
+        case unsafeArtifact
+    }
+
     /// On-disk description of one externally backed capture; the same document is read back
     /// from the pending envelope and from its terminal marker.
     struct Envelope: Codable, Sendable {
@@ -74,23 +83,6 @@ enum IngestSpool {
         try StorageService.writeAtomically(data, to: url.path)
     }
 
-    private static func loadPendingEnvelope(from url: URL) -> Envelope? {
-        guard let data = BestEffortFileOps.loadData(
-            from: url,
-            logger: ScopyLog.monitor,
-            operation: "loadPendingEnvelope.read"
-        ) else {
-            return nil
-        }
-        return BestEffortFileOps.decodeJSON(
-            Envelope.self,
-            from: data,
-            logger: ScopyLog.monitor,
-            operation: "loadPendingEnvelope.decode",
-            path: url.path
-        )
-    }
-
     /// Pending envelopes in capture order. Envelopes are written to a temporary file and renamed,
     /// so creation date approximates capture time; the file name breaks ties deterministically.
     static func discoverPendingEnvelopeURLs(in directory: URL) -> [URL] {
@@ -130,36 +122,71 @@ enum IngestSpool {
         return url
     }
 
-    static func loadPendingPayload(from envelope: Envelope, ingestDirectory: URL) -> Data? {
-        guard let payloadURL = pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory) else {
-            return nil
-        }
-        return BestEffortFileOps.loadData(
-            from: payloadURL,
-            options: [.mappedIfSafe],
-            logger: ScopyLog.monitor,
-            operation: "loadPendingPayload.read"
-        )
+    static func loadPendingPayload(from envelope: Envelope, ingestDirectory: URL) throws -> Data? {
+        guard let name = envelope.payloadFileName else { return nil }
+        guard name == "\(envelope.id.uuidString).payload" else { throw ReadError.invalidEnvelope }
+        let url = ingestDirectory.appendingPathComponent(name)
+        try requireOwnedRegularFile(url, in: ingestDirectory, expectedFileName: name)
+        return try readData(from: url, options: [.mappedIfSafe])
     }
 
     static func loadValidatedEnvelope(
         from url: URL,
         ingestDirectory: URL,
         suffix: String
-    ) -> Envelope? {
+    ) throws -> Envelope {
         guard let pathID = validateOwnedEnvelopeURL(
             url,
             in: ingestDirectory,
             suffix: suffix,
-            requireExistingRegularFile: true
-        ), let envelope = loadPendingEnvelope(from: url), envelope.id == pathID else {
-            return nil
+            requireExistingRegularFile: false
+        ) else {
+            throw ReadError.unsafeArtifact
         }
+        try requireOwnedRegularFile(url, in: ingestDirectory, expectedFileName: url.lastPathComponent)
+        let data = try readData(from: url)
+        let envelope: Envelope
+        do {
+            envelope = try JSONDecoder().decode(Envelope.self, from: data)
+        } catch {
+            throw ReadError.invalidEnvelope
+        }
+        guard envelope.id == pathID else { throw ReadError.invalidEnvelope }
         if let payloadFileName = envelope.payloadFileName,
            payloadFileName != "\(envelope.id.uuidString).payload" {
-            return nil
+            throw ReadError.invalidEnvelope
         }
         return envelope
+    }
+
+    private static func readData(from url: URL, options: Data.ReadingOptions = []) throws -> Data {
+        do {
+            return try Data(contentsOf: url, options: options)
+        } catch {
+            throw readFailure(error, at: url)
+        }
+    }
+
+    /// Only Scopy writes the spool, so a file absent from a reachable spool directory never reappears;
+    /// waiting for it would block every later capture. Any other failure may recover and is retried.
+    private static func readFailure(_ error: Error, at url: URL) -> ReadError {
+        let directoryIsReachable = (try? url.deletingLastPathComponent().checkResourceIsReachable()) == true
+        let failure: ReadError = isNoSuchFile(error) && directoryIsReachable ? .missing : .unavailable
+        ScopyLog.monitor.warning(
+            "Ingest artifact read failed (\(String(describing: failure), privacy: .public)): \(error.localizedDescription, privacy: .private)"
+        )
+        return failure
+    }
+
+    private static func isNoSuchFile(_ error: Error) -> Bool {
+        let error = error as NSError
+        switch (error.domain, error.code) {
+        case (NSCocoaErrorDomain, NSFileNoSuchFileError), (NSCocoaErrorDomain, NSFileReadNoSuchFileError),
+             (NSPOSIXErrorDomain, Int(ENOENT)):
+            return true
+        default:
+            return (error.userInfo[NSUnderlyingErrorKey] as? Error).map(isNoSuchFile) ?? false
+        }
     }
 
     fileprivate static func validateOwnedEnvelopeURL(
@@ -189,21 +216,36 @@ enum IngestSpool {
         in directory: URL,
         expectedFileName: String
     ) -> Bool {
+        (try? requireOwnedRegularFile(url, in: directory, expectedFileName: expectedFileName)) != nil
+    }
+
+    private static func requireOwnedRegularFile(
+        _ url: URL,
+        in directory: URL,
+        expectedFileName: String
+    ) throws {
         let ownedRoot = directory.standardizedFileURL
         let candidate = url.standardizedFileURL
         guard candidate.lastPathComponent == expectedFileName,
               candidate.deletingLastPathComponent().path == ownedRoot.path else {
-            return false
+            throw ReadError.unsafeArtifact
         }
-        guard FileManager.default.fileExists(atPath: candidate.path) else { return false }
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: candidate.path),
-              let fileType = attributes[.type] as? FileAttributeType,
-              fileType == .typeRegular else {
-            return false
+        let attributes: [FileAttributeKey: Any]
+        do {
+            attributes = try FileManager.default.attributesOfItem(atPath: candidate.path)
+        } catch {
+            throw readFailure(error, at: candidate)
         }
+        guard let fileType = attributes[.type] as? FileAttributeType else { throw ReadError.unavailable }
+        guard fileType == .typeRegular else {
+            throw ReadError.unsafeArtifact
+        }
+        // The candidate is a regular file, so its directory decides containment; resolving the file
+        // itself returns another spelling of a symlinked root when the file is removed mid-call.
         let resolvedRoot = ownedRoot.resolvingSymlinksInPath().path
-        let resolvedCandidate = candidate.resolvingSymlinksInPath()
-        return resolvedCandidate.deletingLastPathComponent().path == resolvedRoot
+        guard candidate.deletingLastPathComponent().resolvingSymlinksInPath().path == resolvedRoot else {
+            throw ReadError.unsafeArtifact
+        }
     }
 
     static func transitionEnvelopeToTerminal(
@@ -223,11 +265,11 @@ enum IngestSpool {
         )
 
         if FileManager.default.fileExists(atPath: pendingURL.path) {
-            guard loadValidatedEnvelope(
+            guard (try? loadValidatedEnvelope(
                 from: pendingURL,
                 ingestDirectory: ingestDirectory,
                 suffix: pendingEnvelopeSuffix
-            ) != nil else {
+            )) != nil else {
                 return nil
             }
             guard !FileManager.default.fileExists(atPath: markerURL.path) else { return nil }
@@ -241,7 +283,7 @@ enum IngestSpool {
             }
         }
 
-        guard let envelope = loadValidatedEnvelope(
+        guard let envelope = try? loadValidatedEnvelope(
             from: markerURL,
             ingestDirectory: ingestDirectory,
             suffix: terminalEnvelopeSuffix
@@ -272,7 +314,7 @@ enum IngestSpool {
             .filter { $0.lastPathComponent.hasSuffix(terminalEnvelopeSuffix) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .compactMap { markerURL in
-                guard let envelope = loadValidatedEnvelope(
+                guard let envelope = try? loadValidatedEnvelope(
                     from: markerURL,
                     ingestDirectory: directory,
                     suffix: terminalEnvelopeSuffix
@@ -293,7 +335,7 @@ enum IngestSpool {
         _ acknowledgement: ClipboardMonitor.TerminalIngestAcknowledgement,
         ingestDirectory: URL
     ) -> Bool {
-        guard let envelope = loadValidatedEnvelope(
+        guard let envelope = try? loadValidatedEnvelope(
             from: acknowledgement.markerURL,
             ingestDirectory: ingestDirectory,
             suffix: terminalEnvelopeSuffix
@@ -345,28 +387,46 @@ enum IngestSpool {
         return !FileManager.default.fileExists(atPath: acknowledgement.markerURL.path)
     }
 
+    /// True means processing may continue: the owned envelope was isolated, or the URL was
+    /// rejected without touching it. False leaves the FIFO head in place for an I/O retry.
     static func quarantinePendingEnvelope(
         at url: URL,
         ingestDirectory: URL
-    ) {
+    ) -> Bool {
         guard validateOwnedEnvelopeURL(
             url,
             in: ingestDirectory,
             suffix: pendingEnvelopeSuffix,
-            requireExistingRegularFile: true
+            requireExistingRegularFile: false
         ) != nil else {
-            return
+            return true // Foreign paths and malformed names are never touched.
         }
-        let quarantineURL = ingestDirectory.appendingPathComponent(
+        do {
+            try requireOwnedRegularFile(url, in: ingestDirectory, expectedFileName: url.lastPathComponent)
+        } catch ReadError.unsafeArtifact {
+            return true // In particular, do not follow or remove a symlink.
+        } catch ReadError.missing {
+            return true // Nothing is left to isolate.
+        } catch {
+            return false
+        }
+        var quarantineURL = ingestDirectory.appendingPathComponent(
             url.lastPathComponent + corruptEnvelopeSuffix
         )
-        guard !FileManager.default.fileExists(atPath: quarantineURL.path) else { return }
+        if FileManager.default.fileExists(atPath: quarantineURL.path) {
+            // An earlier copy is already isolated and keeps the payload; a retry would block capture for good.
+            quarantineURL = ingestDirectory.appendingPathComponent(
+                url.lastPathComponent + "." + UUID().uuidString + corruptEnvelopeSuffix
+            )
+        }
         do {
             try FileManager.default.moveItem(at: url, to: quarantineURL)
+            return true
         } catch {
             ScopyLog.monitor.warning(
                 "Failed to quarantine corrupt ingest envelope: \(error.localizedDescription, privacy: .private)"
             )
+            return false
         }
     }
 
@@ -380,7 +440,7 @@ enum IngestSpool {
         }
         let pendingURLs = discoverPendingEnvelopeURLs(in: legacyDirectory)
         for legacyEnvelopeURL in pendingURLs {
-            guard let envelope = loadValidatedEnvelope(
+            guard let envelope = try? loadValidatedEnvelope(
                 from: legacyEnvelopeURL,
                 ingestDirectory: legacyDirectory,
                 suffix: pendingEnvelopeSuffix
@@ -416,11 +476,11 @@ enum IngestSpool {
                 from: legacyEnvelopeURL,
                 to: destinationEnvelopeURL,
                 destinationDirectory: destinationDirectory
-            ), loadValidatedEnvelope(
+            ), (try? loadValidatedEnvelope(
                 from: destinationEnvelopeURL,
                 ingestDirectory: destinationDirectory,
                 suffix: pendingEnvelopeSuffix
-            ) != nil else {
+            )) != nil else {
                 continue
             }
 

@@ -16,7 +16,8 @@ struct HistoryRowThumbnailLifecycleScheduler {
 
     struct Dependencies {
         var cachedImage: (String) -> NSImage?
-        var loadImage: (String, TaskPriority) async -> NSImage?
+        /// Main-actor, like `ThumbnailCache`: the non-Sendable image never crosses an actor boundary.
+        var loadImage: @MainActor (String, TaskPriority) async -> NSImage?
         var isScrolling: () -> Bool
         var sleep: (UInt64) async -> Void
         var isCancelled: () -> Bool

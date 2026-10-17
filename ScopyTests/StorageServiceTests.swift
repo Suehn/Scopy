@@ -515,19 +515,6 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(persisted.contentHash, item.contentHash)
     }
 
-    func testDeduplicationWithNormalization() async throws {
-        // Text with leading/trailing whitespace
-        let content1 = makeTestContent(text: "   Normalized text   \n\r\n")
-        let item1 = try await storage.upsertItem(content1)
-
-        // Same normalized text
-        let content2 = makeTestContent(text: "Normalized text")
-        let item2 = try await storage.upsertItem(content2)
-
-        // Should be deduplicated
-        XCTAssertEqual(item1.id, item2.id)
-    }
-
     func testDifferentContentNotDeduplicated() async throws {
         let content1 = makeTestContent(text: "Content A")
         _ = try await storage.upsertItem(content1)

@@ -77,15 +77,8 @@ export function scopyRichHandler(_state, node) {
 }
 
 export function scopyImageGroupHandler(_state, node) {
-  const images = Array.isArray(node.images) ? node.images.map(normalizeAutomaticImage).filter(Boolean) : [];
-  if (images.length < 2) return text("");
   return renderImageGroup({
-    version: 2,
-    type: "image_group",
-    state: "ready",
-    layout: images.length === 2 ? "search" : "carousel",
-    initialIndex: 0,
-    images,
+    ...node.surface,
     rootID: node.scopyRootID
   }, true);
 }
@@ -548,16 +541,6 @@ function normalizeImageReference(input) {
     result.alt = alt;
   }
   return result;
-}
-
-function normalizeAutomaticImage(input) {
-  if (!isRecord(input)) return null;
-  return normalizeImageItem({
-    ...(input.src === undefined ? {} : { src: String(input.src) }),
-    ...(input.asset === undefined ? {} : { asset: String(input.asset) }),
-    alt: String(input.alt || ""),
-    ...(input.title === undefined ? {} : { title: String(input.title) })
-  });
 }
 
 function renderSurface(surface) {

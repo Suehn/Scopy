@@ -1071,7 +1071,7 @@ public actor SearchEngineImpl {
         let page: SearchReadStore.Page
         if let perf {
             page = try perf.measure("short_query_short_index_fetch") {
-                try readStore.searchShortQuerySubstringCandidates(
+                try readStore.searchShortQuerySubstring(
                     tokenLower: tokenLower,
                     candidateIDStrings: candidateIDStrings,
                     sortMode: request.sortMode,
@@ -1080,7 +1080,7 @@ public actor SearchEngineImpl {
                 )
             }
         } else {
-            page = try readStore.searchShortQuerySubstringCandidates(
+            page = try readStore.searchShortQuerySubstring(
                 tokenLower: tokenLower,
                 candidateIDStrings: candidateIDStrings,
                 sortMode: request.sortMode,
@@ -1110,7 +1110,7 @@ public actor SearchEngineImpl {
         let page: SearchReadStore.Page
         if let perf {
             page = try perf.measure("short_query_short_index_sql_fetch") {
-                try readStore.searchShortQuerySubstringCandidatesSQL(
+                try readStore.searchShortQuerySubstring(
                     tokenLower: tokenLower,
                     candidateIDStrings: candidateIDStrings,
                     sortMode: request.sortMode,
@@ -1119,7 +1119,7 @@ public actor SearchEngineImpl {
                 )
             }
         } else {
-            page = try readStore.searchShortQuerySubstringCandidatesSQL(
+            page = try readStore.searchShortQuerySubstring(
                 tokenLower: tokenLower,
                 candidateIDStrings: candidateIDStrings,
                 sortMode: request.sortMode,

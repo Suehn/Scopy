@@ -185,10 +185,12 @@ def validate_workflow_file(path: Path) -> list[Violation]:
             )
 
     if path.name == "release.yml":
-        trigger_header = source.split("\njobs:\n", maxsplit=1)[0]
+        # Only the top-level event block is authoritative; names/descriptions may quote YAML.
+        trigger = re.search(r"^on:[ \t]*(?:#.*)?\n((?:[ \t]+[^\n]*\n|\n)*)", source, re.MULTILINE)
+        trigger_header = trigger.group(1) if trigger else ""
         required_fragments = ("  push:", "    tags:", '      - "v*"', "  workflow_dispatch:")
         for fragment in required_fragments:
-            if fragment not in trigger_header:
+            if re.search(r"^" + re.escape(fragment) + r"[ \t]*$", trigger_header, re.MULTILINE) is None:
                 violations.append(
                     Violation(path, 1, f"release workflow is missing trigger fragment {fragment.strip()!r}", fragment)
                 )

@@ -204,19 +204,19 @@ final class AppState {
         pasteboard.setString(failure.diagnostics, forType: .string)
     }
 
-    func stop() {
+    func stop() async {
+        // The bounded backend event queue still needs its consumer until producers finish.
+        await service.stopAndWait()
         eventTask?.cancel()
         eventTask = nil
-
         historyViewModel.stop()
-        service.stop()
         startupPhase = .idle
     }
 
-    // MARK: - Settings
-
-    func updateSettings(_ newSettings: SettingsDTO) async {
-        await settingsViewModel.updateSettings(newSettings)
+    func stopForTermination() async -> Bool {
+        guard await historyViewModel.prepareForTermination() else { return false }
+        await stop()
+        return true
     }
 
     // MARK: - Events
@@ -236,7 +236,7 @@ final class AppState {
 
     private func handleEvent(_ event: ClipboardEvent) async {
         switch event {
-        case .newItem, .itemUpdated, .itemContentUpdated, .thumbnailUpdated, .itemDeleted, .itemsRemoved, .itemPinned, .itemUnpinned, .itemsCleared:
+        case .newItem, .itemUpdated, .itemContentUpdated, .thumbnailUpdated, .itemDeleted, .itemsRemoved, .itemPinned, .itemUnpinned, .itemsCleared, .captureReadBlocked:
             await historyViewModel.handleEvent(event)
         case .settingsChanged:
             let patch = await refreshSettings(applyHotKey: true)

@@ -127,8 +127,10 @@ struct ShortQueryIndex: Sendable {
         idToSlot[id] = slot
         slotCandidateStamp.append(0)
 
-        ingestASCII(plainText: plainText, note: note, slot: slot)
-        ingestNonASCIIBigramsUTF16(plainText: plainText, note: note, slot: slot)
+        let plainTextLower = plainText.lowercased()
+        let noteLower = note?.lowercased()
+        ingestASCII(plainText: plainTextLower, note: noteLower, slot: slot)
+        ingestNonASCIIBigramsUTF16(plainText: plainTextLower, note: noteLower, slot: slot)
     }
 
     mutating func candidateIDStrings(for tokenLower: String) -> [String] {
@@ -168,7 +170,8 @@ struct ShortQueryIndex: Sendable {
     mutating func candidateIDStringsForNonASCIIBigram(tokenLower: String) -> [String]? {
         let token = tokenLower.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { return nil }
-        guard !token.canBeConverted(to: .ascii) else { return nil }
+        guard !token.canBeConverted(to: .ascii),
+              FuzzyMatcher.prepare(queryLower: token).safeFastUTF16 else { return nil }
 
         var units: [UInt16] = []
         units.reserveCapacity(2)

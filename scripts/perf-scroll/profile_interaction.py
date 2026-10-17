@@ -31,9 +31,9 @@ a = ap.parse_args()
 out = os.path.join(REPO, 'logs', 'perf-panel', a.label)
 os.makedirs(out, exist_ok=True)
 DB_FILES = ('clipboard.db', 'clipboard.db-wal', 'clipboard.db-shm',
-            'clipboard.db.fullindex.v6.bin', 'clipboard.db.fullindex.v6.bin.metadata.plist',
-            'clipboard.db.fullindex.v6.bin.sha256',
-            'clipboard.db.shortindex.v3.bin', 'clipboard.db.shortindex.v3.bin.sha256')
+            'clipboard.db.fullindex.v7.bin', 'clipboard.db.fullindex.v7.bin.metadata.plist',
+            'clipboard.db.fullindex.v7.bin.sha256',
+            'clipboard.db.shortindex.v4.bin', 'clipboard.db.shortindex.v4.bin.sha256')
 
 def make_db():
     if a.reuse_db:

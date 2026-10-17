@@ -17,4 +17,5 @@ public enum ClipboardEvent: Sendable {
     case itemUnpinned(UUID)
     case itemsCleared(keepPinned: Bool)
     case settingsChanged
+    case captureReadBlocked(Bool)
 }

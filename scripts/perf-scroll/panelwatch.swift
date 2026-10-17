@@ -46,3 +46,4 @@ while CFAbsoluteTimeGetCurrent() - t0 < timeout {
 }
 print(String(format: "%@ %@_ms=%.1f polls=%d poll_cost_ms=%.2f",
              was ? "close" : "open", was ? "hidden" : "visible", changed, polls, calibAvg))
+if !changed.isFinite { exit(1) }

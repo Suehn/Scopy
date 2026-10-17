@@ -97,7 +97,8 @@ enum FullIndexRanker {
         }
 
         for ch in queryChars.nonASCIIChars {
-            guard let list = index.nonASCIICharPostings[ch], !list.isEmpty else {
+            let list = postings(for: ch, in: index)
+            guard !list.isEmpty else {
                 return []
             }
             lists.append(list)
@@ -392,6 +393,47 @@ enum FullIndexRanker {
         }
 
         return (asciiCodes: asciiCodes, nonASCIIChars: nonASCIIChars)
+    }
+
+    /// A query character's postings. A code-unit match of a multi-scalar character can also lie
+    /// inside a longer text character, whose scalars are posted on their own too.
+    private static func postings(for ch: Character, in index: FullFuzzyIndex) -> [UInt32] {
+        let whole = index.nonASCIICharPostings[ch] ?? []
+        guard ch.unicodeScalars.count > 1 else { return whole }
+        var inside: [UInt32]?
+        for scalar in ch.unicodeScalars {
+            let list: [UInt32]
+            if scalar.isASCII {
+                // Whitespace bytes are never posted.
+                guard scalar.value != 32, !(9...13).contains(scalar.value) else { continue }
+                list = index.asciiCharPostings[Int(scalar.value)]
+            } else {
+                list = index.nonASCIICharPostings[Character(scalar)] ?? []
+            }
+            inside = inside.map { intersectSorted($0, list) } ?? list
+        }
+        return unionSorted(whole, inside ?? [])
+    }
+
+    private static func unionSorted(_ a: [UInt32], _ b: [UInt32]) -> [UInt32] {
+        var i = 0
+        var j = 0
+        var result: [UInt32] = []
+        result.reserveCapacity(a.count + b.count)
+        while i < a.count || j < b.count {
+            if j == b.count || (i < a.count && a[i] < b[j]) {
+                result.append(a[i])
+                i += 1
+            } else if i == a.count || b[j] < a[i] {
+                result.append(b[j])
+                j += 1
+            } else {
+                result.append(a[i])
+                i += 1
+                j += 1
+            }
+        }
+        return result
     }
 
     private static func intersectSorted(_ a: [UInt32], _ b: [UInt32]) -> [UInt32] {

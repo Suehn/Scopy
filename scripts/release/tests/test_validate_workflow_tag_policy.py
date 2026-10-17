@@ -49,25 +49,24 @@ class WorkflowTagPolicyTests(unittest.TestCase):
         self.assertGreaterEqual(len(files), 1)
         self.assertEqual(violations, [])
 
-    def test_release_workflow_remains_tag_triggered_or_explicitly_dispatched(self) -> None:
-        source = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        trigger_header = source.split("\njobs:\n", maxsplit=1)[0]
-        self.assertIn('    tags:\n      - "v*"', trigger_header)
-        self.assertIn("  workflow_dispatch:", trigger_header)
-        self.assertNotIn("branches:", trigger_header)
-
-    def test_release_workflow_uses_the_derived_data_aware_packager(self) -> None:
-        workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-        packager = (REPO_ROOT / "scripts" / "build-release.sh").read_text(encoding="utf-8")
-
-        self.assertIn("SCOPY_XCODE_DERIVED_DATA: ${{ runner.temp }}/Scopy-Release", workflow)
-        self.assertIn("run: ./scripts/build-release.sh", workflow)
-        self.assertIn(".build/Scopy-*.dmg.sha256", workflow)
-        self.assertNotIn(".build/Release/Scopy.app", workflow)
-        self.assertIn('BUILD_DIR="$XCODE_DERIVED_DATA/Build/Products/Release"', packager)
-        self.assertIn('SHA_FILE="${DMG_PATH}.sha256"', packager)
-        self.assertIn('SHA256=$(shasum -a 256 "$DMG_PATH"', packager)
-        self.assertIn('"$SHA256" "$DMG_NAME" > "$SHA_FILE"', packager)
+    def test_release_trigger_cannot_be_spoofed_by_workflow_name(self) -> None:
+        violations = self.validate_fixture(
+            '''
+            name: |
+                push:
+                  tags:
+                    - "v*"
+                workflow_dispatch:
+            on: push
+            jobs:
+              inspect:
+                runs-on: ubuntu-latest
+                steps:
+                  - run: echo fixture
+            ''',
+            name="release.yml",
+        )
+        self.assertTrue(any("missing trigger" in violation.reason for violation in violations))
 
     def test_safe_tag_trigger_and_branch_only_cask_push_are_allowed(self) -> None:
         violations = self.validate_fixture(

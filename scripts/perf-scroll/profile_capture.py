@@ -31,8 +31,8 @@ ROWS=a.count+3
 def make_db():
     dbdir=tempfile.mkdtemp(prefix='scopy-capture-db-')
     for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm',
-              'clipboard.db.fullindex.v6.bin','clipboard.db.fullindex.v6.bin.metadata.plist','clipboard.db.fullindex.v6.bin.sha256',
-              'clipboard.db.shortindex.v3.bin','clipboard.db.shortindex.v3.bin.sha256'):
+              'clipboard.db.fullindex.v7.bin','clipboard.db.fullindex.v7.bin.metadata.plist','clipboard.db.fullindex.v7.bin.sha256',
+              'clipboard.db.shortindex.v4.bin','clipboard.db.shortindex.v4.bin.sha256'):
         src=os.path.join(repo, 'perf-db', f)
         if os.path.exists(src): shutil.copy(src, os.path.join(dbdir, f))
     return dbdir
@@ -75,7 +75,7 @@ def ax_ids(text):
         m=re.match(r'row \d+: (\S+) \| (.*)', l)
         if not m: continue
         if m.group(1)=='header':
-            if 'Recent' in m.group(2): start=len(rows)
+            if 'Recent' in m.group(2) or '最近' in m.group(2): start=len(rows)
             continue
         rows.append(m.group(1))
     return rows[start:]

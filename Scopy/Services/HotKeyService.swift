@@ -54,9 +54,6 @@ public final class HotKeyService {
         var isInstallingEventHandler = false
         var nextHotKeyID: UInt32 = 1
         var lastFire: (id: UInt32, timestamp: CFAbsoluteTime)?
-        #if DEBUG
-        var testingMode = false
-        #endif
     }
 
     private final class Locked<Value>: @unchecked Sendable {
@@ -244,18 +241,6 @@ public final class HotKeyService {
     }
 
     public var isRegistered: Bool {
-        #if DEBUG
-        let isTestingMode = Self.sharedState.withValue { state in
-            state.testingMode
-        }
-        if isTestingMode {
-            let hotKeyID = currentHotKeyID
-            return Self.sharedState.withValue { state in
-                state.handlers[hotKeyID] != nil
-            }
-        }
-        #endif
-
         return hotKeyRef != nil
     }
 
@@ -336,58 +321,6 @@ public final class HotKeyService {
         return OSStatus(eventNotHandledErr)
     }
 
-    // MARK: - Testing Support
-
-    #if DEBUG
-    public static func enableTestingMode() {
-        sharedState.withValue { state in
-            state.testingMode = true
-        }
-    }
-
-    public static func disableTestingMode() {
-        sharedState.withValue { state in
-            state.testingMode = false
-        }
-    }
-
-    public func triggerHandlerForTesting() {
-        let hotKeyID = currentHotKeyID
-        let handler = Self.sharedState.withValue { state in
-            state.handlers[hotKeyID]
-        }
-
-        if let handler = handler {
-            Task { @MainActor in
-                handler()
-            }
-        }
-    }
-
-    public var hasHandler: Bool {
-        let hotKeyID = currentHotKeyID
-        return Self.sharedState.withValue { state in
-            state.handlers[hotKeyID] != nil
-        }
-    }
-
-    /// Takes the new ID before entering the shared state, so the two locks never nest.
-    public func registerHandlerOnly(_ handler: @escaping HotKeyHandler) {
-        let newID = Self.getNextHotKeyID()
-        currentHotKeyID = newID
-        Self.sharedState.withValue { state in
-            state.handlers[newID] = handler
-        }
-    }
-
-    public func unregisterHandlerOnly() {
-        let hotKeyID = currentHotKeyID
-        Self.sharedState.withValue { state in
-            _ = state.handlers.removeValue(forKey: hotKeyID)
-        }
-        currentHotKeyID = 0
-    }
-    #endif
 }
 
 // MARK: - Carbon Event Callback

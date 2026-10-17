@@ -588,6 +588,16 @@
         }
       }
     },
+    "Capture will retry automatically. Later items wait in order.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "采集将自动重试，后续内容按顺序等待。"
+          }
+        }
+      }
+    },
     "Captured content types": {
       "localizations": {
         "zh-Hans": {
@@ -674,6 +684,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "剪贴板"
+          }
+        }
+      }
+    },
+    "Clipboard capture is waiting for an unreadable item": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板采集正等待恢复读取"
           }
         }
       }

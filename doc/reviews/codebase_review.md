@@ -242,7 +242,7 @@ row controller 现在也直接管理导出中的状态和反馈：
   - [SettingsConcurrencyMergeTests.swift](../../ScopyTests/SettingsConcurrencyMergeTests.swift#L28)
 - UI tests 面比只有导出相关测试更广:
   - [ScopyUITests/SettingsUITests.swift](../../ScopyUITests/SettingsUITests.swift)
-  - [ScopyUITests/ContextMenuUITests.swift](../../ScopyUITests/ContextMenuUITests.swift)
+  - `ScopyUITests/ContextMenuUITests.swift`（测试精简时已删除：仅剩无行为断言的用例）
   - [ScopyUITests/HistoryListUITests.swift](../../ScopyUITests/HistoryListUITests.swift)
   - [ScopyUITests/KeyboardNavigationUITests.swift](../../ScopyUITests/KeyboardNavigationUITests.swift)
   - [ScopyUITests/MainWindowUITests.swift](../../ScopyUITests/MainWindowUITests.swift)

@@ -91,10 +91,8 @@ final class HistoryItemPresentationCache {
 
     func rowDescriptor(
         for item: ClipboardItemDTO,
-        settings: SettingsDTO,
-        dependencies: HistoryItemRowDescriptor.Dependencies? = nil
+        settings: SettingsDTO
     ) -> HistoryItemRowDescriptor {
-        let dependencies = dependencies ?? .live
         let key = Self.rowDescriptorCacheKey(for: item, settings: settings)
         if let cached = rowDescriptorCache[key] {
             ScrollPerformanceProfile.shared.incrementCounter(name: "row.descriptor_cache_hit")
@@ -105,8 +103,7 @@ final class HistoryItemPresentationCache {
 
         let descriptor = HistoryItemRowDescriptor(
             item: item,
-            settings: settings,
-            dependencies: dependencies
+            settings: settings
         )
         rowDescriptorCache.insert(descriptor, forKey: key)
         return descriptor

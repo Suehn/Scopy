@@ -160,6 +160,8 @@ actor ClipboardBackend {
     private var storageRootLock: StorageRootLock?
     private var memoryPressureSources: [any DispatchSourceMemoryPressure] = []
     private var isStarted = false
+    private var captureStatusMonitorID: UUID?
+    private var captureStatusRevision: UInt64 = 0
 
     // MARK: - Cleanup Scheduling
 
@@ -263,6 +265,9 @@ actor ClipboardBackend {
             Self.sweepStaleShareableImages()
         }.value
 
+        let captureStatusMonitorID = UUID()
+        self.captureStatusMonitorID = captureStatusMonitorID
+        self.captureStatusRevision = 0
         let monitor = await MainActor.run {
             let pasteboard: NSPasteboard
             if let pasteboardName, !pasteboardName.isEmpty {
@@ -270,13 +275,19 @@ actor ClipboardBackend {
             } else {
                 pasteboard = .general
             }
-            return ClipboardMonitor(
+            let monitor = ClipboardMonitor(
                 pasteboard: pasteboard,
                 pollingInterval: pollingInterval,
                 ingestSpoolDirectory: ingestSpoolDirectory,
                 legacyIngestSpoolDirectory: legacyIngestSpoolDirectory,
                 spoolAlreadyPrepared: true
             )
+            monitor.onCaptureReadBlockedChanged = { [weak self] blocked, revision in
+                Task { [weak self] in
+                    await self?.publishCaptureReadStatus(blocked, revision: revision, monitorID: captureStatusMonitorID)
+                }
+            }
+            return monitor
         }
 
         let search = SearchEngineImpl(dbPath: storage.databaseFilePath, commitJournal: storage.commitJournal)
@@ -344,6 +355,7 @@ actor ClipboardBackend {
                 try? await storage.cleanupOrphanedFiles()
             }
         } catch {
+            self.captureStatusMonitorID = nil
             await MainActor.run {
                 monitor.stopMonitoring()
             }
@@ -381,6 +393,7 @@ actor ClipboardBackend {
     func stop() async {
         guard isStarted else { return }
         isStarted = false
+        captureStatusMonitorID = nil
 
         let monitor = monitor
         let storage = storage
@@ -412,12 +425,14 @@ actor ClipboardBackend {
             }
         }
 
-        if let storage {
-            await storage.close()
-        }
-
+        // Close the read-only search connection first: only the writer, closing last, can checkpoint
+        // and truncate the WAL, so the next launch starts without frames to replay.
         if let search {
             await search.close()
+        }
+
+        if let storage {
+            await storage.close()
         }
 
         rootLock?.release()
@@ -447,15 +462,15 @@ actor ClipboardBackend {
         return dtos
     }
 
-    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
         let storage = try requireStorage()
-        let items = try await storage.fetchRecentUnpinned(limit: limit, offset: offset)
-        var dtos: [ClipboardItemDTO] = []
-        dtos.reserveCapacity(items.count)
-        for item in items {
-            dtos.append(await toDTO(item, storage: storage))
-        }
-        return dtos
+        let page = try await storage.fetchHistoryPage(limit: limit, offset: offset, expectedRevision: expectedRevision)
+        var pinned: [ClipboardItemDTO] = []
+        var items: [ClipboardItemDTO] = []
+        for item in page.pinned { pinned.append(await toDTO(item, storage: storage)) }
+        for item in page.items { items.append(await toDTO(item, storage: storage)) }
+        return RecentHistoryPage(pinnedItems: pinned, items: items, total: page.total,
+                                 offset: page.offset, nextOffset: page.nextOffset, revision: page.revision)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -863,12 +878,12 @@ actor ClipboardBackend {
         return policy
     }
 
-    func updateSettings(_ newSettings: SettingsDTO) async throws {
+    func updateSettings(_ requestedPatch: SettingsPatch) async throws -> SettingsDTO {
         let oldSettings = settings
-        let patch = SettingsPatch.from(baseline: oldSettings, draft: newSettings)
         let oldPollingMs = settings.clipboardPollingIntervalMs
 
-        await settingsStore.save(newSettings)
+        let newSettings = await settingsStore.apply(requestedPatch)
+        let patch = SettingsPatch.from(baseline: oldSettings, draft: newSettings)
         settings = newSettings
 
         if monitorPollingInterval == nil,
@@ -904,6 +919,7 @@ actor ClipboardBackend {
         }
 
         await yieldEvent(.settingsChanged)
+        return newSettings
     }
 
     func getSettings() async -> SettingsDTO {
@@ -1484,6 +1500,13 @@ actor ClipboardBackend {
     }
 
     // MARK: - Internals
+
+    private func publishCaptureReadStatus(_ blocked: Bool, revision: UInt64, monitorID: UUID) async {
+        // Callback tasks can arrive after stop/restart or out of order.
+        guard captureStatusMonitorID == monitorID, revision > captureStatusRevision else { return }
+        captureStatusRevision = revision
+        await yieldEvent(.captureReadBlocked(blocked))
+    }
 
     private func requireMonitor() throws -> ClipboardMonitor {
         guard let monitor else { throw ClipboardBackendError.notStarted }

@@ -475,14 +475,17 @@ final class MockClipboardService: ClipboardServiceProtocol {
             .sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
-    func fetchRecentUnpinned(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
+    func fetchHistoryPage(limit: Int, offset: Int, expectedRevision: Int64?) async throws -> RecentHistoryPage {
+        let start = expectedRevision == 0 ? max(0, offset) : 0
+        let count = max(0, limit) + (start == 0 ? max(0, offset) : 0)
+        let pinned = start == 0 ? try await fetchPinned() : []
         try await Task.sleep(nanoseconds: 50_000_000)
         let sortedItems = items
             .filter { !$0.isPinned }
             .sorted { $0.lastUsedAt > $1.lastUsedAt }
-        let start = min(offset, sortedItems.count)
-        let end = min(offset + limit, sortedItems.count)
-        return Array(sortedItems[start..<end])
+        let pageItems = Array(sortedItems.dropFirst(start).prefix(count))
+        return RecentHistoryPage(pinnedItems: pinned, items: pageItems, total: items.count,
+                                 offset: start, nextOffset: start + pageItems.count, revision: 0)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -625,9 +628,10 @@ final class MockClipboardService: ClipboardServiceProtocol {
         []
     }
 
-    func updateSettings(_ newSettings: SettingsDTO) async throws {
-        settings = newSettings
+    func updateSettings(_ patch: SettingsPatch) async throws -> SettingsDTO {
+        settings = settings.applying(patch)
         await yieldEvent(.settingsChanged)
+        return settings
     }
 
     func getSettings() async throws -> SettingsDTO {

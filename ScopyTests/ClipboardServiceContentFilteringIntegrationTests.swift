@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-import ScopyKit
+@testable import ScopyKit
 
 @MainActor
 final class ClipboardServiceContentFilteringIntegrationTests: XCTestCase {
@@ -88,6 +88,69 @@ final class ClipboardServiceContentFilteringIntegrationTests: XCTestCase {
         let items = try await XCTUnwrap(service).fetchRecent(limit: 20, offset: 0)
         XCTAssertTrue(items.contains { $0.type == .text && $0.plainText == sentinel })
         XCTAssertFalse(items.contains { $0.type == .file })
+    }
+
+    func testUnreadableSpoolFilesRecoverInOrderThroughSQLiteCommit() async throws {
+        let ingestDirectory = tempDirectory.appendingPathComponent("ingest", isDirectory: true)
+        try FileManager.default.createDirectory(at: ingestDirectory, withIntermediateDirectories: true)
+
+        // Exercise both actual read locations; neither error may acknowledge the capture.
+        for blockEnvelope in [false, true] {
+            let first = "durable-\(UUID().uuidString)"
+            let later = "later-\(UUID().uuidString)"
+            let payload = Data("<p>\(first)</p>".utf8)
+            let envelopeURL = try IngestSpool.persistPendingEnvelope(
+                for: ClipboardMonitor.RawClipboardData(
+                    type: .html, plainText: first, rawData: payload,
+                    appBundleID: nil, sizeBytes: payload.count
+                ),
+                in: ingestDirectory
+            )
+            let envelope = try IngestSpool.loadValidatedEnvelope(
+                from: envelopeURL, ingestDirectory: ingestDirectory, suffix: IngestSpool.pendingEnvelopeSuffix
+            )
+            let payloadURL = ingestDirectory.appendingPathComponent(try XCTUnwrap(envelope.payloadFileName))
+            let blockedURL = blockEnvelope ? envelopeURL : payloadURL
+            try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: blockedURL.path)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: blockedURL.path) }
+            XCTAssertThrowsError(try Data(contentsOf: blockedURL), "The fixture must actually fail a file read")
+
+            try await startService { _ in }
+            let runningService = try XCTUnwrap(service)
+            var readStates: [Bool] = []
+            let observer = Task {
+                for await event in runningService.eventStream {
+                    if case .captureReadBlocked(let blocked) = event { readStates.append(blocked) }
+                }
+            }
+            defer { observer.cancel() }
+            await waitForConditionAsync(timeout: 2.0, pollInterval: 0.01) { readStates.contains(true) }
+            XCTAssertEqual(readStates, [true])
+
+            let baseline = await ClipboardIngestMetrics.shared.getSummary().changeJumpCount
+            pasteboard.clearContents()
+            pasteboard.clearContents()
+            XCTAssertTrue(pasteboard.setString(later, forType: .string))
+            await waitForMonitorRead(afterChangeJumpCount: baseline)
+            let blockedItems = try await runningService.fetchRecent(limit: 20, offset: 0)
+            XCTAssertFalse(blockedItems.contains { $0.plainText == first || $0.plainText == later })
+            XCTAssertTrue(FileManager.default.fileExists(atPath: envelopeURL.path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: payloadURL.path))
+
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: blockedURL.path)
+            await waitForHistoryItem(plainText: later)
+            let recoveredItems = try await runningService.fetchRecent(limit: 20, offset: 0)
+            XCTAssertEqual(Array(recoveredItems.prefix(2).map(\.plainText)), [later, first])
+            await waitForConditionAsync(timeout: 2.0, pollInterval: 0.01) {
+                (try? Self.pendingIngestArtifactNames(in: ingestDirectory).isEmpty) ?? false
+            }
+            XCTAssertEqual(try Self.pendingIngestArtifactNames(in: ingestDirectory), [])
+            XCTAssertEqual(readStates, [true, false])
+
+            await runningService.stopAndWait()
+            observer.cancel()
+            self.service = nil
+        }
     }
 
     private func startService(updateSettings: (inout SettingsDTO) -> Void) async throws {

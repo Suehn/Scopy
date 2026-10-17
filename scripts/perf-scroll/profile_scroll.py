@@ -31,8 +31,8 @@ def make_db():
     else:
         dbdir=tempfile.mkdtemp(prefix='scopy-profile-db-')
     for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm',
-              'clipboard.db.fullindex.v6.bin','clipboard.db.fullindex.v6.bin.metadata.plist','clipboard.db.fullindex.v6.bin.sha256',
-              'clipboard.db.shortindex.v3.bin','clipboard.db.shortindex.v3.bin.sha256'):
+              'clipboard.db.fullindex.v7.bin','clipboard.db.fullindex.v7.bin.metadata.plist','clipboard.db.fullindex.v7.bin.sha256',
+              'clipboard.db.shortindex.v4.bin','clipboard.db.shortindex.v4.bin.sha256'):
         src=os.path.join(repo,'perf-db',f)
         if os.path.exists(src): shutil.copy(src, os.path.join(dbdir,f))
     return dbdir

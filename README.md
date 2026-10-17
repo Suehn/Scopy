@@ -136,8 +136,7 @@ Download the latest `.dmg` from [GitHub Releases](https://github.com/Suehn/Scopy
 
 ```bash
 make build
-make test-unit
-make test-strict
+make test-unit   # native tests under strict concurrency; any Swift warning fails
 ```
 
 Release build:

@@ -54,19 +54,33 @@ struct FullFuzzyIndex: Sendable {
         }
         seenNonASCII.removeAll(keepingCapacity: true)
 
-        for ch in item.plainTextLower {
-            if ch.isWhitespace { continue }
-            if let ascii = ch.asciiValue {
-                let idx = Int(ascii)
-                if !seenASCII[idx] {
-                    seenASCII[idx] = true
-                    asciiCharPostings[idx].append(UInt32(slot))
-                }
+        // The ASCII scorer scans UTF-16, so an ASCII base inside a combining grapheme
+        // must also enter its postings list. UTF-8 has the same ASCII units without decoding.
+        var hasNonASCII = false
+        for byte in item.plainTextLower.utf8 {
+            if byte >= 128 {
+                hasNonASCII = true
                 continue
             }
-
-            if seenNonASCII.insert(ch).inserted {
+            if byte == 32 || (9...13).contains(byte) { continue }
+            let idx = Int(byte)
+            if !seenASCII[idx] {
+                seenASCII[idx] = true
+                asciiCharPostings[idx].append(UInt32(slot))
+            }
+        }
+        if hasNonASCII {
+            for ch in item.plainTextLower where !ch.isWhitespace && ch.asciiValue == nil {
+                guard seenNonASCII.insert(ch).inserted else { continue }
                 nonASCIICharPostings[ch, default: []].append(UInt32(slot))
+                // Likewise a short needle's scalar inside a longer character (an emoji variant).
+                guard ch.unicodeScalars.count > 1 else { continue }
+                for scalar in ch.unicodeScalars where !scalar.isASCII {
+                    let single = Character(scalar)
+                    if seenNonASCII.insert(single).inserted {
+                        nonASCIICharPostings[single, default: []].append(UInt32(slot))
+                    }
+                }
             }
         }
         return slot

@@ -71,7 +71,6 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         service = nil
         tempDirectory = nil
         settingsSuiteName = nil
-        try await super.tearDown()
     }
 
     func testSuccessfulOptimizationProofMatchesPersistedAndEmittedHash() async throws {

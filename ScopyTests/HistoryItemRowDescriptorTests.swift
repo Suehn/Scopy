@@ -6,325 +6,132 @@ import ScopyKit
 
 @MainActor
 final class HistoryItemRowDescriptorTests: XCTestCase {
-    func testInjectedDependenciesDriveDisplayAndPreviewFields() throws {
-        let item = makeItem(
-            type: .file,
-            plainText: "/tmp/source.md",
-            appBundleID: "com.scopy.source",
-            thumbnailPath: "/tmp/source-thumb.png"
-        )
-        let preview = makePreviewSummary(
-            path: "/tmp/source.md",
-            kind: .other,
-            isMarkdown: true,
-            shouldGenerateThumbnail: true
-        )
-        let descriptor = HistoryItemRowDescriptor(
-            item: item,
-            settings: settings(showThumbnails: true, thumbnailHeight: 72),
-            dependencies: HistoryItemRowDescriptor.Dependencies(
-                displayTexts: { received in
-                    XCTAssertEqual(received.id, item.id)
-                    return (
-                        title: "Injected title",
-                        metadata: "Injected metadata",
-                        searchMetadataPrefix: nil
-                    )
-                },
-                filePreview: { received in
-                    XCTAssertEqual(received.id, item.id)
-                    return preview
-                }
-            )
-        )
-
-        XCTAssertEqual(descriptor.titleText, "Injected title")
-        XCTAssertEqual(descriptor.metadataText, "Injected metadata")
-        XCTAssertEqual(descriptor.thumbnailHeight, 72)
-        XCTAssertTrue(descriptor.showThumbnails)
-        XCTAssertEqual(descriptor.filePreviewInfo?.url.path, "/tmp/source.md")
-        XCTAssertEqual(descriptor.filePreviewInfo?.kind, .other)
-        XCTAssertEqual(descriptor.filePreviewPath, "/tmp/source.md")
-        XCTAssertEqual(descriptor.filePreviewKind, .other)
-        XCTAssertTrue(descriptor.filePreviewIsMarkdown)
-        XCTAssertTrue(descriptor.canShowFileThumbnail)
-        XCTAssertTrue(descriptor.needsThumbnailHeight)
-        XCTAssertEqual(descriptor.appIconBundleID, "com.scopy.source")
+    override func tearDown() {
+        MainActor.assumeIsolated {
+            ClipboardItemDisplayText.shared.clearCaches()
+            HistoryItemPresentationCache.shared.clearCaches()
+        }
+        super.tearDown()
     }
 
-    func testTextItemDoesNotUseFileThumbnailHeightAndMirrorsAppIconBundleID() {
+    func testTextDescriptorUsesLiveDisplayWithoutFilePreview() {
         let item = makeItem(type: .text, plainText: "plain text", appBundleID: "com.scopy.text")
-
         let descriptor = HistoryItemRowDescriptor(
             item: item,
-            settings: settings(showThumbnails: true, thumbnailHeight: 64),
-            dependencies: dependencies(
-                title: "Text title",
-                metadata: "Text metadata",
-                filePreview: nil
-            )
+            settings: settings(showThumbnails: true, thumbnailHeight: 64)
         )
 
-        XCTAssertEqual(descriptor.titleText, "Text title")
-        XCTAssertEqual(descriptor.metadataText, "Text metadata")
+        XCTAssertEqual(descriptor.titleText, "plain text")
+        XCTAssertTrue(descriptor.metadataText.hasSuffix(" · plain text"))
+        XCTAssertNotNil(descriptor.searchMetadataPrefix)
         XCTAssertEqual(descriptor.appIconBundleID, "com.scopy.text")
-        XCTAssertEqual(descriptor.thumbnailHeight, 64)
-        XCTAssertTrue(descriptor.showThumbnails)
+        XCTAssertFalse(descriptor.needsThumbnailHeight)
         XCTAssertNil(descriptor.filePreviewInfo)
         XCTAssertNil(descriptor.filePreviewPath)
-        XCTAssertNil(descriptor.filePreviewKind)
-        XCTAssertFalse(descriptor.filePreviewIsMarkdown)
-        XCTAssertFalse(descriptor.canShowFileThumbnail)
-        XCTAssertFalse(descriptor.needsThumbnailHeight)
-    }
-
-    func testSearchMetadataPrefixComesFromStructuredDisplayText() {
-        let item = makeItem(type: .text, plainText: "body · tail")
-        let descriptor = HistoryItemRowDescriptor(
-            item: item,
-            settings: settings(),
-            dependencies: HistoryItemRowDescriptor.Dependencies(
-                displayTexts: { _ in
-                    (
-                        title: "body · tail",
-                        metadata: "11字 · 1行 · body · tail",
-                        searchMetadataPrefix: "11字 · 1行"
-                    )
-                },
-                filePreview: { _ in nil }
-            )
-        )
-
-        XCTAssertEqual(descriptor.searchMetadataPrefix, "11字 · 1行")
-    }
-
-    func testImageItemNeedsThumbnailHeightOnlyWhenThumbnailsAreEnabled() {
-        let imageItem = makeItem(
-            type: .image,
-            plainText: "Image",
-            thumbnailPath: "/tmp/image-thumb.png",
-            storageRef: "/tmp/image.png"
-        )
-
-        let enabled = HistoryItemRowDescriptor(
-            item: imageItem,
-            settings: settings(showThumbnails: true, thumbnailHeight: 48),
-            dependencies: dependencies(title: "Image", metadata: "10 KB")
-        )
-        let disabled = HistoryItemRowDescriptor(
-            item: imageItem,
-            settings: settings(showThumbnails: false, thumbnailHeight: 48),
-            dependencies: dependencies(title: "Image", metadata: "10 KB")
-        )
-
-        XCTAssertTrue(enabled.showThumbnails)
-        XCTAssertTrue(enabled.needsThumbnailHeight)
-        XCTAssertFalse(enabled.canShowFileThumbnail)
-
-        XCTAssertFalse(disabled.showThumbnails)
-        XCTAssertFalse(disabled.needsThumbnailHeight)
-        XCTAssertFalse(disabled.canShowFileThumbnail)
     }
 
     func testFileThumbnailFlagsRespectSettingsAndPreviewCapability() {
-        let fileItem = makeItem(type: .file, plainText: "/tmp/image.png")
-        let thumbnailPreview = makePreviewSummary(
-            path: "/tmp/image.png",
-            kind: .image,
-            isMarkdown: false,
-            shouldGenerateThumbnail: true
-        )
-        let nonThumbnailPreview = makePreviewSummary(
-            path: "/tmp/readme.txt",
-            kind: .other,
-            isMarkdown: false,
-            shouldGenerateThumbnail: false
-        )
-
+        let imageFile = makeItem(type: .file, plainText: "/tmp/image.png")
+        let textFile = makeItem(type: .file, plainText: "/tmp/readme.txt")
         let enabled = HistoryItemRowDescriptor(
-            item: fileItem,
-            settings: settings(showThumbnails: true, thumbnailHeight: 40),
-            dependencies: dependencies(filePreview: thumbnailPreview)
+            item: imageFile,
+            settings: settings(showThumbnails: true, thumbnailHeight: 40)
         )
         let disabledBySettings = HistoryItemRowDescriptor(
-            item: fileItem,
-            settings: settings(showThumbnails: false, thumbnailHeight: 40),
-            dependencies: dependencies(filePreview: thumbnailPreview)
+            item: imageFile,
+            settings: settings(showThumbnails: false, thumbnailHeight: 40)
         )
         let disabledByPreview = HistoryItemRowDescriptor(
-            item: fileItem,
-            settings: settings(showThumbnails: true, thumbnailHeight: 40),
-            dependencies: dependencies(filePreview: nonThumbnailPreview)
+            item: textFile,
+            settings: settings(showThumbnails: true, thumbnailHeight: 40)
         )
 
+        XCTAssertEqual(enabled.titleText, "image.png")
+        XCTAssertEqual(enabled.filePreviewInfo?.url.path, "/tmp/image.png")
+        XCTAssertEqual(enabled.filePreviewKind, .image)
         XCTAssertTrue(enabled.canShowFileThumbnail)
         XCTAssertTrue(enabled.needsThumbnailHeight)
-        XCTAssertEqual(enabled.filePreviewKind, .image)
-
         XCTAssertFalse(disabledBySettings.canShowFileThumbnail)
         XCTAssertFalse(disabledBySettings.needsThumbnailHeight)
-
+        XCTAssertEqual(disabledByPreview.titleText, "readme.txt")
         XCTAssertFalse(disabledByPreview.canShowFileThumbnail)
         XCTAssertFalse(disabledByPreview.needsThumbnailHeight)
         XCTAssertEqual(disabledByPreview.filePreviewKind, .other)
     }
 
     func testMarkdownFilePreviewAndTextPreviewFieldsStaySeparate() {
-        let markdownFile = makeItem(type: .file, plainText: "/tmp/note.md")
-        let markdownPreview = makePreviewSummary(
-            path: "/tmp/note.md",
-            kind: .other,
-            isMarkdown: true,
-            shouldGenerateThumbnail: false
-        )
         let fileDescriptor = HistoryItemRowDescriptor(
-            item: markdownFile,
-            settings: settings(),
-            dependencies: dependencies(filePreview: markdownPreview)
+            item: makeItem(type: .file, plainText: "/tmp/note.md"),
+            settings: settings()
         )
-
-        let markdownText = makeItem(type: .text, plainText: "# Title")
         let textDescriptor = HistoryItemRowDescriptor(
-            item: markdownText,
-            settings: settings(),
-            dependencies: dependencies(filePreview: nil)
+            item: makeItem(type: .text, plainText: "# Title"),
+            settings: settings()
         )
 
+        XCTAssertEqual(fileDescriptor.titleText, "note.md")
         XCTAssertTrue(fileDescriptor.filePreviewIsMarkdown)
         XCTAssertEqual(fileDescriptor.filePreviewPath, "/tmp/note.md")
         XCTAssertFalse(fileDescriptor.canShowFileThumbnail)
-
+        XCTAssertEqual(textDescriptor.titleText, "# Title")
         XCTAssertFalse(textDescriptor.filePreviewIsMarkdown)
         XCTAssertNil(textDescriptor.filePreviewPath)
     }
 
-    func testPresentationCacheReusesRowDescriptorForSameItemAndSettings() {
-        let item = makeItem(type: .text, plainText: "cached descriptor")
-        var displayCallCount = 0
-        var filePreviewCallCount = 0
-        HistoryItemPresentationCache.shared.clearCaches()
-
-        let cachedSettings = settings()
-        let dependencies = HistoryItemRowDescriptor.Dependencies(
-            displayTexts: { _ in
-                displayCallCount += 1
-                return (
-                    title: "Cached title",
-                    metadata: "Cached metadata",
-                    searchMetadataPrefix: nil
-                )
-            },
-            filePreview: { _ in
-                filePreviewCallCount += 1
-                return nil
-            }
-        )
-
-        let first = HistoryItemPresentationCache.shared.rowDescriptor(
-            for: item,
-            settings: cachedSettings,
-            dependencies: dependencies
-        )
-        let second = HistoryItemPresentationCache.shared.rowDescriptor(
-            for: item,
-            settings: cachedSettings,
-            dependencies: HistoryItemRowDescriptor.Dependencies(
-                displayTexts: { _ in
-                    XCTFail("Expected cached row descriptor to skip display text recomputation")
-                    return (
-                        title: "Unexpected",
-                        metadata: "Unexpected",
-                        searchMetadataPrefix: nil
-                    )
-                },
-                filePreview: { _ in
-                    XCTFail("Expected cached row descriptor to skip file preview recomputation")
-                    return nil
-                }
-            )
-        )
-
-        XCTAssertEqual(first.titleText, "Cached title")
-        XCTAssertEqual(second.titleText, "Cached title")
-        XCTAssertEqual(second.metadataText, "Cached metadata")
-        XCTAssertEqual(displayCallCount, 1)
-        XCTAssertEqual(filePreviewCallCount, 1)
-    }
-
     func testPresentationCacheSeparatesRowDescriptorsByThumbnailSettings() {
-        let item = makeItem(type: .image, plainText: "image")
-        var displayCallCount = 0
-        HistoryItemPresentationCache.shared.clearCaches()
-
-        let dependencies = HistoryItemRowDescriptor.Dependencies(
-            displayTexts: { _ in
-                displayCallCount += 1
-                return (title: "Image", metadata: "10 KB", searchMetadataPrefix: nil)
-            },
-            filePreview: { _ in nil }
-        )
-
-        let compact = HistoryItemPresentationCache.shared.rowDescriptor(
+        let item = makeItem(type: .image, plainText: "[Image: 100x100]")
+        let cache = HistoryItemPresentationCache.shared
+        let compact = cache.rowDescriptor(
             for: item,
-            settings: settings(showThumbnails: true, thumbnailHeight: 40),
-            dependencies: dependencies
+            settings: settings(showThumbnails: true, thumbnailHeight: 40)
         )
-        let large = HistoryItemPresentationCache.shared.rowDescriptor(
+        let large = cache.rowDescriptor(
             for: item,
-            settings: settings(showThumbnails: true, thumbnailHeight: 80),
-            dependencies: dependencies
+            settings: settings(showThumbnails: true, thumbnailHeight: 80)
+        )
+        let hidden = cache.rowDescriptor(
+            for: item,
+            settings: settings(showThumbnails: false, thumbnailHeight: 80)
         )
 
         XCTAssertEqual(compact.thumbnailHeight, 40)
         XCTAssertEqual(large.thumbnailHeight, 80)
-        XCTAssertEqual(displayCallCount, 2)
+        XCTAssertTrue(compact.needsThumbnailHeight)
+        XCTAssertTrue(large.needsThumbnailHeight)
+        XCTAssertFalse(hidden.showThumbnails)
+        XCTAssertFalse(hidden.needsThumbnailHeight)
+        XCTAssertEqual(compact.titleText, String(localized: "Image"))
+        XCTAssertTrue(compact.metadataText.contains("100×100"))
+        XCTAssertEqual(compact.metadataText, hidden.metadataText)
     }
 
     func testPresentationCacheSeparatesSameIDMissingHashEqualLengthContent() {
         let itemID = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
         let first = makeItem(id: itemID, contentHash: "", type: .text, plainText: "AB")
         let replacement = makeItem(id: itemID, contentHash: "", type: .text, plainText: "CD")
-        var displayCallCount = 0
-        HistoryItemPresentationCache.shared.clearCaches()
-
-        let firstDescriptor = HistoryItemPresentationCache.shared.rowDescriptor(
-            for: first,
-            settings: settings(),
-            dependencies: HistoryItemRowDescriptor.Dependencies(
-                displayTexts: { _ in
-                    displayCallCount += 1
-                    return (title: "AB", metadata: "first", searchMetadataPrefix: nil)
-                },
-                filePreview: { _ in nil }
-            )
-        )
-        let replacementDescriptor = HistoryItemPresentationCache.shared.rowDescriptor(
-            for: replacement,
-            settings: settings(),
-            dependencies: HistoryItemRowDescriptor.Dependencies(
-                displayTexts: { _ in
-                    displayCallCount += 1
-                    return (title: "CD", metadata: "replacement", searchMetadataPrefix: nil)
-                },
-                filePreview: { _ in nil }
-            )
-        )
+        let cache = HistoryItemPresentationCache.shared
+        let firstDescriptor = cache.rowDescriptor(for: first, settings: settings())
+        let replacementDescriptor = cache.rowDescriptor(for: replacement, settings: settings())
 
         XCTAssertEqual(firstDescriptor.titleText, "AB")
         XCTAssertEqual(replacementDescriptor.titleText, "CD")
-        XCTAssertEqual(displayCallCount, 2)
+        XCTAssertTrue(firstDescriptor.metadataText.hasSuffix(" · AB"))
+        XCTAssertTrue(replacementDescriptor.metadataText.hasSuffix(" · CD"))
+        XCTAssertEqual(cache.cachedRowDescriptor(for: first, settings: settings())?.titleText, "AB")
+        XCTAssertEqual(cache.cachedRowDescriptor(for: replacement, settings: settings())?.titleText, "CD")
     }
 
     func testMarkdownCapabilityCacheInvalidatesForSameIDContentRevision() {
         let itemID = UUID(uuidString: "abababab-abab-abab-abab-abababababab")!
-        let first = makeItem(id: itemID, contentHash: "", type: .text, plainText: "#A")
+        let first = makeItem(id: itemID, contentHash: "", type: .text, plainText: "# A\n\nBody")
         let replacement = makeItem(id: itemID, contentHash: "", type: .text, plainText: "AB")
         HistoryItemPresentationCache.shared.clearCaches()
 
-        HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: first)
+        XCTAssertTrue(HistoryItemPresentationCache.shared.markdownExportCapability(for: first))
 
         XCTAssertEqual(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: first), true)
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: replacement))
+        XCTAssertFalse(HistoryItemPresentationCache.shared.markdownExportCapability(for: replacement))
     }
 
     func testMarkdownMenuSignalCacheInvalidatesForSameIDContentRevision() {
@@ -378,9 +185,9 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         XCTAssertNil(cache.cachedFilePreview(for: firstFile))
         XCTAssertEqual(cache.cachedFilePreview(for: thirdFile)?.path, "/tmp/third.md")
 
-        cache.storeMarkdownExportCapability(false, for: firstText)
-        cache.storeMarkdownExportCapability(true, for: secondText)
-        cache.storeMarkdownExportCapability(false, for: replacementText)
+        XCTAssertFalse(cache.markdownExportCapability(for: firstText))
+        XCTAssertTrue(cache.markdownExportCapability(for: secondText))
+        XCTAssertFalse(cache.markdownExportCapability(for: replacementText))
         XCTAssertNil(cache.cachedMarkdownExportCapability(for: firstText))
         XCTAssertEqual(cache.cachedMarkdownExportCapability(for: replacementText), false)
 
@@ -501,21 +308,24 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
     }
 
     func testMarkdownMenuSignalPrewarmIsBoundedAndClearedWithPresentationCaches() async {
-        HistoryItemPresentationCache.shared.clearCaches()
-
-        let items = (0...4_096).map { index in
+        let cache = HistoryItemPresentationCache.shared
+        cache.configureCacheCapacityForTesting(2)
+        defer { cache.restoreDefaultCacheCapacityForTesting() }
+        let items = (0..<3).map { index in
             makeItem(
                 contentHash: "menu-signal-\(index)",
                 type: .text,
                 plainText: index.isMultiple(of: 2) ? "# title" : "plain"
             )
         }
-        let task = HistoryItemPresentationCache.shared.prewarm(items: items)
-        await task?.value
+        await cache.prewarm(items: items)?.value
 
-        XCTAssertEqual(HistoryItemPresentationCache.shared.markdownMenuSignalEntryCountForTesting, 4_096)
-        HistoryItemPresentationCache.shared.clearCaches()
-        XCTAssertEqual(HistoryItemPresentationCache.shared.markdownMenuSignalEntryCountForTesting, 0)
+        XCTAssertEqual(cache.cachedMarkdownMenuSignal(for: items[0]), true)
+        XCTAssertEqual(cache.cachedMarkdownMenuSignal(for: items[1]), false)
+        XCTAssertNil(cache.cachedMarkdownMenuSignal(for: items[2]))
+        XCTAssertEqual(cache.markdownMenuSignalEntryCountForTesting, 2)
+        cache.clearCaches()
+        XCTAssertEqual(cache.markdownMenuSignalEntryCountForTesting, 0)
     }
 
     func testMarkdownMenuSignalPrewarmDeduplicatesInFlightRevision() async {
@@ -586,42 +396,11 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         XCTAssertNil(HistoryItemPresentationCache.shared.cachedMarkdownExportCapability(for: item))
     }
 
-    private func dependencies(
-        title: String = "Title",
-        metadata: String = "Metadata",
-        filePreview: FilePreviewSummary? = nil
-    ) -> HistoryItemRowDescriptor.Dependencies {
-        HistoryItemRowDescriptor.Dependencies(
-            displayTexts: {
-                _ in (title: title, metadata: metadata, searchMetadataPrefix: nil)
-            },
-            filePreview: { _ in filePreview }
-        )
-    }
-
     private func settings(showThumbnails: Bool = true, thumbnailHeight: Int = 40) -> SettingsDTO {
         var settings = SettingsDTO.default
         settings.showImageThumbnails = showThumbnails
         settings.thumbnailHeight = thumbnailHeight
         return settings
-    }
-
-    private func makePreviewSummary(
-        path: String,
-        kind: FilePreviewKind,
-        isMarkdown: Bool,
-        shouldGenerateThumbnail: Bool
-    ) -> FilePreviewSummary {
-        guard let info = FilePreviewSupport.previewInfo(from: path, requireExists: false) else {
-            preconditionFailure("Expected test path to produce FilePreviewInfo: \(path)")
-        }
-        return FilePreviewSummary(
-            info: info,
-            path: path,
-            kind: kind,
-            isMarkdown: isMarkdown,
-            shouldGenerateThumbnail: shouldGenerateThumbnail
-        )
     }
 
     private func makeItem(

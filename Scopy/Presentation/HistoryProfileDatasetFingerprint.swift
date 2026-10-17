@@ -6,7 +6,7 @@ import ScopyKit
 enum HistoryProfileDatasetFingerprint {
     static let schema = "history-profile-dataset-v1"
 
-    struct Metadata: Equatable, Sendable {
+    struct Metadata: Sendable {
         let schema: String
         let datasetID: String
         let fingerprint: String
@@ -18,20 +18,7 @@ enum HistoryProfileDatasetFingerprint {
         let minimumTextUTF8Bytes: Int
         let maximumTextUTF8Bytes: Int
 
-        var jsonPayload: [String: Any] {
-            [
-                "schema": schema,
-                "id": datasetID,
-                "fingerprint": fingerprint,
-                "item_count": itemCount,
-                "text_item_count": textItemCount,
-                "image_item_count": imageItemCount,
-                "pinned_item_count": pinnedItemCount,
-                "unique_item_id_count": uniqueItemIDCount,
-                "text_utf8_bytes_min": minimumTextUTF8Bytes,
-                "text_utf8_bytes_max": maximumTextUTF8Bytes
-            ]
-        }
+
     }
 
     static func make(

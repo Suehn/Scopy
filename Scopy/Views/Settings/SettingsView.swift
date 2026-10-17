@@ -240,15 +240,13 @@ struct SettingsView: View {
                     return
                 }
 
-                let latest = (try? await settingsViewModel.getLatestSettingsOrThrow()) ?? baselineSettings
-                let merged = latest.applying(patch)
-                try await settingsViewModel.updateSettingsOrThrow(merged)
+                let committed = try await settingsViewModel.updateSettings(patch)
                 await MainActor.run {
                     isSaving = false
                     let hint = String(localized: "Saved")
                     savedHint = hint
-                    self.baselineSettings = merged
-                    tempSettings = merged
+                    self.baselineSettings = committed
+                    tempSettings = committed
                     if dismissesOnSave { onDismiss?() }
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 1_200_000_000)

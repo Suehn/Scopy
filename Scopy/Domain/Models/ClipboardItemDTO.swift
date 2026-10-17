@@ -1,5 +1,26 @@
 import Foundation
 
+/// Rows and continuation belong to one committed database snapshot. A changed revision returns
+/// the loaded prefix again, since recopying can move an older row across any page boundary.
+public struct RecentHistoryPage: Sendable {
+    public let pinnedItems: [ClipboardItemDTO]
+    public let items: [ClipboardItemDTO]
+    public let total: Int
+    public let offset: Int
+    public let nextOffset: Int
+    public let revision: Int64
+
+    public init(pinnedItems: [ClipboardItemDTO], items: [ClipboardItemDTO], total: Int,
+                offset: Int, nextOffset: Int, revision: Int64) {
+        self.pinnedItems = pinnedItems
+        self.items = items
+        self.total = total
+        self.offset = offset
+        self.nextOffset = nextOffset
+        self.revision = revision
+    }
+}
+
 /// One clipboard history item as the UI sees it.
 /// Derived display fields (title, metadata) belong to the presentation layer.
 public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {

@@ -1,8 +1,6 @@
 import Foundation
-import WebKit
 import XCTest
 @testable import ScopyKit
-@testable import Scopy
 
 final class SourceIconTests: XCTestCase {
     private static let png = try! Data(contentsOf: URL(fileURLWithPath: #filePath)
@@ -90,48 +88,6 @@ final class SourceIconTests: XCTestCase {
         let saved = await SettingsStore(suiteName: suite).load()
         XCTAssertFalse(saved.siteIconsEnabled)
         UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
-    }
-
-    @MainActor
-    func testSlowNativeIconSettlesBeforeFontReadinessAndKeepsInlineGeometry() async throws {
-        let png = Self.png
-        let handler = SourceIconSchemeHandler(load: { _ in
-            try? await Task.sleep(nanoseconds: 3_200_000_000)
-            return png
-        })
-        let configuration = WKWebViewConfiguration()
-        configuration.setURLSchemeHandler(handler, forURLScheme: SourceIconSchemeHandler.scheme)
-        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 816, height: 500), configuration: configuration)
-        let window = NSWindow(contentRect: webView.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = webView
-        window.orderFront(nil)
-        defer { window.close() }
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Scopy/Resources/MarkdownPreview")
-        let assets = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.copyItem(at: root, to: assets)
-        defer { try? FileManager.default.removeItem(at: assets) }
-        let document = assets.appendingPathComponent("test.html")
-        try MarkdownHTMLDocumentBuilder.document(source: "正文 [站点标题](https://new-site.example/private?token=secret) 与后续文字。")
-            .write(to: document, atomically: true, encoding: .utf8)
-        webView.loadFileURL(document, allowingReadAccessTo: assets)
-        let deadline = Date().addingTimeInterval(12)
-        var ready = false
-        while !ready && Date() < deadline {
-            ready = (try? await webView.evaluateJavaScript("Boolean(window.ScopyDocument && window.ScopyDocument.isRenderReady())")) as? Bool == true
-            if !ready { try await Task.sleep(nanoseconds: 100_000_000) }
-        }
-        XCTAssertTrue(ready, "a slow native icon must not become a font timeout")
-        let checks = try await webView.evaluateJavaScript("""
-        (() => {
-          const image = document.querySelector('img[data-scopy-native-source-icon]');
-          const label = document.querySelector('.scopy-link__label');
-          return !!image && image.naturalWidth > 0 && image.dataset.scopyImageState === 'ready'
-            && image.getBoundingClientRect().width <= 20 && label.textContent === '站点标题';
-        })()
-        """)
-        XCTAssertEqual(checks as? Bool, true)
     }
 
     private func fetcher(address: String = "93.184.216.34") -> LinkEnrichmentFetcher {

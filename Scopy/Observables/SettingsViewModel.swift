@@ -44,10 +44,6 @@ final class SettingsViewModel {
 
     // MARK: - Settings
 
-    func getLatestSettingsOrThrow() async throws -> SettingsDTO {
-        try await service.getSettings()
-    }
-
     func loadSettings() async {
         do {
             settings = try await service.getSettings()
@@ -57,17 +53,9 @@ final class SettingsViewModel {
         }
     }
 
-    func updateSettings(_ newSettings: SettingsDTO) async {
-        do {
-            try await updateSettingsOrThrow(newSettings)
-        } catch {
-            ScopyLog.app.error("Failed to update settings: \(error.localizedDescription, privacy: .private)")
-        }
-    }
-
-    func updateSettingsOrThrow(_ newSettings: SettingsDTO) async throws {
+    func updateSettings(_ patch: SettingsPatch) async throws -> SettingsDTO {
         let oldSettings = settings
-        try await service.updateSettings(newSettings)
+        let newSettings = try await service.updateSettings(patch)
         settings = newSettings
 
         if oldSettings.thumbnailHeight != newSettings.thumbnailHeight
@@ -75,6 +63,7 @@ final class SettingsViewModel {
         {
             ThumbnailCache.shared.clear()
         }
+        return newSettings
     }
 
     // MARK: - Stats

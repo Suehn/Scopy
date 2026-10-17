@@ -186,16 +186,17 @@ struct AboutSettingsPage: View {
         autoRefreshTask = nil
     }
 
+    /// Resident size, as `task_info` reports it. `proc_pid_rusage` avoids `mach_task_self_`, a mutable
+    /// global that older SDKs (Xcode 16) do not mark concurrency-safe.
     private func readMemoryUsageMB() -> Double {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
-        let result = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+        var usage = rusage_info_v2()
+        let result = withUnsafeMutablePointer(to: &usage) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                proc_pid_rusage(getpid(), RUSAGE_INFO_V2, $0)
             }
         }
-        guard result == KERN_SUCCESS else { return 0 }
-        return Double(info.resident_size) / 1024 / 1024
+        guard result == 0 else { return 0 }
+        return Double(usage.ri_resident_size) / 1024 / 1024
     }
 
     private func formatMs(_ ms: Double) -> String {
