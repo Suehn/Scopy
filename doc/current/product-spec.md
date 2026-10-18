@@ -47,6 +47,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 - Show recent history in a floating panel driven by a global hotkey; the panel remembers its last size, clamped to the current screen.
 - A left click on the status item toggles the panel; a right click opens a menu with Open Scopy, Settings…, Check for Updates…, and Quit Scopy.
+- A hotkey open more than 3 minutes after the panel closed starts over, with or without a search query: the query and selection are cleared, the list is back to its first page (every pinned row and the first page of recent rows, or of the active type filter) and shows its top. Rows paged in before are dropped and page in again on scroll. A hotkey open within 3 minutes, and an open from the status item, keep the query, the loaded rows and the scroll position.
 - Support incremental loading for large histories instead of blocking on full-history reads; pinned rows do not consume the recent-page quota. Recopies and concurrent changes must not produce duplicate rows, skip rows or collapse the requested paging depth.
 - Keep an idle history row passive: preview, note, Markdown export, image optimization, popover, and feedback state should be created only for real interaction or owned work, then released when every owned task is idle.
 - Keep stable context-menu content predicates out of repeated row-body work. Cache the fast Markdown menu signal by content revision, keep it bounded, and preserve separately cached exact export capability as the authoritative result.

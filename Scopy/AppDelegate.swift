@@ -497,7 +497,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let panel {
             if !panel.isPresented,
                panel.wasClosedLongerThan(PanelReopenSearchResetPolicy.staleIntervalSeconds) {
-                appState.historyViewModel.clearSearchForPanelReopen()
+                appState.historyViewModel.resetForStalePanelReopen()
             }
             panel.toggle(positionMode: .mousePosition)
         } else {
