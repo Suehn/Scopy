@@ -12,6 +12,24 @@
 
 - No unreleased entries.
 
+## [v0.83.0] - 2026-10-18
+
+### Changed
+
+- A hotkey open more than 3 minutes after the panel closed starts over, with or without a query: no query or selection, the first page, scrolled to the top. A hotkey open within 3 minutes and a status-item open keep the query, rows and position.
+- Recent-order fuzzy rankings stop at the page end and continue on the next page; while a scan is unfinished the total is unknown and the footer shows "N+ results".
+- Search index caches use a CRC-32 sidecar and new cache versions, so both caches are rebuilt once on the first launch after the upgrade.
+
+### Fixed
+
+- A capture, edit or deletion during a deep search or filter list keeps the loaded rows instead of collapsing them to the first page.
+- Pinned previews no longer close on every capture once 4,096 deletions have been recorded; the first history load finishes while events keep arriving; a repeated search hit no longer crashes the list.
+
+### Performance
+
+- Real 16,771-row snapshot, Release A–B–B–A against `v0.82.2`: recent `e` 24.3 → 3.0 ms, recent `co` 24.9 → 3.4 ms, exact `的 是` (300 rows) 446 → 171 ms, prepared `cm` 15.4 → 7.4 ms, `cmd` 15.4 → 10.7 ms, cold `cm` 83.9 → 61.9 ms. Ten 300-row pages of `e`: 419 → 134 ms by recency, 263 → 122 ms by relevance.
+- A history-list update rebuilds only changed rows: a capture with 3,380 rows loaded costs 32% less main-thread time; with the panel closed after a deep scroll, a stale reopen cuts ten captures from 0.68–0.70 s to 0.17–0.19 s of CPU.
+
 ## [v0.82.2] - 2026-10-18
 
 ### Fixed

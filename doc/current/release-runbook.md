@@ -550,3 +550,22 @@ Dated historical observations formerly embedded in this runbook are preserved in
 - **Gates on the final tree:**
   - `make build` passed; `make test-unit`: 757 passed, 0 failed; `make test-tooling` passed.
   - `make test-snapshot-perf-release` passed three times: `cmd` p95 11.12 / 10.77 / 10.84 ms (limit 50); prepared `cm` p95 7.60 / 7.65 / 7.52 ms (limit 20); cold `cm` 98.9 (first run after the build) / 63.0 / 62.4 ms.
+
+### 2026-10-18 v0.83.0 Release Gates
+
+- Release candidate `1e37fbc` contains search stages 1–6 above and the history-list changes in [history-list-depth-baseline-2026-10-18.md](../perf/studies/history-list-depth-baseline-2026-10-18.md) (row equatable, profiler start barrier, stale reopen). Environment: Apple M3, 8 cores, 24 GB; macOS 27.2 (`26B5101f`); Xcode 27.0 (`27A5194q`). Release note: [v0.83.0](../releases/history/v0.83.0.md).
+- `make build` passed; `make test-unit` 760 passed, 0 failed (54.6 s); `make docs-validate`, `make release-validate`, `make test-release-policy` (14) and `make test-tooling` (7) passed. Hosted CI `39099188933` and Hosted TSan `39099188918` passed on the same commit.
+- Real DB snapshot: 16,771 rows, 341,401,600 bytes, SHA-256 `f73a53497800cca25f247b5c13b30196f95069f8666309e9f73ac5226d889972`. Each binary used its own `cp -c` APFS clone; the gate used a third.
+- `make test-snapshot-perf-release`, three consecutive runs on `b03c865` (its `Scopy/Infrastructure`, `Scopy/Domain`, `Tools/ScopyBench` and `Package.swift` are identical to `1e37fbc`): `cmd` p95 11.49 / 10.84 / 11.15 ms (limit 50); prepared `cm` p95 7.91 / 9.45 / 8.82 ms (limit 20); cold `cm` 65.3 / 63.3 / 61.6 ms. All passed.
+- End-to-end A/B, Release ScopyBench of `c05ba8d` (v0.82.2, SHA-256 prefix `2084850c2e339d70`) against `b03c865` (`2da89a3e600e44a8`). Per workload: one discarded run per side, 3 A/A pairs of the baseline, then 5 A-B-B-A groups; values are means of run medians. Load average about 3 from other applications at the start and end.
+
+| Workload | A/A max pair difference (ms) | v0.82.2 (ms) | v0.83.0 (ms) | Separated |
+| --- | --- | --- | --- | --- |
+| Service `e`, fuzzy+, recent | 0.16 | 24.34 (24.23–24.57) | 3.00 (2.97–3.03) | yes |
+| Service `co`, fuzzy+, recent | 0.11 | 24.90 (24.75–25.03) | 3.43 (3.39–3.52) | yes |
+| Engine exact `的 是`, limit 300 | 2.52 | 445.89 (443.73–449.74) | 170.70 (169.41–177.99) | yes |
+| Engine prepared `cm`, relevance (candidate with `--reset-query md`) | 0.11 | 15.38 (15.31–15.54) | 7.40 (7.36–7.45) | yes |
+| Service `cmd`, relevance | 0.04 | 15.35 (15.32–15.42) | 10.68 (10.64–10.74) | yes |
+| Service cold `cm`, relevance, one search | 3.05 | 83.94 (83.53–84.79) | 61.91 (61.31–62.88) | yes |
+
+- Not run: XCUITest (blocked on this machine), the in-app first launch after the cache-version change, a macOS 14 runtime, and a real logout or restart quit. Consecutive-page workloads are measured per stage above, because the v0.82.2 ScopyBench has no `--pages`.

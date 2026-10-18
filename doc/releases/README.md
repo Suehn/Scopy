@@ -20,9 +20,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.82.2`
+- Version: `v0.83.0`
 - Date: `2026-10-18`
-- Release note: [v0.82.2](./history/v0.82.2.md)
+- Release note: [v0.83.0](./history/v0.83.0.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -30,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-10-18` [v0.83.0](./history/v0.83.0.md) - Search short queries up to 8x faster, rebuild only changed history rows, keep deep search pages through new copies, and start over after a stale reopen
 - `2026-10-18` [v0.82.2](./history/v0.82.2.md) - Harden capture, quit and storage races, page recent history by key, and search non-ASCII text up to 52% faster
 - `2026-10-13` [v0.82.1](./history/v0.82.1.md) - Fix Homebrew installation on macOS 15 and later
 - `2026-09-26` [v0.82.0](./history/v0.82.0.md) - Fix the scroll-stop jump, add undo, ⌘1–9, a status menu, Launch at Login and Chinese, and consolidate search, capture and rendering
@@ -37,7 +38,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-09-11` [v0.80.7](./history/v0.80.7.md) - Restore preview typography and remove the reserved toolbar row
 - `2026-09-11` [v0.80.6](./history/v0.80.6.md) - Keep multiple resizable previews with quiet unified controls and responsive reading layout
 - `2026-09-11` [v0.80.5](./history/v0.80.5.md) - Discover and cache website icons across Markdown links, citations and source cards
-- `2026-09-05` [v0.80.4](./history/v0.80.4.md) - Render original Codex icons and preserve source artwork colors
 - `2026-09-05` [v0.80.3](./history/v0.80.3.md) - Preserve Chinese tables and emphasis when capturing ChatGPT copies
 - `2026-09-05` [v0.80.2](./history/v0.80.2.md) - Fix Chinese emphasis and single-dollar math while simplifying capture tests
 - `2026-09-05` [v0.80.1](./history/v0.80.1.md) - Keep search pagination correctly ranked and apply new rows in small batches

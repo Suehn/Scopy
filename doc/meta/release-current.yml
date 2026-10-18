@@ -1,6 +1,6 @@
-version: v0.82.2
+version: v0.83.0
 date: 2026-10-18
-release_doc: doc/releases/history/v0.82.2.md
+release_doc: doc/releases/history/v0.83.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,21 +9,18 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-10-18
-summary: Harden capture, quit and storage races, page recent history by key, and search non-ASCII text up to 52% faster
+summary: Search short queries up to 8x faster, rebuild only changed history rows, keep deep search pages through new copies, and start over after a stale reopen
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
-  build: pass_local_debug_5fb38d7
-  test_unit: pass_local_742_tests_0_failures_0_skips_strict_warnings_as_errors_5fb38d7
-  test_tsan: pass_hosted_39057779924_5fb38d7
-  hosted_ci: pass_39057779920_5fb38d7
-  snapshot_release: pass_4_of_5_cmd_p95_15_3_to_16_6ms_prepared_cm_p95_16_7_to_18_7ms_one_21_9ms_miss_under_external_load_cold_cm_85_to_89ms_db_2724012f
+  test_tooling: pass
+  build: pass_local_debug_1e37fbc
+  test_unit: pass_local_760_tests_0_failures_strict_warnings_as_errors_1e37fbc
+  test_tsan: pass_hosted_39099188918_1e37fbc
+  hosted_ci: pass_39099188933_1e37fbc
+  snapshot_release: pass_3_of_3_cmd_p95_10_8_to_11_5ms_prepared_cm_p95_7_9_to_9_4ms_cold_cm_62_to_65ms_db_f73a5349_search_tree_of_b03c865_identical_to_1e37fbc
+  search_ab_vs_v0_82_2: recent_e_24_3_to_3_0ms_recent_co_24_9_to_3_4ms_exact_300_rows_446_to_171ms_prepared_cm_15_4_to_7_4ms_cmd_15_4_to_10_7ms_cold_cm_83_9_to_61_9ms_5_abba_groups_after_3_aa_pairs
+  stale_reopen_ui: pass_local_ui_path_isolated_identity_hotkey_reopen_after_190s_first_page_at_top_5s_reopen_unchanged
   frontend_profile: not_run_xcuitest_blocked_on_this_machine
   quit_on_logout: not_exercised
-  release_commit: 4b359156a97aab5b3812228d2155e32a89040504
-  release_workflow: https://github.com/Suehn/Scopy/actions/runs/39061813094
-  dmg_sha256: 35f0c1e050fbffa2a3f79854d6b16960e9c3e5abfb99d2f12ea17ad8a9b10988
-  homebrew_casks: pass_repo_3f043e8_and_tap_b89cdf7_identical_0_82_2
-  tap_automation: failed_403_token_lacks_tap_write_manual_sync_b89cdf7
-  installed_bundle: pass_brew_reinstall_0_82_2_build_672_universal_min_14_434_entries_match_DMG_first_launch_waits_on_Gatekeeper_approval
