@@ -1,6 +1,6 @@
 # History list with explicit row updates
 
-Status: proposal, not scheduled. Evidence: [history-list-depth-baseline-2026-10-18.md](../perf/studies/history-list-depth-baseline-2026-10-18.md).
+Status: step 1 done; step 2 proposed, not scheduled. Evidence: [history-list-depth-baseline-2026-10-18.md](../perf/studies/history-list-depth-baseline-2026-10-18.md).
 
 ## Problem
 
@@ -28,6 +28,29 @@ time must be in the comparison; callbacks that read state when they run are safe
 
 Evidence: a hosted `HistoryListView` test counting row constructions per update (DEBUG `…ForTesting` counter), and
 an interleaved A/B of AX-free `sample` main-thread busy samples and process CPU over the deep capture workload.
+
+Result (2026-10-18): `HistoryLiveRow` compares its item, the row context (settings, hover Markdown controller) and the
+fan-out. The effect is larger than the per-row share: once rows compare, the List no longer builds rows it does not
+show, so a List update builds only the shown rows whose inputs changed. In the hosted test (350 rows in a window), a capture
+builds 1 row instead of 351. The identity and row modifiers had to move onto the `ForEach` child, outside
+`.equatable()`; inside it the List ignored them and the rows took the default insets (8 pt taller, caught by
+comparing the Accessibility row heights with main's).
+
+Deep capture workload (Release, perf-db, 3,380 rows, 10 captures in 7 s), 4 interleaved rounds of main (A), this
+change (B) and main on a second data copy (A2, the A/A floor), each side's first launch discarded:
+
+| | A | A2 | B | per-round (A+A2)/2 − B | A/A difference |
+| --- | --- | --- | --- | --- | --- |
+| main-thread busy samples | 909 | 960 | 638 | 233–351 | mean 70, max 158 |
+| `GraphHost.flushTransactions` | 477 | 504 | 191 | 277–330 | mean 34, max 107 |
+| process CPU (s) | 1.17 | 1.24 | 0.78 | 0.37–0.48 | mean 0.10, max 0.31 |
+| `HistoryLiveRow.body` | 117 | 124 | 0.5 | | |
+
+`OutlineListCoordinator.diffRows` is unchanged (230 / 216 / 188, within the A/A spread); it is what step 2 addresses.
+Rows already scrolled past keep the same heights as on main (Accessibility row heights after each page lands), and
+no visible row moved after a page landed with the list still. The original scroll-stop jump did not reproduce on
+this macOS even with `.id` removed, so that check cannot confirm the explicit identity still prevents it; the
+identity is kept.
 
 ## Step 2: an AppKit table fed by the projection's own diff
 

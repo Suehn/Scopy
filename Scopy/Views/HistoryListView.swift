@@ -58,7 +58,10 @@ struct HistoryListView: View {
                 let unpinned = historyViewModel.unpinnedItems
                 // Rows are built inside ForEach child closures, where every @Observable read installs its own
                 // observation and copies the access list; read the shared state once here and pass values down.
-                let rowContext = HistoryRowContext(settings: settingsViewModel.settings)
+                let rowContext = HistoryRowContext(
+                    settings: settingsViewModel.settings,
+                    markdownWebViewController: sharedMarkdownPreview.controller
+                )
 
                 // Section titles are ordinary rows: a List Section header draws an opaque background.
                 // Pinned Section Header
@@ -460,15 +463,22 @@ struct HistoryListView: View {
         }
     }
 
-    /// Shared list state a row needs, captured once per list update instead of read per row.
-    private struct HistoryRowContext {
-        let settings: SettingsDTO
-    }
-
+    /// The List reads each row's identity and row modifiers from the ForEach child without building
+    /// the row, so they go outside `.equatable()`: inside it the List never sees them.
     private func historyRow(item: ClipboardItemDTO, context: HistoryRowContext) -> some View {
-        HistoryLiveRow(itemID: item.id, fanout: historyViewModel.rowLiveState) { live in
+        HistoryLiveRow(item: item, context: context, fanout: historyViewModel.rowLiveState) { item, context, live in
             historyRowContent(item: item, context: context, live: live)
         }
+        .equatable()
+        // Keep this explicit identity. ForEach already identifies the child by `item.id`, but
+        // without `.id` the List's NSTableView loses its measured row heights on every update
+        // and re-tiles from the estimate, which moves the content under the viewport when a page
+        // lands or a fast scroll ends. Removing it (456abdf) was bisected on device as the cause
+        // of the scroll-stop jump on 2026-09-25.
+        .id(item.id)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
@@ -499,7 +509,7 @@ struct HistoryListView: View {
             },
             onOptimizeImage: { await historyViewModel.optimizeImage(item) },
             getImageData: { try? await historyViewModel.getImageData(itemID: item.id) },
-            markdownWebViewController: sharedMarkdownPreview.controller,
+            markdownWebViewController: context.markdownWebViewController,
             interactionCoordinator: interactionCoordinator,
             interactionSessionStore: interactionSessionStore,
             isContentRevisionCurrent: { itemID, revision in
@@ -523,27 +533,16 @@ struct HistoryListView: View {
             }
         )
         .equatable()
-        // Keep this explicit identity. ForEach already identifies the child by `item.id`, but
-        // without `.id` the List's NSTableView loses its measured row heights on every update
-        // and re-tiles from the estimate, which moves the content under the viewport when a page
-        // lands or a fast scroll ends. Removing it (456abdf) was bisected on device as the cause
-        // of the scroll-stop jump on 2026-09-25.
-        .id(item.id)
 
-        Group {
-            if Self.isScrollProfile && !Self.profileAccessibility {
-                row.accessibilityHidden(true)
-            } else if Self.shouldExposeAccessibility {
-                row.accessibilityIdentifier("History.Item.\(item.id.uuidString)")
-                    .accessibilityValue(isSelected ? "selected" : "unselected")
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-            } else {
-                row.accessibilityAddTraits(isSelected ? .isSelected : [])
-            }
+        if Self.isScrollProfile && !Self.profileAccessibility {
+            row.accessibilityHidden(true)
+        } else if Self.shouldExposeAccessibility {
+            row.accessibilityIdentifier("History.Item.\(item.id.uuidString)")
+                .accessibilityValue(isSelected ? "selected" : "unselected")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+        } else {
+            row.accessibilityAddTraits(isSelected ? .isSelected : [])
         }
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 }
 
@@ -614,38 +613,58 @@ private struct ScrollFrameSamplerView: View {
     }
 }
 
+/// Shared list state a row needs, captured once per list update instead of read per row.
+private struct HistoryRowContext: Equatable {
+    let settings: SettingsDTO
+    let markdownWebViewController: MarkdownPreviewWebViewController
+
+    nonisolated static func == (lhs: HistoryRowContext, rhs: HistoryRowContext) -> Bool {
+        lhs.settings == rhs.settings && lhs.markdownWebViewController === rhs.markdownWebViewController
+    }
+}
+
 /// Holds one row's live state (selection, search evidence) as local state fed by
 /// `HistoryRowLiveStateFanout`, so a change re-evaluates the rows it concerns instead of the List
 /// body (which re-initializes every ForEach child and diffs every loaded id).
-private struct HistoryLiveRow<Content: View>: View {
+///
+/// `Equatable` so a List update skips the body of every row whose item and context are unchanged;
+/// the content closure is not compared, so it builds the row only from the values it is passed.
+private struct HistoryLiveRow<Content: View>: View, Equatable {
     @Environment(HistoryViewModel.self) private var historyViewModel
 
-    let itemID: UUID
+    let item: ClipboardItemDTO
+    let context: HistoryRowContext
     let fanout: HistoryRowLiveStateFanout
-    let content: (HistoryRowLiveState) -> Content
+    let content: (ClipboardItemDTO, HistoryRowContext, HistoryRowLiveState) -> Content
     @State private var live: HistoryRowLiveState
 
     init(
-        itemID: UUID,
+        item: ClipboardItemDTO,
+        context: HistoryRowContext,
         fanout: HistoryRowLiveStateFanout,
-        @ViewBuilder content: @escaping (HistoryRowLiveState) -> Content
+        @ViewBuilder content: @escaping (ClipboardItemDTO, HistoryRowContext, HistoryRowLiveState) -> Content
     ) {
-        self.itemID = itemID
+        self.item = item
+        self.context = context
         self.fanout = fanout
         self.content = content
-        _live = State(initialValue: fanout.state(for: itemID))
+        _live = State(initialValue: fanout.state(for: item.id))
+    }
+
+    nonisolated static func == (lhs: HistoryLiveRow, rhs: HistoryLiveRow) -> Bool {
+        lhs.item == rhs.item && lhs.context == rhs.context && lhs.fanout === rhs.fanout
     }
 
     var body: some View {
-        content(live)
+        content(item, context, live)
             .onAppear {
-                live = fanout.register(itemID: itemID) { state in
+                live = fanout.register(itemID: item.id) { state in
                     live = state
                 }
-                historyViewModel.rowDidAppear(itemID: itemID)
+                historyViewModel.rowDidAppear(itemID: item.id)
             }
             .onDisappear {
-                fanout.unregister(itemID: itemID)
+                fanout.unregister(itemID: item.id)
             }
     }
 }
