@@ -193,7 +193,8 @@ final class SearchReadStore {
             try conn.execute("PRAGMA busy_timeout = 500")
             try conn.execute("PRAGMA cache_size = -64000")
             try conn.execute("PRAGMA temp_store = MEMORY")
-            try conn.execute("PRAGMA mmap_size = 268435456")
+            // Maps up to 1 GiB, so reads past 256 MB of a large history skip the page-cache copy.
+            try conn.execute("PRAGMA mmap_size = 1073741824")
         } catch {
             conn.close()
             throw error
