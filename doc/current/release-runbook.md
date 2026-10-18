@@ -451,3 +451,102 @@ Dated historical observations formerly embedded in this runbook are preserved in
 - **Gates:**
   - `make build` passed; `make test-unit`: 756 passed, 0 failed; `make test-tooling` and `make test-release-policy` passed.
   - `make test-snapshot-perf-release` with the new `cm` run passed three times: `cmd` p95 12.93 / 12.64 / 12.06 ms (limit 50); prepared `cm` p95 8.90 / 9.08 / 9.07 ms (limit 20); cold `cm` 119.3 (first run after the build) / 66.8 / 72.1 ms.
+
+### 2026-10-18 Search Stage 6: Linear Match Evidence And Read-Connection mmap
+
+- **Source baseline:** `main` at `7ed7b25` (stage 5 merged); branch `claude/search-match-evidence`. Development evidence, not a release. Environment and project baselines as in stage 1.
+- **Snapshot:** a new real DB snapshot from `make snapshot-perf-db`: 16,763 rows, 341,401,600 bytes, 65 MB of plain text, SHA-256 `0aaebe80ec8dae5027e076cf3e43227b6a7f845c445f43b047c9743bb2dbd291` (unchanged after the runs). Each binary used its own `cp -c` APFS clone.
+- **Profile:** `sample` of the 300-row exact `的 是` page showed match evidence at 424 of 442 ms. Of that:
+  - 39% went to `NSRange(_:in:)` per token, which builds and walks UTF-16 breadcrumbs;
+  - 28% to SQLite's tokenizer;
+  - 14% to the 8,192-Character chunk walk;
+  - 10% to `String.Index(_:within:)` per token edge.
+  
+  For recent `cm`, literal search spent a quarter of its time transcoding the bridged String (breadcrumbs plus `getCharacters`).
+- **Change (`SearchMatchContextBuilder`), output identical:**
+  - **unicode61:** one tokenizer call over the source's contiguous UTF-8, in place of 8,192-Character chunks merged at their edges. The tokenizer classifies each scalar on its own, and a diacritic it attaches to a token is a grapheme extender, so the old Character-aligned chunk edges never split a token differently.
+  - **Token ranges:**
+    - UTF-16 ranges come from a forward count over the bytes.
+    - Token edges still have to be Character boundaries: scalar pairs that break in every grapheme state are accepted directly, and any other pair asks `String.Index(_:within:)`.
+    - A source with an edge inside a cluster still has no evidence.
+  - **Token comparison:**
+    - Folded token bytes stay in one buffer, without a String per token.
+    - A token equals a query token when the bytes are equal. Otherwise both must be NFC-inert to conclude they differ: NFC quick-check Yes with combining class 0, which covers scalars below U+0300, kana, CJK ideographs and Hangul syllables.
+    - In every other case `String ==` decides, so canonical equivalence is unchanged (for example, `각` against `가` + U+11A8, and U+F900 against U+8C48).
+  - **Literal search:** an `NSString` subclass serving one UTF-16 copy per source through `getCharacters(_:range:)`, shared by every term.
+    - A CFString copy would change results: Foundation's grapheme handling differs on that path. For example, `4.5` before a skin-tone modifier matches in a CFString of any length, but in a bridged String or the subclass only while it is shorter than 65 UTF-16 units.
+    - The subclass reproduced the bridged results in every case.
+  - **Fragments:**
+    - `Range(_:in:)` is not inlinable, and the OS's Foundation handles bounds that are not Character boundaries differently by release; this one returns the UTF-16 view's indices unchecked.
+    - So bounds on Character boundaries come from one UTF-8 scan (64-byte blocks, then scalars), and every other range goes to `Range(_:in:)`.
+    - The fragment's UTF-16 start is the match location minus its leading context, not `utf16Offset(in:)`.
+  - **Differences:**
+    - A source over `Int32.max` bytes now fails tokenization instead of being chunked. SQLite's default text limit (10⁹ bytes) keeps such text out of the database.
+    - A source with no tokens polls cancellation only before and after the tokenizer call, no longer every 256 Characters.
+- **Identical output, differential fuzz:** the `main` builder and the new one were compiled into one scratch binary and compared on full `makeContext` output, including thrown errors.
+
+| Corpus | Comparisons | With evidence | Tokenizer errors (both) | Mismatches |
+| --- | --- | --- | --- | --- |
+| Random texts, 4 seeds | 600,000 | 253,050 | 71,329 | 0 |
+| Canonically equivalent forms | 200,000 | 145,177 | 674, all in query preparation | 0 |
+| Real snapshot rows × 13 workload queries | 352,023 | 66,774 | 480 | 0 |
+
+  - The random texts mix ASCII, CJK, kana, Hangul and jamo, Indic clusters, Prepend, combining marks, ZWJ, emoji with modifiers, flags, CR LF, BOM and astral scalars. Every mode, coverage and note case is covered, and 8% of texts sit across the old 8,192-Character chunk edges.
+  - **Controls:** 13 harmful mutants all fail the fuzz:
+    - no `String.Index` fallback (7,011 mismatches);
+    - combining marks treated as breaks (514);
+    - preceding scalar decoded one early (59);
+    - 4-byte UTF-16 count as 1, in tokens (373) and in fragments (936);
+    - token cursor not advanced (225);
+    - swapped surrogates (134);
+    - 3-byte transcoding shift (2,893);
+    - CFString copy (5);
+    - first token dropped (6,023);
+    - no `String ==` fallback (5,292 canonical);
+    - jamo (2,210 canonical) and compatibility ideographs (1,556 canonical) marked inert;
+    - unadjusted fragment start (15,161).
+  - **Equivalent controls** (0 mismatches, by construction):
+    - the CR LF exception (CR and LF are never token characters);
+    - a block skip that overshoots (it falls back to Foundation);
+    - kana voicing marks or Greek extended marked inert (never in folded tokens, or never next to an inert counterpart).
+- **Tests:** `testUnicode61TokenRangeCountsSurrogatePairsBeforeTheToken` replaces the chunk-edge test, and `testLiteralEvidenceRangesSurviveMultiByteScalarsBeforeTheMatch` is new. Both fail under the 4-byte and 3-byte mutants.
+- **A/B, evidence:** Release ScopyBench from one scratch copy (`main` `67328afe`, stage 6 `ab9592ad`). Engine layer unless noted; 300-row pages 7 samples after 2 warm-ups, others 15 after 3 (gate forms as in the Makefile). Means of run medians, ms.
+
+| Workload (ms) | A/A, 3 interleaved pairs | `main`, 5 ABBA pairs | Stage 6, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Exact `的 是`, recent, 300 rows | 429.9 / 432.0 | 430.6 | 171.1 |
+| Exact `数据 一`, recent, offset 300 | 387.1 / 386.8 | 387.4 | 250.3 |
+| Exact `the` (FTS), recent, 300 rows | 457.8 / 457.2 | 457.1 | 180.1 |
+| Exact `the`, relevance | 28.66 / 28.43 | 28.53 | 12.46 |
+| Fuzzy+ `select`, recent | 86.73 / 86.76 | 86.94 | 67.46 |
+| Fuzzy+ `cm`, recent, short index | 85.11 / 85.03 | 85.05 | 71.41 |
+| Fuzzy+ `数据`, relevance, 300 rows | 59.80 / 59.86 | 59.76 | 54.41 |
+| Fuzzy+ `co`, relevance | 16.90 / 16.94 | 16.91 | 16.27 |
+| Refine `co config`, relevance | 20.54 / 20.52 | 20.53 | 20.23 |
+| Service `cmd` | 11.78 / 11.82 | 11.80 | 10.58 |
+| Prepared `cm` after `md` (gate form) | 7.87 / 7.91 | 7.88 | 7.46 |
+
+- **Read connection `mmap_size`:** 256 MB → 1 GiB in `SearchReadStore` (the snapshot is 341 MB; SQLite reports 1 GiB applied). Same scratch-copy method, both sides with the stage-6 evidence code (`e96e6c44` / `1291ed85`). Cold runs are one sample per process, with the OS file cache warm.
+
+| Workload (ms) | A/A, 3 interleaved pairs | 256 MB, 5 ABBA pairs | 1 GiB, 5 ABBA pairs |
+| --- | --- | --- | --- |
+| Cold service `cm`, relevance | 63.73 / 63.90 | 63.66 | 62.56 |
+| Cold service `cm`, recent | 86.26 / 86.24 | 86.47 | 83.51 |
+| `数据`, relevance, 10 × 300 rows | 812.6 / 811.9 | 811.7 | 808.9 |
+| `e`, recent, 10 × 300 rows | 102.80 / 102.72 | 102.70 | 98.74 |
+| Exact `的 是`, recent, offset 3000 | 173.89 / 174.09 | 174.56 | 171.82 |
+| Exact `the`, recent, 300 rows | 179.48 / 179.67 | 179.55 | 178.08 |
+| Full-index `e`, recent (control) | 3.26 / 3.26 | 3.24 | 3.23 |
+| Prepared `cm` after `md` | 7.48 / 7.56 | 7.50 | 7.42 |
+
+  - **Gain:** 1–4% on workloads that read the file, above the A/A spread, with no change on the in-memory control.
+  - **Memory:** `/usr/bin/time -l`, 3 runs each. Peak memory footprint is unchanged:
+    - 10-page `数据`: 154.9–155.0 MB before, 155.1–155.2 MB after;
+    - `the`: 180.9–181.1 MB before, 179.8–180.7 MB after.
+    
+    Maximum RSS grows by about 17 MB on the 10-page run, from clean file-backed mapped pages. The repository's own connection keeps 256 MB.
+- **Tooling:** the `scripts/perf-scroll` profiles copied `fullindex.v7` / `shortindex.v4` caches with `.sha256` sidecars. Now they copy whatever `clipboard.db*` files the snapshot holds, so current v9 / v5 caches with `.crc32` sidecars are included.
+- **Pre-existing, not changed here:** 480 of the 352,023 real-row evidence builds fail because a unicode61 token edge falls inside a grapheme cluster (for example, a Devanagari consonant before a vowel sign). Those rows show no evidence in exact mode and on staged refine.
+- **Gates on the final tree:**
+  - `make build` passed; `make test-unit`: 757 passed, 0 failed; `make test-tooling` passed.
+  - `make test-snapshot-perf-release` passed three times: `cmd` p95 11.12 / 10.77 / 10.84 ms (limit 50); prepared `cm` p95 7.60 / 7.65 / 7.52 ms (limit 20); cold `cm` 98.9 (first run after the build) / 63.0 / 62.4 ms.
