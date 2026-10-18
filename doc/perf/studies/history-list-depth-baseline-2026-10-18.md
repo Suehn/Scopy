@@ -14,8 +14,8 @@ driver (`run.py`) and its raw output stay in the session scratchpad and `logs/ph
 
 - **Fresh**: the first page after launch, 80 Accessibility outline rows (77 items and the section headers).
 - **Deep**: after seven 3 s mouse-wheel bursts (120 px per event, 60 events/s, 1 s apart), 3,380 outline rows.
-  Depth is read from Accessibility (`AXOutline` `AXRows`); the profile's `fixed_workload.loaded_count` stops
-  updating after the first load-more page and is not usable for this.
+  Depth is read from Accessibility (`AXOutline` `AXRows`). The profile's `fixed_workload.loaded_count` read 77 in
+  every gated run; that was the start-barrier bug below, not a stale value.
 - Each run measures one 8 s window: **type** `cm` at 8 keys/s with real key events (the AX readback must show the
   query), **hover** (`build/hoverstall`, pointer stepped over 6 rows), **capture** (10 unique 2,000-byte texts on
   the private pasteboard, 0.5 s apart), or **idle**. States and workloads were interleaved, 3 runs per cell.
@@ -54,14 +54,22 @@ plus tail, `list.body` 9, `row.init` 1,549–1,550, 353 result rows by AX readba
   thread (`accessibilityWindowsAttribute` → `_NSCGSGetSpaces`), and in the deep state its answers take ~100 ms after
   each List change. With the probe attached, the deep typing window spends 702 of 1,125 busy main-thread samples
   answering it. Its stall readings are valid for comparing like with like, not for absolute cost with large lists.
-- **`TimelineView(.animation)` cadence does not see stalls.** The profiler's animation callbacks stayed at 480 per
-  8 s (60 Hz) with no gap above 58 ms during deep captures, while `sample` shows ~69 ms of work per capture. The
-  callback dates come from the timeline schedule; they are cadence, as the profiler's own notes say.
-- **The profile start barrier drops queued counters.** With `SCOPY_PROFILE_START_NOTIFICATION` set, `list.body` and
-  `row.init` (sent through the static, queued `incrementCounter`) never reach the report, while main-actor counters
-  do. Counters here come from runs profiled from launch.
-- **The main run-loop observer starts only on `scrollDidStart`**, which a mouse-wheel stream without gesture phases
-  never sends, so `main_runloop_active_ms` is empty for typing, hover and capture.
+- **The profile start barrier did not hold** (found after this study and fixed
+  since). With `SCOPY_PROFILE_START_NOTIFICATION` set, the first `TimelineView` callback after launch opened the
+  measurement window, so every gated report covered the 8 s after launch, not the workload. That is why `list.body`
+  and `row.init` looked missing and `loaded_count` read 77. Counters here come from runs profiled from launch. With
+  the barrier fixed, the same deep capture (`main` code) reports 10 `list.body`, 33,602 `row.init` and
+  `loaded_count` 3,387.
+- **`TimelineView(.animation)` cadence does see the capture stalls.** An earlier version of this list said it did
+  not; those readings came from the launch window above. In the fixed deep capture, the callbacks drop to 412 in
+  8 s, the longest gap is 208 ms, and 2.4% of the intervals are over the threshold. `sample` remains the attribution
+  source.
+- **The main run-loop observer started only on `scrollDidStart`**, which a mouse-wheel stream without gesture phases
+  never sends, so `main_runloop_active_ms` was empty for typing, hover and capture. The barrier release now starts
+  it too: the fixed deep capture records 2,336 ms of main run-loop activity, p95 0.9 ms and max 208 ms.
+- With the window open, the profiler's own ingestion is not free at depth. The gated deep capture used 2.41 s of
+  CPU, against 1.1–1.4 s for the same workload in runs whose profile window had already closed. Take cost from
+  `sample` and process CPU with the window closed or the profiler off.
 
 ## Memory
 

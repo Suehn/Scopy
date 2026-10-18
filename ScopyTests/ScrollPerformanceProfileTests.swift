@@ -227,6 +227,44 @@ final class ScrollPerformanceProfileTests: XCTestCase {
         XCTAssertEqual(metrics.gauges["active.slot.max"], 1)
     }
 
+    /// With a start barrier configured, nothing before its release opens the measurement window:
+    /// the first animation callback used to, so the report covered the launch instead of the
+    /// driver's workload. The released window records the workload's counters and main run-loop
+    /// pressure even though nothing scrolls.
+    func testStartBarrierOpensTheMeasurementWindowOnlyWhenReleased() async throws {
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-profile-\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: output) }
+        let profile = ScrollPerformanceProfile.makeForTesting(environment: [
+            "SCOPY_SCROLL_PROFILE": "1",
+            "SCOPY_PROFILE_START_NOTIFICATION": "com.scopy.tests.profile-start.\(UUID().uuidString)",
+            "SCOPY_PROFILE_OUTPUT": output.path,
+            "SCOPY_PROFILE_DURATION_SEC": "0.3",
+            "SCOPY_PROFILE_MIN_SAMPLES": "30",
+        ])
+
+        let launch = Date()
+        for frame in 0..<60 { profile.recordAnimationCallback(launch.addingTimeInterval(Double(frame) / 60)) }
+        profile.scrollDidStart()
+        profile.scrollDidEnd()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path), "A report was written before the release")
+
+        profile.beginAutoScrollAfterReadiness()
+        profile.incrementCounter(name: "workload.event")
+        // Let the main run loop wait and wake a few times inside the window.
+        for _ in 0..<5 { try await Task.sleep(nanoseconds: 10_000_000) }
+        let released = Date()
+        for frame in 1...60 { profile.recordAnimationCallback(released.addingTimeInterval(Double(frame) / 60)) }
+
+        let report = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: output)) as? [String: Any]
+        )
+        let counters = (report["structural_metrics"] as? [String: Any])?["counters"] as? [String: Any]
+        XCTAssertEqual(counters?["workload.event"] as? Int, 1)
+        let runLoop = report["main_runloop_active_ms"] as? [String: Any]
+        XCTAssertGreaterThan(runLoop?["total_count"] as? Int ?? 0, 0, "No main run-loop activity in the window")
+    }
+
     func testSerializedMetricIngressSchedulesOneDrainForAnOrderedBatch() {
         let ingress = ScrollProfileSerializedEventBuffer<Int>()
 

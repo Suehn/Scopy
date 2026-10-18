@@ -36,6 +36,12 @@ Interpretation rules: animation-callback intervals are callback cadence, not pre
 `sample` tree is the attribution source; compare same-workload runs only (wheel vs wheel, phased vs phased, fixed
 vs fixed, warm vs warm).
 
+`SCOPY_PROFILE_START_NOTIFICATION=<name>` holds the profiler's measurement window closed until a distributed
+notification with that name arrives. The window then opens with the main run-loop observer running, so the report's
+callbacks, counters and run-loop time cover only what follows. A driver uses it to reach a state unmeasured, such as
+a list scrolled thousands of rows deep, and then measure only the workload. At that depth the active profiler's own
+ingestion costs measurable CPU, so take cost from `sample` and process CPU.
+
 ## Clipboard-capture profiling
 
 `profile_capture.py` launches the same app/DB setup with the clipboard monitor bound to a private named pasteboard
@@ -71,7 +77,9 @@ opening it although it does almost no work, so most of that number is synthetic-
 
 `build/hoverstall` is the main-thread stall meter: it moves the pointer onto a row (optionally stepping down further
 rows) and issues a cheap Accessibility query every ~3 ms. Those queries are answered on the app's main thread, so a
-slow answer measures exactly how long the main thread was blocked. It prints p50/p95/max and every stall over 50 ms
+slow answer measures exactly how long the main thread was blocked. With thousands of rows loaded, answering the query
+itself costs main-thread time after each List change (about 100 ms at 3,380 rows), so compare its readings like with
+like. It prints p50/p95/max and every stall over 50 ms
 with its offset, which is what attributes hover-preview and search-typing hitches.
 
 ```
