@@ -13,7 +13,7 @@ run's DB and checks that their ids are the first rows of the Recent section. It 
 the CPU figures and any app log lines mentioning "capture" or "ingest". The SCOPY_SCROLL_PROFILE report only
 finalizes after scrolling samples, so profile.json is normally absent for a capture-only run.
 """
-import argparse, json, datetime, math, os, re, shutil, signal, sqlite3, subprocess, sys, tempfile, time
+import argparse, glob, json, datetime, math, os, re, shutil, signal, sqlite3, subprocess, sys, tempfile, time
 S=os.path.dirname(os.path.abspath(__file__))
 TOOLS=os.environ.get('SCOPY_PERF_SCROLL_TOOLS', os.path.join(S, 'build'))
 repo=os.path.abspath(os.path.join(S, '..', '..'))
@@ -30,11 +30,9 @@ ROWS=a.count+3
 
 def make_db():
     dbdir=tempfile.mkdtemp(prefix='scopy-capture-db-')
-    for f in ('clipboard.db','clipboard.db-wal','clipboard.db-shm',
-              'clipboard.db.fullindex.v7.bin','clipboard.db.fullindex.v7.bin.metadata.plist','clipboard.db.fullindex.v7.bin.sha256',
-              'clipboard.db.shortindex.v4.bin','clipboard.db.shortindex.v4.bin.sha256'):
-        src=os.path.join(repo, 'perf-db', f)
-        if os.path.exists(src): shutil.copy(src, os.path.join(dbdir, f))
+    # The database, its WAL, and whatever index caches the snapshot holds, at any cache version.
+    for src in glob.glob(os.path.join(repo, 'perf-db', 'clipboard.db*')):
+        shutil.copy(src, os.path.join(dbdir, os.path.basename(src)))
     return dbdir
 
 def winpos(pid, activate=False):

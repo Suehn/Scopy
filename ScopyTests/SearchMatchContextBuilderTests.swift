@@ -77,12 +77,20 @@ final class SearchMatchContextBuilderTests: XCTestCase {
         XCTAssertEqual(context.fragments.flatMap(highlightedText), ["αλφα"])
     }
 
-    func testUnicode61TokenRangeSurvivesTokenizerChunkBoundary() throws {
-        let text = String(repeating: " ", count: 8_190) + "needle"
+    func testUnicode61TokenRangeCountsSurrogatePairsBeforeTheToken() throws {
+        let text = String(repeating: "😀 数据，", count: 3_000) + "\r\nneedle。"
         let context = try XCTUnwrap(makeContext(query: "needle", mode: .exact, text: text))
 
         XCTAssertEqual(context.occurrenceCount, 1)
         XCTAssertEqual(context.fragments.flatMap(highlightedText), ["needle"])
+    }
+
+    func testLiteralEvidenceRangesSurviveMultiByteScalarsBeforeTheMatch() throws {
+        let text = String(repeating: "é😀 ", count: 400) + "前文数据后文"
+        let context = try XCTUnwrap(makeContext(query: "数据", mode: .exact, text: text))
+
+        XCTAssertEqual(context.occurrenceCount, 1)
+        XCTAssertEqual(context.fragments.flatMap(highlightedText), ["数据"])
     }
 
     func testExactFTSEvidenceDoesNotMarkSubstringInsideLargerToken() throws {
