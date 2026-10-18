@@ -569,3 +569,22 @@ Dated historical observations formerly embedded in this runbook are preserved in
 | Service cold `cm`, relevance, one search | 3.05 | 83.94 (83.53–84.79) | 61.91 (61.31–62.88) | yes |
 
 - Not run: XCUITest (blocked on this machine), the in-app first launch after the cache-version change, a macOS 14 runtime, and a real logout or restart quit. Consecutive-page workloads are measured per stage above, because the v0.82.2 ScopyBench has no `--pages`.
+
+### 2026-10-18 v0.84.0 Release Gates
+
+- Release candidate `ff93c4a` contains fuzzy contiguous-occurrence evidence ([#17](https://github.com/Suehn/Scopy/pull/17)) and scoring ([#18](https://github.com/Suehn/Scopy/pull/18)); each PR records its own A/B, negative controls and rejected variants. Environment: Apple M3, 8 cores, 24 GB; macOS 27.2; Xcode 27.0 (`27A5194q`). Release note: [v0.84.0](../releases/history/v0.84.0.md).
+- `make build` and `make test-tooling` passed; `make test-unit` 770 passed, 0 failed (76 s, display awake; an earlier run with the display asleep failed the same WebKit render-readiness tests on unmodified `main`, so those suites need an awake display); `make docs-validate`, `make release-validate` and `make test-release-policy` passed. Hosted CI `39123710894` and Hosted TSan `39123710997` passed on the same commit.
+- Real DB snapshot: 16,778 rows, 341,401,600 bytes, SHA-256 `c8678ffec96388439a61c5402137ebdef7077dde00127d206bd8e311a496ecdb`. Each binary used its own `cp -c` APFS clone; each gate run used a fresh clone.
+- `make test-snapshot-perf-release`, three runs on `ff93c4a`: `cmd` p95 10.71 / 10.64 / 10.65 ms (limit 50); prepared `cm` p95 7.84 / 7.95 / 7.86 ms (limit 20); cold `cm` 63.8 / 64.5 / 66.4 ms. All passed.
+- End-to-end A/B, Release ScopyBench of `4a8d1ed` (v0.83.0, SHA-256 prefix `830026b96eca36cc`) against `ff93c4a` (`ae92ab12d884cdaf`), engine layer with `--force-full-fuzzy --reset-query q`, 20 iterations and 3 warm-ups per run. Per workload: one untimed warm run per side, 3 A/A pairs of the baseline, then 5 A-B-B-A groups; values are means of run medians. Load average 3–4 from other applications.
+
+| Workload | A/A max pair difference (ms) | v0.83.0 (ms) | v0.84.0 (ms) | Separated |
+| --- | --- | --- | --- | --- |
+| fuzzy+ `这个问题`, relevance | 2.00 | 151.06 (150.24–152.77) | 70.04 (69.79–70.39) | yes |
+| fuzzy+ `原文错了嘛`, relevance | 0.37 | 20.58 (20.44–20.73) | 15.55 (15.41–15.85) | yes |
+| fuzzy+ `原文错了嘛`, recent | 0.40 | 20.49 (20.35–20.61) | 15.61 (15.44–15.80) | yes |
+| fuzzy `cmd`, relevance | 0.05 | 10.77 (10.63–10.84) | 7.05 (6.87–7.26) | yes |
+| fuzzy `abc`, relevance | 0.15 | 9.42 (9.35–9.47) | 6.46 (6.32–6.57) | yes |
+| fuzzy+ `数学`, relevance (control) | 0.13 | 7.61 (7.54–7.76) | 7.59 (7.50–7.63) | no |
+
+- Not run: XCUITest (blocked on this machine), interactive typing latency (`make perf-search-type`), and a macOS 14 runtime.

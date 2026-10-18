@@ -1,6 +1,6 @@
-version: v0.83.0
+version: v0.84.0
 date: 2026-10-18
-release_doc: doc/releases/history/v0.83.0.md
+release_doc: doc/releases/history/v0.84.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -9,24 +9,17 @@ spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
 last_verified_at: 2026-10-18
-summary: Search short queries up to 8x faster, rebuild only changed history rows, keep deep search pages through new copies, and start over after a stale reopen
+summary: Rank and highlight fuzzy matches by their contiguous phrase, and score fuzzy subsequence queries up to 2x faster
 verification:
   docs_validate: pass
   release_validate: pass
   release_policy: pass
   test_tooling: pass
-  build: pass_local_debug_1e37fbc
-  test_unit: pass_local_760_tests_0_failures_strict_warnings_as_errors_1e37fbc
-  test_tsan: pass_hosted_39099188918_1e37fbc
-  hosted_ci: pass_39099188933_1e37fbc
-  snapshot_release: pass_3_of_3_cmd_p95_10_8_to_11_5ms_prepared_cm_p95_7_9_to_9_4ms_cold_cm_62_to_65ms_db_f73a5349_search_tree_of_b03c865_identical_to_1e37fbc
-  search_ab_vs_v0_82_2: recent_e_24_3_to_3_0ms_recent_co_24_9_to_3_4ms_exact_300_rows_446_to_171ms_prepared_cm_15_4_to_7_4ms_cmd_15_4_to_10_7ms_cold_cm_83_9_to_61_9ms_5_abba_groups_after_3_aa_pairs
-  stale_reopen_ui: pass_local_ui_path_isolated_identity_hotkey_reopen_after_190s_first_page_at_top_5s_reopen_unchanged
+  build: pass_local_debug_ff93c4a
+  test_unit: pass_local_770_tests_0_failures_strict_warnings_as_errors_ff93c4a
+  test_tsan: pass_hosted_39123710997_ff93c4a
+  hosted_ci: pass_39123710894_ff93c4a
+  snapshot_release: pass_3_of_3_cmd_p95_10_6_to_10_7ms_prepared_cm_p95_7_8_to_8_0ms_cold_cm_64_to_66ms_db_c8678ffe_ff93c4a
+  search_ab_vs_v0_83_0: fuzzy_plus_zhe_ge_wen_ti_151_1_to_70_0ms_yuan_wen_cuo_le_ma_20_6_to_15_6ms_fuzzy_cmd_10_8_to_7_1ms_abc_9_4_to_6_5ms_shu_xue_control_unchanged_5_abba_groups_after_3_aa_pairs
   frontend_profile: not_run_xcuitest_blocked_on_this_machine
   quit_on_logout: not_exercised
-  release_commit: 4a8d1ed4660f8ad01f9fb0aeaee41cfc06f360ae
-  release_workflow: https://github.com/Suehn/Scopy/actions/runs/39113117190
-  dmg_sha256: f675c79bbd93c25bccda1471745e5005294d6ba8d86e1413e325b95333ff1a49
-  homebrew_casks: pass_repo_2fa086d_and_tap_5ed9cd4_identical_0_83_0
-  tap_automation: failed_403_token_lacks_tap_write_manual_sync_5ed9cd4
-  installed_bundle: pass_brew_reinstall_0_83_0_build_724_universal_min_14_257_files_match_DMG_first_launch_waits_on_Gatekeeper_approval

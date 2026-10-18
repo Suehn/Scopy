@@ -12,6 +12,20 @@
 
 - No unreleased entries.
 
+## [v0.84.0] - 2026-10-18
+
+### Changed
+
+- A fuzzy-mode query, or a fuzzy+ non-ASCII word, of three or more characters scores the better of its leftmost scattered match and its first contiguous occurrence. Hits are unchanged; a row that contains the whole term after an earlier scattered start now ranks as a contiguous match.
+
+### Fixed
+
+- Fuzzy highlights show the match that was scored, so `原文错了嘛` is highlighted as one phrase instead of `原文` from an earlier sentence plus `错了嘛`. An ASCII fuzzy query also highlights a hit inside a decomposed character.
+
+### Performance
+
+- Real 16,778-row snapshot, Release A–B–B–A against `v0.83.0`: fuzzy+ `这个问题` 151 → 70 ms, fuzzy+ `原文错了嘛` 20.6 → 15.6 ms, fuzzy `cmd` 10.8 → 7.1 ms, fuzzy `abc` 9.4 → 6.5 ms; two-character `数学` unchanged.
+
 ## [v0.83.0] - 2026-10-18
 
 ### Changed

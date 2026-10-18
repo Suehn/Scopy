@@ -20,9 +20,9 @@ This page is the human-facing index for current release state. Automation should
 ## Current Release
 
 <!-- release-current:start -->
-- Version: `v0.83.0`
+- Version: `v0.84.0`
 - Date: `2026-10-18`
-- Release note: [v0.83.0](./history/v0.83.0.md)
+- Release note: [v0.84.0](./history/v0.84.0.md)
 - Changelog: [CHANGELOG.md](./CHANGELOG.md)
 - Profile doc: `none`
 <!-- release-current:end -->
@@ -30,6 +30,7 @@ This page is the human-facing index for current release state. Automation should
 ## Recent Releases
 
 <!-- release-recent:start -->
+- `2026-10-18` [v0.84.0](./history/v0.84.0.md) - Rank and highlight fuzzy matches by their contiguous phrase, and score fuzzy subsequence queries up to 2x faster
 - `2026-10-18` [v0.83.0](./history/v0.83.0.md) - Search short queries up to 8x faster, rebuild only changed history rows, keep deep search pages through new copies, and start over after a stale reopen
 - `2026-10-18` [v0.82.2](./history/v0.82.2.md) - Harden capture, quit and storage races, page recent history by key, and search non-ASCII text up to 52% faster
 - `2026-10-13` [v0.82.1](./history/v0.82.1.md) - Fix Homebrew installation on macOS 15 and later
@@ -41,7 +42,6 @@ This page is the human-facing index for current release state. Automation should
 - `2026-09-05` [v0.80.3](./history/v0.80.3.md) - Preserve Chinese tables and emphasis when capturing ChatGPT copies
 - `2026-09-05` [v0.80.2](./history/v0.80.2.md) - Fix Chinese emphasis and single-dollar math while simplifying capture tests
 - `2026-09-05` [v0.80.1](./history/v0.80.1.md) - Keep search pagination correctly ranked and apply new rows in small batches
-- `2026-09-04` [v0.80.0](./history/v0.80.0.md) - Copy reports whether it reached the pasteboard, copied folders replay as folders, and any hover preview can be pinned into a movable, resizable, always-on-top window
 <!-- release-recent:end -->
 
 ## Full History
