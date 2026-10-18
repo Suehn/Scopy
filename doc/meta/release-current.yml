@@ -24,3 +24,9 @@ verification:
   stale_reopen_ui: pass_local_ui_path_isolated_identity_hotkey_reopen_after_190s_first_page_at_top_5s_reopen_unchanged
   frontend_profile: not_run_xcuitest_blocked_on_this_machine
   quit_on_logout: not_exercised
+  release_commit: 4a8d1ed4660f8ad01f9fb0aeaee41cfc06f360ae
+  release_workflow: https://github.com/Suehn/Scopy/actions/runs/39113117190
+  dmg_sha256: f675c79bbd93c25bccda1471745e5005294d6ba8d86e1413e325b95333ff1a49
+  homebrew_casks: pass_repo_2fa086d_and_tap_5ed9cd4_identical_0_83_0
+  tap_automation: failed_403_token_lacks_tap_write_manual_sync_5ed9cd4
+  installed_bundle: pass_brew_reinstall_0_83_0_build_724_universal_min_14_257_files_match_DMG_first_launch_waits_on_Gatekeeper_approval
