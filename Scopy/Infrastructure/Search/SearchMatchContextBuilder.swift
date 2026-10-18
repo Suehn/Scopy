@@ -7,7 +7,6 @@ public enum SearchMatchContextBuilder {
     private enum Constants {
         static let maxOccurrencesPerTerm = 32
         static let literalScanChunkUTF16 = 64 * 1024
-        static let tokenizerChunkCharacters = 8 * 1024
         static let cancellationPollInterval = 256
         static let singleFragmentCharacters = 72
         static let splitFragmentCharacters = 14
@@ -54,8 +53,158 @@ public enum SearchMatchContextBuilder {
     }
 
     fileprivate struct UnicodeToken {
-        let normalizedText: String
+        /// The folded UTF-8 in `UnicodeTokens.foldedBytes`.
+        let folded: Range<Int>
+        let foldedIsNFCInert: Bool
         let range: NSRange
+    }
+
+    /// unicode61 tokens of one text, their folded UTF-8 kept in one buffer.
+    fileprivate struct UnicodeTokens {
+        let foldedBytes: [UInt8]
+        let tokens: [UnicodeToken]
+
+        func foldedText(_ token: UnicodeToken) -> String {
+            foldedBytes.withUnsafeBufferPointer { buffer in
+                String(decoding: UnsafeBufferPointer(rebasing: buffer[token.folded]), as: UTF8.self)
+            }
+        }
+
+        /// The canonical equivalence `String ==` decides. Texts made only of NFC-inert scalars are
+        /// in NFC, so for two of them it is byte equality.
+        func token(at index: Int, equals term: PhraseTerm) -> Bool {
+            let token = tokens[index]
+            if token.folded.count == term.utf8.count {
+                let sameBytes = foldedBytes.withUnsafeBufferPointer { buffer in
+                    term.utf8.withUnsafeBufferPointer { termBuffer in
+                        guard let base = buffer.baseAddress, let termBase = termBuffer.baseAddress else {
+                            return true
+                        }
+                        return memcmp(base + token.folded.lowerBound, termBase, termBuffer.count) == 0
+                    }
+                }
+                if sameBytes { return true }
+            }
+            if token.foldedIsNFCInert && term.isNFCInert { return false }
+            return foldedText(token) == term.text
+        }
+    }
+
+    /// One folded query token of an FTS evidence phrase.
+    fileprivate struct PhraseTerm {
+        let text: String
+        let utf8: [UInt8]
+        let isNFCInert: Bool
+
+        init(_ text: String) {
+            self.text = text
+            utf8 = Array(text.utf8)
+            isNFCInert = utf8.withUnsafeBufferPointer(SearchMatchContextBuilder.isNFCInert)
+        }
+    }
+
+    /// Whether every scalar is NFC quick-check Yes with canonical combining class 0: Latin and
+    /// other scalars below U+0300, kana without combining marks, CJK ideographs, and Hangul
+    /// syllables. Such a text is in NFC.
+    fileprivate static func isNFCInert(_ bytes: UnsafeBufferPointer<UInt8>) -> Bool {
+        var index = 0
+        while index < bytes.count {
+            let lead = bytes[index]
+            if lead < 0x80 {
+                index += 1
+            } else if lead >= 0xC2, lead < 0xCC, index + 1 < bytes.count {
+                index += 2
+            } else if lead >= 0xE3, lead <= 0xED, index + 2 < bytes.count {
+                let scalar = UInt32(lead & 0x0F) << 12 | UInt32(bytes[index + 1] & 0x3F) << 6
+                    | UInt32(bytes[index + 2] & 0x3F)
+                switch scalar {
+                case 0x3041...0x3096, 0x30A1...0x30FA, 0x3400...0x9FFF, 0xAC00...0xD7A3:
+                    index += 3
+                default:
+                    return false
+                }
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// A searchable text whose UTF-16 copy is made once, on its first literal search, and shared
+    /// by every term.
+    private final class EvidenceSource {
+        let source: SearchMatchSource
+        let text: String
+        private var utf16Copy: UTF16Text?
+
+        init(source: SearchMatchSource, text: String) {
+            self.source = source
+            self.text = text
+        }
+
+        var utf16Text: NSString {
+            if let utf16Copy { return utf16Copy }
+            let copy = UTF16Text(copying: text)
+            utf16Copy = copy
+            return copy
+        }
+    }
+
+    /// UTF-16 units served through `getCharacters(_:range:)`. Foundation searches it on the path
+    /// it takes for a bridged String, whose grapheme handling differs from a CFString copy's, so
+    /// results stay those of the bridged String without its per-refill transcoding.
+    private final class UTF16Text: NSString {
+        private var units: [UInt16] = []
+
+        convenience init(copying text: String) {
+            self.init()
+            var text = text
+            units = text.withUTF8 { bytes in
+                // A scalar never needs more UTF-16 units than UTF-8 bytes.
+                [UInt16](unsafeUninitializedCapacity: bytes.count) { buffer, count in
+                    count = 0
+                    var index = 0
+                    while index < bytes.count {
+                        let lead = UInt32(bytes[index])
+                        if lead < 0x80 {
+                            buffer[count] = UInt16(lead)
+                            count += 1
+                            index += 1
+                        } else if lead < 0xE0 {
+                            buffer[count] = UInt16((lead & 0x1F) << 6 | UInt32(bytes[index + 1] & 0x3F))
+                            count += 1
+                            index += 2
+                        } else if lead < 0xF0 {
+                            buffer[count] = UInt16(
+                                (lead & 0x0F) << 12 | UInt32(bytes[index + 1] & 0x3F) << 6
+                                    | UInt32(bytes[index + 2] & 0x3F)
+                            )
+                            count += 1
+                            index += 3
+                        } else {
+                            let scalar = ((lead & 0x07) << 18 | UInt32(bytes[index + 1] & 0x3F) << 12
+                                | UInt32(bytes[index + 2] & 0x3F) << 6 | UInt32(bytes[index + 3] & 0x3F))
+                                - 0x10000
+                            buffer[count] = UInt16(0xD800 | scalar >> 10)
+                            buffer[count + 1] = UInt16(0xDC00 | scalar & 0x3FF)
+                            count += 2
+                            index += 4
+                        }
+                    }
+                }
+            }
+        }
+
+        override var length: Int { units.count }
+
+        override func character(at index: Int) -> unichar { units[index] }
+
+        override func getCharacters(_ buffer: UnsafeMutablePointer<unichar>, range: NSRange) {
+            units.withUnsafeBufferPointer { source in
+                guard range.length > 0, let base = source.baseAddress else { return }
+                buffer.update(from: base + range.location, count: range.length)
+            }
+        }
     }
 
     public enum BuildError: Error, LocalizedError, Sendable {
@@ -79,13 +228,15 @@ public enum SearchMatchContextBuilder {
     }
 
     private struct Unicode61ByteToken {
-        var normalizedText: String
+        let folded: Range<Int>
+        let foldedIsNFCInert: Bool
         let start: Int
-        var end: Int
+        let end: Int
     }
 
     private final class Unicode61CallbackState {
         let cancellationCheck: () throws -> Void
+        var foldedBytes: [UInt8] = []
         var tokens: [Unicode61ByteToken] = []
         var callbackCount = 0
         var cancellationError: Error?
@@ -126,13 +277,16 @@ public enum SearchMatchContextBuilder {
                 }
             }
 
-            let bytes = UnsafeRawPointer(rawToken).assumingMemoryBound(to: UInt8.self)
+            let bytes = UnsafeBufferPointer(
+                start: UnsafeRawPointer(rawToken).assumingMemoryBound(to: UInt8.self),
+                count: Int(tokenLength)
+            )
+            let foldedStart = state.foldedBytes.count
+            state.foldedBytes.append(contentsOf: bytes)
             state.tokens.append(
                 Unicode61ByteToken(
-                    normalizedText: String(
-                        decoding: UnsafeBufferPointer(start: bytes, count: Int(tokenLength)),
-                        as: UTF8.self
-                    ),
+                    folded: foldedStart..<state.foldedBytes.count,
+                    foldedIsNFCInert: SearchMatchContextBuilder.isNFCInert(bytes),
                     start: Int(start),
                     end: Int(end)
                 )
@@ -228,123 +382,168 @@ public enum SearchMatchContextBuilder {
             sqlite3_close_v2(database)
         }
 
+        /// Tokenizes the contiguous UTF-8 text in one call and converts token byte offsets to
+        /// UTF-16 ranges in a single forward pass.
         func tokens(
             in text: String,
             flags: Int32,
             cancellationCheck: @escaping () throws -> Void
-        ) throws -> [UnicodeToken] {
+        ) throws -> UnicodeTokens {
             try cancellationCheck()
+            var contiguousText = text
+            contiguousText.makeContiguousUTF8()
+            let source = contiguousText
 
             lock.lock()
             defer { lock.unlock() }
 
-            var byteTokens: [Unicode61ByteToken] = []
-            var chunkStart = text.startIndex
-            var chunkStartByte = 0
+            let tokens = try source.utf8.withContiguousStorageIfAvailable { bytes in
+                try tokens(in: source, bytes: bytes, flags: flags, cancellationCheck: cancellationCheck)
+            }
+            guard let tokens else { throw BuildError.invalidUnicode61Range }
+            return tokens
+        }
 
-            while chunkStart < text.endIndex {
-                try cancellationCheck()
-                var chunkEnd = chunkStart
-                var characterCount = 0
-                while chunkEnd < text.endIndex,
-                      characterCount < Constants.tokenizerChunkCharacters {
-                    if characterCount % Constants.cancellationPollInterval == 0 {
-                        try cancellationCheck()
-                    }
-                    chunkEnd = text.index(after: chunkEnd)
-                    characterCount += 1
-                }
+        private func tokens(
+            in text: String,
+            bytes: UnsafeBufferPointer<UInt8>,
+            flags: Int32,
+            cancellationCheck: @escaping () throws -> Void
+        ) throws -> UnicodeTokens {
+            guard let base = bytes.baseAddress, !bytes.isEmpty else {
+                return UnicodeTokens(foldedBytes: [], tokens: [])
+            }
+            guard bytes.count <= Int(Int32.max) else { throw BuildError.contentTooLarge }
 
-                let chunk = String(text[chunkStart..<chunkEnd])
-                let chunkByteCount = chunk.utf8.count
-                guard chunkByteCount <= Int(Int32.max) else { throw BuildError.contentTooLarge }
-                let state = Unicode61CallbackState(cancellationCheck: cancellationCheck)
-                let rawState = Unmanaged.passUnretained(state).toOpaque()
-                let tokenizeCode = chunk.withCString { textPointer in
-                    tokenizer.xTokenize?(
-                        instance,
-                        rawState,
-                        flags,
-                        textPointer,
-                        Int32(chunkByteCount),
-                        Self.tokenCallback
-                    ) ?? SQLITE_ERROR
-                }
-
-                if let cancellationError = state.cancellationError {
-                    throw cancellationError
-                }
-                guard tokenizeCode == SQLITE_OK else {
-                    throw BuildError.unicode61TokenizationFailed(tokenizeCode)
-                }
-
-                for (tokenIndex, token) in state.tokens.enumerated() {
-                    let adjusted = Unicode61ByteToken(
-                        normalizedText: token.normalizedText,
-                        start: chunkStartByte + token.start,
-                        end: chunkStartByte + token.end
-                    )
-                    if tokenIndex == 0,
-                       token.start == 0,
-                       var previous = byteTokens.last,
-                       previous.end == adjusted.start {
-                        previous.normalizedText += adjusted.normalizedText
-                        previous.end = adjusted.end
-                        byteTokens[byteTokens.count - 1] = previous
-                    } else {
-                        byteTokens.append(adjusted)
-                    }
-                }
-
-                chunkStartByte += chunkByteCount
-                chunkStart = chunkEnd
+            let state = Unicode61CallbackState(cancellationCheck: cancellationCheck)
+            let rawState = Unmanaged.passUnretained(state).toOpaque()
+            let tokenizeCode = base.withMemoryRebound(to: CChar.self, capacity: bytes.count) {
+                tokenizer.xTokenize?(
+                    instance,
+                    rawState,
+                    flags,
+                    $0,
+                    Int32(bytes.count),
+                    Self.tokenCallback
+                ) ?? SQLITE_ERROR
+            }
+            if let cancellationError = state.cancellationError {
+                throw cancellationError
+            }
+            guard tokenizeCode == SQLITE_OK else {
+                throw BuildError.unicode61TokenizationFailed(tokenizeCode)
             }
 
             try cancellationCheck()
-            let utf8 = text.utf8
-            var cursor = utf8.startIndex
-            var cursorOffset = 0
+            var cursorByte = 0
+            var cursorUTF16 = 0
             var result: [UnicodeToken] = []
-            result.reserveCapacity(byteTokens.count)
+            result.reserveCapacity(state.tokens.count)
 
-            for (index, token) in byteTokens.enumerated() {
+            for (index, token) in state.tokens.enumerated() {
                 if index % Constants.cancellationPollInterval == 0 {
                     try cancellationCheck()
                 }
-                guard token.start >= cursorOffset,
-                      let startUTF8 = utf8.index(
-                        cursor,
-                        offsetBy: token.start - cursorOffset,
-                        limitedBy: utf8.endIndex
-                      ),
-                      let endUTF8 = utf8.index(
-                        startUTF8,
-                        offsetBy: token.end - token.start,
-                        limitedBy: utf8.endIndex
-                      ),
-                      let start = String.Index(startUTF8, within: text),
-                      let end = String.Index(endUTF8, within: text) else {
+                guard token.start >= cursorByte,
+                      token.end >= token.start,
+                      token.end <= bytes.count,
+                      Self.isCharacterBoundary(token.start, in: text, bytes: bytes),
+                      Self.isCharacterBoundary(token.end, in: text, bytes: bytes) else {
                     throw BuildError.invalidUnicode61Range
                 }
 
+                let startUTF16 = cursorUTF16
+                    + SearchMatchContextBuilder.utf16Count(bytes, from: cursorByte, to: token.start)
+                let lengthUTF16 = SearchMatchContextBuilder.utf16Count(bytes, from: token.start, to: token.end)
                 result.append(
                     UnicodeToken(
-                        normalizedText: token.normalizedText,
-                        range: NSRange(start..<end, in: text)
+                        folded: token.folded,
+                        foldedIsNFCInert: token.foldedIsNFCInert,
+                        range: NSRange(location: startUTF16, length: lengthUTF16)
                     )
                 )
-                cursor = endUTF8
-                cursorOffset = token.end
+                cursorByte = token.end
+                cursorUTF16 = startUTF16 + lengthUTF16
             }
-            return result
+            return UnicodeTokens(foldedBytes: state.foldedBytes, tokens: result)
         }
+
+        /// Whether `String.Index(_:within:)` accepts the UTF-8 offset. Scalar pairs that break in
+        /// every grapheme-breaking state skip the standard library's state machine.
+        private static func isCharacterBoundary(
+            _ offset: Int,
+            in text: String,
+            bytes: UnsafeBufferPointer<UInt8>
+        ) -> Bool {
+            if offset == 0 || offset == bytes.count { return true }
+            let followingByte = bytes[offset]
+            let precedingByte = bytes[offset - 1]
+            if followingByte < 0x80, precedingByte < 0x80 {
+                if !(precedingByte == 0x0D && followingByte == 0x0A) { return true }
+            } else if let following = scalarValue(startingAt: offset, in: bytes),
+               let preceding = scalarValue(endingAt: offset, in: bytes),
+               alwaysBreaksAround(preceding),
+               alwaysBreaksAround(following) {
+                return true
+            }
+            let index = text.utf8.index(text.utf8.startIndex, offsetBy: offset)
+            return String.Index(index, within: text) != nil
+        }
+
+        /// Scalars without Extend, SpacingMark, Prepend, ZWJ, regional-indicator, Hangul jamo,
+        /// Indic consonant, or emoji properties: two of them always form a grapheme break,
+        /// except CR LF.
+        private static func alwaysBreaksAround(_ scalar: UInt32) -> Bool {
+            switch scalar {
+            case 0x0000...0x02FF,
+                 0x2010...0x2029,
+                 0x3000...0x3029,
+                 0x3041...0x3096,
+                 0x30A1...0x30FA,
+                 0x3400...0x9FFF,
+                 0xAC00...0xD7A3,
+                 0xFF01...0xFF9D:
+                return true
+            default:
+                return false
+            }
+        }
+
+        /// The scalar whose UTF-8 encoding starts at `offset`, or nil inside a scalar.
+        private static func scalarValue(startingAt offset: Int, in bytes: UnsafeBufferPointer<UInt8>) -> UInt32? {
+            let lead = UInt32(bytes[offset])
+            switch lead {
+            case 0..<0x80:
+                return lead
+            case 0x80..<0xC0:
+                return nil
+            case 0xC0..<0xE0:
+                return (lead & 0x1F) << 6 | UInt32(bytes[offset + 1] & 0x3F)
+            case 0xE0..<0xF0:
+                return (lead & 0x0F) << 12 | UInt32(bytes[offset + 1] & 0x3F) << 6
+                    | UInt32(bytes[offset + 2] & 0x3F)
+            default:
+                return (lead & 0x07) << 18 | UInt32(bytes[offset + 1] & 0x3F) << 12
+                    | UInt32(bytes[offset + 2] & 0x3F) << 6 | UInt32(bytes[offset + 3] & 0x3F)
+            }
+        }
+
+        /// The scalar whose UTF-8 encoding ends at `offset`, which must start a scalar.
+        private static func scalarValue(endingAt offset: Int, in bytes: UnsafeBufferPointer<UInt8>) -> UInt32? {
+            var start = offset - 1
+            while start > 0, bytes[start] & 0xC0 == 0x80 {
+                start -= 1
+            }
+            return scalarValue(startingAt: start, in: bytes)
+        }
+
     }
 
     public struct Matcher {
         fileprivate let mode: SearchMode
         fileprivate let coverage: SearchCoverage
         fileprivate let normalizedQuery: String
-        fileprivate let exactPhrases: [[String]]
+        fileprivate let exactPhrases: [[PhraseTerm]]
         fileprivate let fuzzyTerm: FuzzyTerm?
         fileprivate let fuzzyPlusTerms: [FuzzyTerm]
         fileprivate let regex: NSRegularExpression?
@@ -398,7 +597,7 @@ public enum SearchMatchContextBuilder {
         let needsUnicode61 = (request.mode == .exact && normalizedQuery.count > 2)
             || coverage.isStagedRefine
         let unicode61Tokenizer: Unicode61Tokenizer?
-        let exactPhrases: [[String]]
+        let exactPhrases: [[PhraseTerm]]
         if needsUnicode61 {
             let tokenizer = try Unicode61Tokenizer()
             unicode61Tokenizer = tokenizer
@@ -513,7 +712,7 @@ public enum SearchMatchContextBuilder {
 
     private static func exactMatches(
         query: String,
-        phrases: [[String]],
+        phrases: [[PhraseTerm]],
         plainText: String,
         note: String?,
         tokenizer: Unicode61Tokenizer?,
@@ -553,7 +752,7 @@ public enum SearchMatchContextBuilder {
 
     private static func fuzzyMatches(
         term: FuzzyTerm,
-        prefilterPhrases: [[String]],
+        prefilterPhrases: [[PhraseTerm]],
         plainText: String,
         note: String?,
         coverage: SearchCoverage,
@@ -591,7 +790,7 @@ public enum SearchMatchContextBuilder {
 
     private static func fuzzyPlusMatches(
         terms: [FuzzyTerm],
-        prefilterPhrases: [[String]],
+        prefilterPhrases: [[PhraseTerm]],
         plainText: String,
         note: String?,
         coverage: SearchCoverage,
@@ -655,8 +854,10 @@ public enum SearchMatchContextBuilder {
     ) throws -> MatchSet {
         try cancellationCheck()
         var result = MatchSet()
-        for (source, text) in searchableSources(plainText: plainText, note: note) {
+        for evidenceSource in searchableSources(plainText: plainText, note: note) {
             try cancellationCheck()
+            let source = evidenceSource.source
+            let text = evidenceSource.text
             let nsText = text as NSString
             let fullRange = NSRange(text.startIndex..., in: text)
             var sourceOccurrenceCount = 0
@@ -696,7 +897,7 @@ public enum SearchMatchContextBuilder {
 
     private static func literalMatches(
         _ needle: String,
-        sources: [(SearchMatchSource, String)],
+        sources: [EvidenceSource],
         termIndex: Int,
         cancellationCheck: @escaping () throws -> Void
     ) throws -> MatchSet {
@@ -704,9 +905,10 @@ public enum SearchMatchContextBuilder {
         let options: NSString.CompareOptions = [.caseInsensitive]
 
         var result = MatchSet()
-        for (source, text) in sources {
+        for evidenceSource in sources {
             try cancellationCheck()
-            let nsText = text as NSString
+            let source = evidenceSource.source
+            let nsText = evidenceSource.utf16Text
             let needleUTF16Count = max(1, (needle as NSString).length)
             let overlap = max(64, min(Int.max / 4, needleUTF16Count) * 4)
             var chunkStart = 0
@@ -814,22 +1016,23 @@ public enum SearchMatchContextBuilder {
         _ query: String,
         tokenizer: Unicode61Tokenizer,
         cancellationCheck: @escaping () throws -> Void
-    ) throws -> [[String]] {
+    ) throws -> [[PhraseTerm]] {
         let normalized = query
             .replacingOccurrences(of: "*", with: "")
             .replacingOccurrences(of: "-", with: " ")
 
         var seen: Set<[String]> = []
-        var phrases: [[String]] = []
+        var phrases: [[PhraseTerm]] = []
         for part in normalized.split(whereSeparator: \.isWhitespace) {
             try cancellationCheck()
-            let phrase = try tokenizer.tokens(
+            let tokenized = try tokenizer.tokens(
                 in: String(part),
                 flags: FTS5_TOKENIZE_QUERY,
                 cancellationCheck: cancellationCheck
-            ).map(\.normalizedText)
+            )
+            let phrase = tokenized.tokens.map(tokenized.foldedText)
             guard !phrase.isEmpty, seen.insert(phrase).inserted else { continue }
-            phrases.append(phrase)
+            phrases.append(phrase.map(PhraseTerm.init))
         }
         return phrases
     }
@@ -845,7 +1048,7 @@ public enum SearchMatchContextBuilder {
 
     private static func requiredLiteralMatches(
         terms: [String],
-        sources: [(SearchMatchSource, String)],
+        sources: [EvidenceSource],
         cancellationCheck: @escaping () throws -> Void
     ) throws -> MatchSet {
         guard !terms.isEmpty else { return MatchSet() }
@@ -865,21 +1068,21 @@ public enum SearchMatchContextBuilder {
     }
 
     private static func ftsPhraseMatches(
-        phrases: [[String]],
-        sources: [(SearchMatchSource, String)],
+        phrases: [[PhraseTerm]],
+        sources: [EvidenceSource],
         tokenizer: Unicode61Tokenizer,
         cancellationCheck: @escaping () throws -> Void
     ) throws -> MatchSet {
         guard !phrases.isEmpty else { return MatchSet() }
-        var tokenizedSources: [(source: SearchMatchSource, tokens: [UnicodeToken])] = []
+        var tokenizedSources: [(source: SearchMatchSource, tokens: UnicodeTokens)] = []
         tokenizedSources.reserveCapacity(sources.count)
-        for (source, text) in sources {
+        for evidenceSource in sources {
             try cancellationCheck()
             tokenizedSources.append(
                 (
-                    source: source,
+                    source: evidenceSource.source,
                     tokens: try tokenizer.tokens(
-                        in: text,
+                        in: evidenceSource.text,
                         flags: FTS5_TOKENIZE_DOCUMENT,
                         cancellationCheck: cancellationCheck
                     )
@@ -893,15 +1096,16 @@ public enum SearchMatchContextBuilder {
             var phraseWasFound = false
             for source in tokenizedSources {
                 var sourceOccurrenceCount = 0
-                guard source.tokens.count >= phrase.count else { continue }
+                let tokens = source.tokens.tokens
+                guard tokens.count >= phrase.count else { continue }
 
-                for start in 0...(source.tokens.count - phrase.count) {
+                for start in 0...(tokens.count - phrase.count) {
                     if start % Constants.cancellationPollInterval == 0 {
                         try cancellationCheck()
                     }
                     var matchesPhrase = true
                     for offset in phrase.indices where
-                        source.tokens[start + offset].normalizedText != phrase[offset] {
+                        !source.tokens.token(at: start + offset, equals: phrase[offset]) {
                         matchesPhrase = false
                         break
                     }
@@ -916,7 +1120,7 @@ public enum SearchMatchContextBuilder {
                         result.matches.append(
                             RawMatch(
                                 source: source.source,
-                                range: source.tokens[start + offset].range,
+                                range: tokens[start + offset].range,
                                 termIndex: termIndex
                             )
                         )
@@ -934,10 +1138,10 @@ public enum SearchMatchContextBuilder {
     private static func searchableSources(
         plainText: String,
         note: String?
-    ) -> [(SearchMatchSource, String)] {
-        var sources: [(SearchMatchSource, String)] = [(.content, plainText)]
+    ) -> [EvidenceSource] {
+        var sources = [EvidenceSource(source: .content, text: plainText)]
         if let note, !note.isEmpty {
-            sources.append((.note, note))
+            sources.append(EvidenceSource(source: .note, text: note))
         }
         return sources
     }
@@ -1046,14 +1250,14 @@ public enum SearchMatchContextBuilder {
         }
 
         guard !sourceText.isEmpty,
-              let firstRange = Range(firstMatch.range, in: sourceText) else { return nil }
+              let firstRange = characterRange(firstMatch.range, in: sourceText) else { return nil }
 
         let lastMatch = matches.last ?? firstMatch
         let unionNSRange = NSRange(
             location: firstMatch.range.location,
             length: max(0, NSMaxRange(lastMatch.range) - firstMatch.range.location)
         )
-        let unionRange = Range(unionNSRange, in: sourceText)
+        let unionRange = characterRange(unionNSRange, in: sourceText)
         let targetRange: Range<String.Index>
         if let unionRange,
            sourceText.distance(from: unionRange.lowerBound, to: unionRange.upperBound)
@@ -1083,10 +1287,14 @@ public enum SearchMatchContextBuilder {
             limitedBy: sourceText.endIndex
         ) ?? sourceText.endIndex
 
+        // targetRange starts at firstMatch.range.location in UTF-16.
+        let leadingUTF16 = sourceText[sliceStart..<targetRange.lowerBound].unicodeScalars
+            .reduce(0) { $0 + UTF16.width($1) }
         let fragment = normalizedFragment(
             source: source,
             sourceText: sourceText,
             slice: sliceStart..<sliceEnd,
+            sliceUTF16Offset: firstMatch.range.location - leadingUTF16,
             matches: matches,
             hasLeadingOmission: sliceStart != sourceText.startIndex,
             hasTrailingOmission: sliceEnd != sourceText.endIndex
@@ -1098,10 +1306,63 @@ public enum SearchMatchContextBuilder {
         return fragment
     }
 
+    /// UTF-16 units of the scalars whose lead bytes lie in `bytes[start..<end]`.
+    fileprivate static func utf16Count(_ bytes: UnsafeBufferPointer<UInt8>, from start: Int, to end: Int) -> Int {
+        var count = 0
+        for index in start..<end {
+            let byte = bytes[index]
+            count += (byte & 0xC0 != 0x80 ? 1 : 0) + (byte >= 0xF0 ? 1 : 0)
+        }
+        return count
+    }
+
+    /// `Range(range, in: text)`. Bounds on Character boundaries come from one UTF-8 scan up to
+    /// the range's end, so a match in a large non-ASCII text does not make the String build
+    /// UTF-16 breadcrumbs for all of it. Other bounds, whose handling varies by OS release, go
+    /// to Foundation.
+    private static func characterRange(_ range: NSRange, in text: String) -> Range<String.Index>? {
+        guard range.location != NSNotFound else { return nil }
+        let lowerUTF16 = range.location
+        let upperUTF16 = NSMaxRange(range)
+        let byteBounds = text.utf8.withContiguousStorageIfAvailable { bytes -> (Int, Int)? in
+            var units = 0
+            var index = 0
+            // The UTF-8 offset at `target` UTF-16 units; nil inside a surrogate pair or past the end.
+            func advance(toUTF16 target: Int) -> Int? {
+                while index + 64 <= bytes.count {
+                    let blockUnits = utf16Count(bytes, from: index, to: index + 64)
+                    guard units + blockUnits < target else { break }
+                    units += blockUnits
+                    index += 64
+                }
+                while index < bytes.count, bytes[index] & 0xC0 == 0x80 {
+                    index += 1
+                }
+                while units < target, index < bytes.count {
+                    let lead = bytes[index]
+                    units += lead >= 0xF0 ? 2 : 1
+                    index += lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4
+                }
+                return units == target ? index : nil
+            }
+            guard let lower = advance(toUTF16: lowerUTF16),
+                  let upper = advance(toUTF16: upperUTF16) else { return nil }
+            return (lower, upper)
+        }
+        let utf8 = text.utf8
+        if let (lower, upper) = byteBounds ?? nil,
+           let lowerBound = String.Index(utf8.index(utf8.startIndex, offsetBy: lower), within: text),
+           let upperBound = String.Index(utf8.index(utf8.startIndex, offsetBy: upper), within: text) {
+            return lowerBound..<upperBound
+        }
+        return Range(range, in: text)
+    }
+
     private static func normalizedFragment(
         source: SearchMatchSource,
         sourceText: String,
         slice: Range<String.Index>,
+        sliceUTF16Offset: Int,
         matches: [RawMatch],
         hasLeadingOmission: Bool,
         hasTrailingOmission: Bool
@@ -1111,7 +1372,7 @@ public enum SearchMatchContextBuilder {
         var highlightedRanges: [SearchMatchTextRange] = []
         var activeHighlightStart: Int?
         var previousWasWhitespace = false
-        var utf16Location = slice.lowerBound.utf16Offset(in: sourceText)
+        var utf16Location = sliceUTF16Offset
 
         func closeHighlight() {
             guard let start = activeHighlightStart else { return }
