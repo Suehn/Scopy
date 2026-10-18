@@ -1145,6 +1145,56 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertEqual(settings.diskSizeBytes, 4_096)
     }
 
+    /// A hotkey reopen after the panel was closed past the stale interval starts over, with or
+    /// without a query: the list is its first page again (every pinned row and the first unpinned
+    /// page, continuing after that page's last row), the list is asked to scroll to its top, and
+    /// paging down still reaches the oldest row in order.
+    func testStaleReopenStartsOverAtTheFirstPageAndPagingStillReachesTheOldestRow() async {
+        var items = makeItems(count: Self.firstTwoPages + HistoryViewModel.loadMorePageSize + 20)
+        items[5] = items[5].withPinned(true)
+        let service = HistoryViewModelRegressionService(items: items)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        await viewModel.loadMore()
+        await viewModel.loadMore()
+        XCTAssertEqual(viewModel.loadedCount, 1 + Self.firstTwoPages + HistoryViewModel.loadMorePageSize)
+
+        let firstPage = RecentHistoryPage(slicing: items, limit: HistoryViewModel.initialPageSize, after: nil)
+        let firstPageIDs = (firstPage.pinnedItems + firstPage.items).map(\.id)
+        await reopenAfterTheStaleInterval(viewModel)
+        XCTAssertEqual(viewModel.loadedCount, firstPageIDs.count)
+        XCTAssertTrue(viewModel.items.map(\.id) == firstPageIDs, "Every pinned row and the first unpinned page")
+        XCTAssertTrue(viewModel.canLoadMore)
+
+        while viewModel.canLoadMore { await viewModel.loadMore() }
+        let allIDs = (items.filter(\.isPinned) + items.filter { !$0.isPinned }).map(\.id)
+        XCTAssertTrue(viewModel.items.map(\.id) == allIDs, "Paging continues after the first page to the oldest row")
+
+        viewModel.searchQuery = "item 1"
+        viewModel.search()
+        await waitForSearchToFinish(in: viewModel)
+        await reopenAfterTheStaleInterval(viewModel)
+        XCTAssertEqual(viewModel.searchQuery, "")
+        XCTAssertTrue(viewModel.items.map(\.id) == firstPageIDs, "The cleared query shows the first page")
+    }
+
+    /// Runs the stale-reopen reset and waits for its first page and its scroll-to-top request.
+    private func reopenAfterTheStaleInterval(_ viewModel: HistoryViewModel) async {
+        let reloaded = expectation(description: "The first page replaced the list")
+        withObservationTracking {
+            _ = viewModel.projectionGeneration
+        } onChange: {
+            reloaded.fulfill()
+        }
+        let scrolled = expectation(description: "The list was asked to scroll to its top")
+        viewModel.scrollListToTop = { scrolled.fulfill() }
+        viewModel.resetForStalePanelReopen()
+        await fulfillment(of: [reloaded, scrolled], timeout: 1.0)
+        viewModel.scrollListToTop = nil
+    }
+
     private func waitForSearchToFinish(in viewModel: HistoryViewModel) async {
         guard viewModel.isLoading else { return }
         let finished = expectation(description: "Search finished publishing and recording metrics")

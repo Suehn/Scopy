@@ -40,6 +40,10 @@ struct HistoryListView: View {
     @State private var presentation = HoverPreviewPresentation()
     @State private var programmaticScrollGate = ListProgrammaticScrollGate()
 
+    /// The section header rows, the list's top for `HistoryViewModel.scrollListToTop`.
+    private static let pinnedHeaderID = "History.PinnedHeader"
+    private static let recentHeaderID = "History.RecentHeader"
+
     private static let isUITesting: Bool = ProcessInfo.processInfo.arguments.contains("--uitesting")
     private static let isScrollProfile: Bool = ProcessInfo.processInfo.environment["SCOPY_SCROLL_PROFILE"] == "1"
     private static let profileAccessibility: Bool = ProcessInfo.processInfo.environment["SCOPY_PROFILE_ACCESSIBILITY"] == "1"
@@ -73,6 +77,7 @@ struct HistoryListView: View {
                         isCollapsed: historyViewModel.isPinnedCollapsed,
                         onToggle: { historyViewModel.isPinnedCollapsed.toggle() }
                     )
+                    .id(Self.pinnedHeaderID)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -88,6 +93,7 @@ struct HistoryListView: View {
                 // Recent Section Header (hidden while the empty overlay stands in for the list)
                 if !pinned.isEmpty || !unpinned.isEmpty {
                     RecentSectionHeader(count: unpinned.count)
+                    .id(Self.recentHeaderID)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -147,9 +153,17 @@ struct HistoryListView: View {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }
+                historyViewModel.scrollListToTop = {
+                    programmaticScrollGate.beginProgrammaticScroll()
+                    proxy.scrollTo(
+                        historyViewModel.pinnedItems.isEmpty ? Self.recentHeaderID : Self.pinnedHeaderID,
+                        anchor: .top
+                    )
+                }
             }
             .onDisappear {
                 historyViewModel.rowLiveState.onSelectionChanged = nil
+                historyViewModel.scrollListToTop = nil
             }
         }
         .overlay { HistoryListEmptyOverlay(openSettings: openSettings) }

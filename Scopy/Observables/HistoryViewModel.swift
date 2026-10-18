@@ -335,6 +335,8 @@ final class HistoryViewModel {
     @ObservationIgnored private var timing: Timing = .production
 
     @ObservationIgnored var closePanelHandler: (() -> Void)?
+    /// Scrolls the list to its first row; set by the list while it is mounted.
+    @ObservationIgnored var scrollListToTop: (() -> Void)?
     @ObservationIgnored var pasteAfterCopyHandler: (() -> Void)?
 
     /// Message for an action that failed where the user expected it to work. A failed copy leaves
@@ -1555,12 +1557,17 @@ final class HistoryViewModel {
         NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
-    func clearSearchForPanelReopen() {
+    /// A hotkey reopen after the panel was closed longer than
+    /// `PanelReopenSearchResetPolicy.staleIntervalSeconds` starts over, with or without a query: no
+    /// selection or query, the list's first page (the rows paged in before are dropped), scrolled
+    /// to the top.
+    func resetForStalePanelReopen() {
         selectedID = nil
         lastSelectionSource = .programmatic
-        guard !searchQuery.isEmpty else { return }
         searchQuery = ""
         search()
+        // The caller opens the panel next; scroll once it is on screen.
+        DispatchQueue.main.async { [weak self] in self?.scrollListToTop?() }
     }
 
     func togglePin(_ item: ClipboardItemDTO) async {
