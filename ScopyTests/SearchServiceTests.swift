@@ -358,7 +358,7 @@ final class SearchServiceTests: XCTestCase {
 
         let result = try await search.search(
             request: SearchRequest(
-                query: "cafe",
+                query: "fe",
                 mode: .fuzzy,
                 forceFullFuzzy: true,
                 limit: 50,

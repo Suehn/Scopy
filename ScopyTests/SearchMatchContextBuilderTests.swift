@@ -187,6 +187,64 @@ final class SearchMatchContextBuilderTests: XCTestCase {
         XCTAssertEqual(highlightedText(context.fragments[0]).map { $0.lowercased() }, ["c", "m", "d"])
     }
 
+    func testFuzzyEvidenceHighlightsTheContiguousOccurrenceThatOutscoresGreedy() throws {
+        let cjk = try XCTUnwrap(
+            makeContext(
+                query: "原文错了嘛",
+                mode: .fuzzyPlus,
+                text: "也就是你最开始回答的推导和原文有冲突？是原文错了嘛"
+            )
+        )
+        XCTAssertEqual(cjk.fragments.flatMap(highlightedText), ["原文错了嘛"])
+
+        let ascii = try XCTUnwrap(makeContext(query: "abc", mode: .fuzzy, text: "ab_abc"))
+        XCTAssertEqual(ascii.fragments.flatMap(highlightedText), ["abc"])
+    }
+
+    func testASCIIFuzzyEvidenceMatchesInsideADecomposedCharacterLikeTheScore() throws {
+        let context = try XCTUnwrap(
+            makeContext(query: "cafe", mode: .fuzzy, text: "/Users/example/Cafe\u{301}.txt")
+        )
+
+        XCTAssertEqual(context.fragments.flatMap(highlightedText), ["Cafe\u{301}"])
+    }
+
+    /// Every text of up to nine characters over two letters, against every three- and
+    /// four-character query, on the character path (CJK) and the UTF-16 path (ASCII): evidence
+    /// highlights the greedy match, or the contiguous occurrence that ends it.
+    func testFuzzyEvidenceMatchesItsDefinitionExhaustively() throws {
+        for alphabet in [Array("原文"), Array("ab")] {
+            func strings(length: Int) -> [[Character]] {
+                guard length > 0 else { return [[]] }
+                return strings(length: length - 1).flatMap { prefix in alphabet.map { prefix + [$0] } }
+            }
+            let texts = (1...9).flatMap(strings(length:))
+            for query in [3, 4].flatMap(strings(length:)) {
+                let matcher = try SearchMatchContextBuilder.prepare(
+                    request: SearchRequest(query: String(query), mode: .fuzzy),
+                    coverage: .complete
+                )
+                for text in texts {
+                    let context = try matcher.makeContext(plainText: String(text), note: nil)
+                    XCTAssertEqual(
+                        context?.fragments.flatMap(\.highlightedRanges),
+                        expectedHighlights(text: text, query: query),
+                        "\(String(query)) in \(String(text))"
+                    )
+                }
+            }
+        }
+    }
+
+    func testFuzzyEvidenceFindsTheContiguousOccurrenceInTheNote() throws {
+        let context = try XCTUnwrap(
+            makeContext(query: "数学题", mode: .fuzzyPlus, text: "数", note: "x数学题")
+        )
+
+        XCTAssertEqual(context.fragments.map(\.source), [.note])
+        XCTAssertEqual(context.fragments.flatMap(highlightedText), ["数学题"])
+    }
+
     func testShortFuzzyEvidenceUsesContiguousBackendSemantics() throws {
         let context = try XCTUnwrap(
             makeContext(query: "ab", mode: .fuzzy, text: "a then b, followed by ab")
@@ -404,6 +462,28 @@ final class SearchMatchContextBuilderTests: XCTestCase {
             request: SearchRequest(query: query, mode: mode),
             coverage: coverage
         )
+    }
+
+    private func expectedHighlights(text: [Character], query: [Character]) -> [SearchMatchTextRange]? {
+        var positions: [Int] = []
+        for (position, character) in text.enumerated()
+        where positions.count < query.count && character == query[positions.count] {
+            positions.append(position)
+        }
+        guard let last = positions.last, positions.count == query.count else { return nil }
+        let start = last - (query.count - 1)
+        if Array(text[start...last]) == query {
+            positions = Array(start...last)
+        }
+        var ranges: [SearchMatchTextRange] = []
+        for position in positions {
+            if let previous = ranges.last, previous.offset + previous.length == position {
+                ranges[ranges.count - 1] = SearchMatchTextRange(offset: previous.offset, length: previous.length + 1)
+            } else {
+                ranges.append(SearchMatchTextRange(offset: position, length: 1))
+            }
+        }
+        return ranges
     }
 
     private func highlightedText(_ fragment: SearchMatchFragment) -> [String] {
