@@ -656,8 +656,8 @@ final class SearchSQLGoldenTests: XCTestCase {
     short fuzzy recent "数" type=text => [11,8,16] total=3 more=0 | [8,16] total=3 more=0
     short fuzzy recent "数" types=rtf,html => [10,9] total=2 more=0 | [9] total=2 more=0
     short fuzzy recent "数" app=com.b type=image types=text,rtf => [11,9] total=2 more=0 | [9] total=2 more=0
-    full fuzzy relevance "alpha" - => [4,2,1,3,7,13,14,6] total=8 more=0 | [2,1] total=8 more=1
-    full fuzzy relevance "alpha" app=com.a => [4,1,7,13,14] total=5 more=0 | [1,7] total=5 more=1
+    full fuzzy relevance "alpha" - => [4,2,1,3,13,14,6,7] total=8 more=0 | [2,1] total=8 more=1
+    full fuzzy relevance "alpha" app=com.a => [4,1,13,14,7] total=5 more=0 | [1,13] total=5 more=1
     full fuzzy relevance "alpha" type=text => [4,1,13] total=3 more=0 | [1,13] total=3 more=0
     full fuzzy relevance "alpha" types=rtf,html => [2,3,14] total=3 more=0 | [3,14] total=3 more=0
     full fuzzy relevance "alpha" app=com.b type=image types=text,rtf => [2] total=1 more=0 | [] total=1 more=0

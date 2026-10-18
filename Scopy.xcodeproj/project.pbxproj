@@ -337,6 +337,7 @@
 		7990F7AD71766B8A192E606C /* KaTeX_Typewriter-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = BD450DDC435BD725CD4310FD /* KaTeX_Typewriter-Regular.woff2 */; };
 		79C683411D52F91709D15AE9 /* HistoryItemPresentationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 162CA2AC19540746D21C8DDB /* HistoryItemPresentationCache.swift */; };
 		79CB2BC0E5FFBC5C518DBA39 /* SettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ACB57C715F93F048BD919DC /* SettingsComponents.swift */; };
+		7A95ED26B4B0A37910DFA563 /* FuzzySubsequenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F2182AF647DC59651AB0EB7 /* FuzzySubsequenceTests.swift */; };
 		7B0D56F48C43D79215994E42 /* HistoryItemFileThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 731B070DC304C5CC7CDC7C75 /* HistoryItemFileThumbnailView.swift */; };
 		7BAD31599DE16D32F3FFF800 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EE4401FFF4C04C3F4498B26 /* libsqlite3.tbd */; };
 		7BE87903E229043476A6967B /* KaTeX_Caligraphic-Bold.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = EFFB5A8F8CB41B987173626B /* KaTeX_Caligraphic-Bold.woff2 */; };
@@ -710,6 +711,7 @@
 		FE1B7934B9FC6C5F1123E8F4 /* HistoryRowThumbnailLifecycleScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5AC24893A200F18B7ADA495 /* HistoryRowThumbnailLifecycleScheduler.swift */; };
 		FE96B78665F159342116C6D5 /* ReviewFix24Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09D06477D29F2066855D402 /* ReviewFix24Tests.swift */; };
 		FF12E7A643182C979006E77F /* ClipboardServiceContentFilteringIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D762743BEF2D1B59E4E9808 /* ClipboardServiceContentFilteringIntegrationTests.swift */; };
+		FF4B350F0D7812ED70E3DC09 /* FuzzySubsequenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F2182AF647DC59651AB0EB7 /* FuzzySubsequenceTests.swift */; };
 		FFF482F6A9A7DD14B0698AC7 /* ScopyUISupport in Frameworks */ = {isa = PBXBuildFile; productRef = A8C4FDEA64E79129FEBF1CBE /* ScopyUISupport */; };
 /* End PBXBuildFile section */
 
@@ -764,6 +766,7 @@
 		094F7E96DC5DC3FD8002CD7E /* ScopyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScopyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C442EB6B998A8961A987D12 /* KaTeX_Main-Regular.woff2 */ = {isa = PBXFileReference; path = "KaTeX_Main-Regular.woff2"; sourceTree = "<group>"; };
 		0E5BC3C78931E99A757A8DCD /* HistoryProfileDatasetFingerprintTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryProfileDatasetFingerprintTests.swift; sourceTree = "<group>"; };
+		0F2182AF647DC59651AB0EB7 /* FuzzySubsequenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuzzySubsequenceTests.swift; sourceTree = "<group>"; };
 		0F5415719DC8F8F02BD50CDE /* weather-sun-shower-light.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "weather-sun-shower-light.png"; sourceTree = "<group>"; };
 		0F77CBE035B9D88E9E868592 /* HistoryItemTextPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItemTextPreviewView.swift; sourceTree = "<group>"; };
 		0FAE180C180AC1677449E237 /* PreviewControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewControls.swift; sourceTree = "<group>"; };
@@ -1414,6 +1417,7 @@
 				E4D1554C58F3E1CBECB5974C /* FullIndexRankerGoldenTests.swift */,
 				F3D590E28618E8B08B464342 /* FullIndexTombstoneUpsertStaleTests.swift */,
 				A05AED6288A371F2733E57FA /* FullIndexWarmupContinuityTests.swift */,
+				0F2182AF647DC59651AB0EB7 /* FuzzySubsequenceTests.swift */,
 				E6C6716450CA8DB3E379A58D /* HistoryContentRevisionRegistryTests.swift */,
 				B07691C802480ACD52B76823 /* HistoryHoverPreviewPipelineTests.swift */,
 				4F69EDE05A9181A2C8FE7EE2 /* HistoryItemInteractionStateTests.swift */,
@@ -2230,6 +2234,7 @@
 				A5AD318F0A977D70BADDF9BC /* FullIndexRankerGoldenTests.swift in Sources */,
 				D355A252516F85A8BC9B367B /* FullIndexTombstoneUpsertStaleTests.swift in Sources */,
 				77D1BEA52106ED37AA717299 /* FullIndexWarmupContinuityTests.swift in Sources */,
+				FF4B350F0D7812ED70E3DC09 /* FuzzySubsequenceTests.swift in Sources */,
 				67035ED2045AD9BFF208D12C /* GeneralSettingsPage.swift in Sources */,
 				542FFE8F4C4D397F7079AB5B /* HeaderView.swift in Sources */,
 				C6F729F9D3F8BFCB8388F808 /* HistoryContentRevisionRegistryTests.swift in Sources */,
@@ -2435,6 +2440,7 @@
 				7006F4F9AB3677BFE8642BEB /* FullIndexRankerGoldenTests.swift in Sources */,
 				6D6E20B6FCA9F435D3DA7825 /* FullIndexTombstoneUpsertStaleTests.swift in Sources */,
 				2738ED157960DDE5700901D9 /* FullIndexWarmupContinuityTests.swift in Sources */,
+				7A95ED26B4B0A37910DFA563 /* FuzzySubsequenceTests.swift in Sources */,
 				6B9C5FE2F55120A7F883D39C /* GeneralSettingsPage.swift in Sources */,
 				401BCD4DE9684844FEFE7136 /* HeaderView.swift in Sources */,
 				E861E9E9003131605A947F27 /* HistoryContentRevisionRegistryTests.swift in Sources */,

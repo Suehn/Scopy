@@ -5,17 +5,18 @@ import Foundation
 /// Score model: a match earns 10 per matched character minus the span between the first and
 /// last match minus the gap penalty (characters skipped before each match), so contiguous and
 /// early matches rank higher. Queries of one or two characters, and fuzzy+ ASCII words of three
-/// or more characters, match as substrings; everything else matches as a subsequence.
+/// or more characters, match as substrings; everything else matches as a subsequence
+/// (`FuzzySubsequence`).
 enum FuzzyMatcher {
     struct PreparedQuery {
         let lower: String
-        let isASCII: Bool
-        let characterCount: Int
         let utf16Count: Int
         let safeFastUTF16: Bool
         let utf16Units: [UInt16]?
         /// A one- or two-character needle's byte-level search, with the same rule as the String one.
         let substringMatcher: LoweredTextMatcher?
+        /// A query of three or more characters.
+        let subsequence: FuzzySubsequence?
     }
 
     /// One compiled query for either fuzzy mode; `score(textLower:)` is the single scoring rule
@@ -78,136 +79,52 @@ enum FuzzyMatcher {
     }
 
     static func prepare(queryLower: String) -> PreparedQuery {
-        let isASCII = queryLower.canBeConverted(to: .ascii)
-        let characterCount = queryLower.count
-        if characterCount <= 2 {
+        if queryLower.count <= 2 {
+            let isASCII = queryLower.canBeConverted(to: .ascii)
             let safeFastUTF16 = isASCII || isSafeForFastUTF16Search(queryLower)
             if safeFastUTF16 {
                 let units = Array(queryLower.utf16)
                 return PreparedQuery(
                     lower: queryLower,
-                    isASCII: isASCII,
-                    characterCount: characterCount,
                     utf16Count: units.count,
                     safeFastUTF16: true,
                     utf16Units: units,
                     substringMatcher: units.count <= 4
                         ? LoweredTextMatcher(codeUnitsOf: queryLower)
-                        : LoweredTextMatcher(charactersOf: queryLower)
+                        : LoweredTextMatcher(charactersOf: queryLower),
+                    subsequence: nil
                 )
             }
 
             return PreparedQuery(
                 lower: queryLower,
-                isASCII: isASCII,
-                characterCount: characterCount,
                 utf16Count: queryLower.utf16.count,
                 safeFastUTF16: false,
                 utf16Units: nil,
-                substringMatcher: LoweredTextMatcher(charactersOf: queryLower)
-            )
-        }
-
-        if isASCII {
-            let units = Array(queryLower.utf16)
-            return PreparedQuery(
-                lower: queryLower,
-                isASCII: true,
-                characterCount: characterCount,
-                utf16Count: units.count,
-                safeFastUTF16: true,
-                utf16Units: units,
-                substringMatcher: nil
+                substringMatcher: LoweredTextMatcher(charactersOf: queryLower),
+                subsequence: nil
             )
         }
 
         return PreparedQuery(
             lower: queryLower,
-            isASCII: false,
-            characterCount: characterCount,
             utf16Count: queryLower.utf16.count,
             safeFastUTF16: false,
             utf16Units: nil,
-            substringMatcher: nil
+            substringMatcher: nil,
+            subsequence: FuzzySubsequence(termLower: queryLower)
         )
     }
 
     static func score(textLower: String, query: PreparedQuery) -> Int? {
         guard !query.lower.isEmpty else { return 0 }
 
-        if query.characterCount <= 2 {
-            guard let pos = findNeedleUTF16Offset(haystack: textLower, needle: query) else { return nil }
-            let m = query.utf16Count
-            return m * 10 - (m - 1) - pos
+        if let subsequence = query.subsequence {
+            return subsequence.score(textLower: textLower)
         }
-
-        if query.isASCII, let queryUnits = query.utf16Units {
-            return scoreASCIIUTF16(textLower: textLower, queryUnits: queryUnits)
-        }
-
-        // Fuzzy subsequence matching (non-contiguous). Implemented as a single pass to avoid
-        // repeated `String.Index` distance computations on large/unicode-heavy texts.
-        var queryIterator = query.lower.makeIterator()
-        guard var queryChar = queryIterator.next() else { return 0 }
-
-        var firstPos: Int?
-        var lastPos = 0
-        var gapPenalty = 0
-        var matchedCount = 0
-        var searchStartPos = 0
-
-        var pos = 0
-        for ch in textLower {
-            if ch == queryChar {
-                if firstPos == nil { firstPos = pos }
-                gapPenalty += pos - searchStartPos
-                matchedCount += 1
-                lastPos = pos
-                if let next = queryIterator.next() {
-                    queryChar = next
-                    searchStartPos = pos + 1
-                } else {
-                    break
-                }
-            }
-            pos += 1
-        }
-
-        guard matchedCount == query.characterCount else { return nil }
-        let span = firstPos.map { lastPos - $0 } ?? 0
-        return matchedCount * 10 - span - gapPenalty
-    }
-
-    /// ASCII-only query: a single-pass subsequence match over UTF-16 code units avoids
-    /// `Character` iteration on very large texts while keeping the same gap/span model.
-    private static func scoreASCIIUTF16(textLower: String, queryUnits: [UInt16]) -> Int? {
-        guard !queryUnits.isEmpty else { return 0 }
-
-        var queryIndex = 0
-        let queryCount = queryUnits.count
-        var firstPos: Int?
-        var lastPos = 0
-        var gapPenalty = 0
-        var matchedCount = 0
-        var searchStartPos = 0
-
-        var pos = 0
-        for cu in textLower.utf16 {
-            if cu == queryUnits[queryIndex] {
-                if firstPos == nil { firstPos = pos }
-                gapPenalty += pos - searchStartPos
-                matchedCount += 1
-                lastPos = pos
-                queryIndex += 1
-                if queryIndex >= queryCount { break }
-                searchStartPos = pos + 1
-            }
-            pos += 1
-        }
-
-        guard matchedCount == queryCount else { return nil }
-        let span = firstPos.map { lastPos - $0 } ?? 0
-        return matchedCount * 10 - span - gapPenalty
+        guard let pos = findNeedleUTF16Offset(haystack: textLower, needle: query) else { return nil }
+        let m = query.utf16Count
+        return m * 10 - (m - 1) - pos
     }
 
     private static func findNeedleUTF16Offset(haystack: String, needle: PreparedQuery) -> Int? {

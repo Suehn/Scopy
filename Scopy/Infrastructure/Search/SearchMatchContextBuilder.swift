@@ -970,9 +970,9 @@ public enum SearchMatchContextBuilder {
         return result
     }
 
-    /// The leftmost greedy subsequence match that `FuzzyMatcher` scores, over the elements it
-    /// compares in `content + "\n" + note`. When the elements that end it spell the whole term,
-    /// that contiguous occurrence scores higher than the scattered match, so it is shown instead.
+    /// The match `FuzzyMatcher` scores, over the elements it compares in `content + "\n" + note`:
+    /// the leftmost greedy subsequence match, or the first contiguous occurrence when that scores
+    /// higher (`FuzzySubsequence`).
     private static func fuzzyWitness(
         term: FuzzyTerm,
         sources: [EvidenceSource],
@@ -1000,7 +1000,8 @@ public enum SearchMatchContextBuilder {
     }
 
     /// Feeds each original character's lowercased elements to the greedy match, so every match
-    /// maps back to the character it came from.
+    /// maps back to the character it came from. When greedy completes with a gap, an
+    /// `OccurrenceScan` takes over from `m - 1` elements before its last match.
     private static func fuzzyWitness<Elements: Sequence>(
         pattern: [Elements.Element],
         elements: (String) -> Elements,
@@ -1011,12 +1012,23 @@ public enum SearchMatchContextBuilder {
         guard !pattern.isEmpty else { return nil }
         var matched = 0
         var matches: [RawMatch] = []
+        var position = 0
+        var first = 0
+        var scan: OccurrenceScan<Elements.Element>?
+        var utf16Lengths: [Int] = []
 
         for (sourceIndex, evidenceSource) in sources.enumerated() {
             if sourceIndex > 0 {
-                for element in elements("\n") where element == pattern[matched] {
-                    matched += 1
-                    if matched == pattern.count { return matches }
+                for element in elements("\n") {
+                    if scan != nil {
+                        if let outcome = scan?.consume(element, of: nil) { return outcome.matches ?? matches }
+                    } else if element == pattern[matched] {
+                        if matched == 0 { first = position }
+                        matched += 1
+                        // Fuzzy terms are trimmed, so greedy never completes on the separator.
+                        if matched == pattern.count { return matches }
+                    }
+                    position += 1
                 }
             }
             var utf16Location = 0
@@ -1028,67 +1040,157 @@ public enum SearchMatchContextBuilder {
                 let characterString = String(character)
                 let characterLength = characterString.utf16.count
                 let lowered = characterString.lowercased()
-                for (elementIndex, element) in elements(lowered).enumerated()
-                where element == pattern[matched] {
-                    let rawMatch = RawMatch(
+                var rawMatch: RawMatch {
+                    RawMatch(
                         source: evidenceSource.source,
                         range: NSRange(location: utf16Location, length: characterLength),
                         termIndex: termIndex
                     )
+                }
+                for (elementIndex, element) in elements(lowered).enumerated() {
+                    if scan != nil {
+                        if let outcome = scan?.consume(element, of: rawMatch) { return outcome.matches ?? matches }
+                        continue
+                    }
+                    defer { position += 1 }
+                    guard element == pattern[matched] else { continue }
                     if matches.last != rawMatch {
                         matches.append(rawMatch)
                     }
+                    if matched == 0 { first = position }
                     matched += 1
                     guard matched == pattern.count else { continue }
-                    return contiguousOccurrence(
-                        of: pattern,
-                        elements: elements,
-                        endingWith: Array(elements(lowered).prefix(elementIndex + 1)),
-                        of: rawMatch,
-                        atUTF8Offset: utf8Offset,
-                        in: evidenceSource.text
-                    ) ?? matches
+                    let start = position - (pattern.count - 1)
+                    guard start > first else { return matches }
+                    var occurrenceScan = OccurrenceScan(
+                        pattern: pattern,
+                        start: start,
+                        bound: 2 * position - first - 2 * (pattern.count - 1)
+                    )
+                    let earlier = elementsBefore(
+                        elementIndex,
+                        of: lowered,
+                        character: rawMatch,
+                        utf8Offset: utf8Offset,
+                        count: pattern.count - 1,
+                        sourceIndex: sourceIndex,
+                        sources: sources,
+                        utf16Lengths: utf16Lengths,
+                        elements: elements
+                    )
+                    for (earlierElement, earlierCharacter) in earlier + [(element, rawMatch)] {
+                        if let outcome = occurrenceScan.consume(earlierElement, of: earlierCharacter) {
+                            return outcome.matches ?? matches
+                        }
+                    }
+                    scan = occurrenceScan
                 }
                 utf16Location += characterLength
                 utf8Offset += characterString.utf8.count
             }
+            utf16Lengths.append(utf16Location)
         }
-        return nil
+        return scan == nil ? nil : matches
     }
 
-    /// The characters of `text` whose lowercased elements, through `lastElements` of the
-    /// character `last` (at `utf8Offset`), end with the whole pattern; nil when they do not or
-    /// would reach before the start of `text`.
-    private static func contiguousOccurrence<Elements: Sequence>(
-        of pattern: [Elements.Element],
-        elements: (String) -> Elements,
-        endingWith lastElements: [Elements.Element],
-        of last: RawMatch,
-        atUTF8Offset utf8Offset: Int,
-        in text: String
-    ) -> [RawMatch]? where Elements.Element: Equatable {
-        var collected = lastElements
-        var characters = [last]
+    /// The `count` lowercased elements before element `elementIndex` of `lowered`, the character
+    /// `character` at `utf8Offset` in `sources[sourceIndex]`, oldest first, each with the character
+    /// it belongs to (nil for the separator). `utf16Lengths` holds every earlier source's length.
+    private static func elementsBefore<Elements: Sequence>(
+        _ elementIndex: Int,
+        of lowered: String,
+        character: RawMatch,
+        utf8Offset: Int,
+        count: Int,
+        sourceIndex: Int,
+        sources: [EvidenceSource],
+        utf16Lengths: [Int],
+        elements: (String) -> Elements
+    ) -> [(element: Elements.Element, character: RawMatch?)] {
+        var collected: [(element: Elements.Element, character: RawMatch?)] = elements(lowered)
+            .prefix(elementIndex)
+            .map { (element: $0, character: character) }
+        var sourceIndex = sourceIndex
+        var text = sources[sourceIndex].text
         var index = text.utf8.index(text.utf8.startIndex, offsetBy: utf8Offset)
-        var location = last.range.location
-        while collected.count < pattern.count, index > text.startIndex {
-            text.formIndex(before: &index)
-            let characterString = String(text[index])
-            let length = characterString.utf16.count
-            location -= length
-            collected.insert(contentsOf: Array(elements(characterString.lowercased())), at: 0)
-            characters.insert(
-                RawMatch(
-                    source: last.source,
+        var location = character.range.location
+        while collected.count < count {
+            if index > text.startIndex {
+                text.formIndex(before: &index)
+                let characterString = String(text[index])
+                let length = characterString.utf16.count
+                location -= length
+                let earlier = RawMatch(
+                    source: sources[sourceIndex].source,
                     range: NSRange(location: location, length: length),
-                    termIndex: last.termIndex
-                ),
-                at: 0
-            )
+                    termIndex: character.termIndex
+                )
+                collected.insert(
+                    contentsOf: elements(characterString.lowercased()).map { (element: $0, character: earlier) },
+                    at: 0
+                )
+            } else if sourceIndex > 0 {
+                collected.insert(contentsOf: elements("\n").map { (element: $0, character: RawMatch?.none) }, at: 0)
+                sourceIndex -= 1
+                text = sources[sourceIndex].text
+                index = text.endIndex
+                location = utf16Lengths[sourceIndex]
+            } else {
+                break
+            }
         }
-        guard collected.count >= pattern.count,
-              collected.suffix(pattern.count).elementsEqual(pattern) else { return nil }
-        return characters
+        return Array(collected.suffix(count))
+    }
+
+    /// KMP over element positions from `start` for the first whole occurrence of the pattern that
+    /// starts before `bound`, remembering the character of each of the last `m` elements.
+    private struct OccurrenceScan<Element: Equatable> {
+        enum Outcome {
+            case occurrence([RawMatch])
+            case notBeforeBound
+
+            /// The occurrence's characters; nil when the greedy match stands.
+            var matches: [RawMatch]? {
+                if case .occurrence(let characters) = self { return characters }
+                return nil
+            }
+        }
+
+        private let pattern: [Element]
+        private let failure: [Int]
+        private let bound: Int
+        private var position: Int
+        private var matched = 0
+        private var characters: [RawMatch?]
+
+        init(pattern: [Element], start: Int, bound: Int) {
+            self.pattern = pattern
+            failure = FuzzySubsequence.failureLinks(pattern)
+            self.bound = bound
+            position = start
+            characters = Array(repeating: nil, count: pattern.count)
+        }
+
+        /// Scans the element at the next position; nil until the outcome is known.
+        mutating func consume(_ element: Element, of character: RawMatch?) -> Outcome? {
+            guard position - matched < bound else { return .notBeforeBound }
+            while matched > 0, element != pattern[matched] {
+                matched = failure[matched - 1]
+            }
+            if element == pattern[matched] {
+                matched += 1
+            }
+            characters[position % pattern.count] = character
+            position += 1
+            guard matched == pattern.count else { return nil }
+            var occurrence: [RawMatch] = []
+            for scanned in (position - pattern.count)..<position {
+                if let character = characters[scanned % pattern.count], occurrence.last != character {
+                    occurrence.append(character)
+                }
+            }
+            return .occurrence(occurrence)
+        }
     }
 
     private static func ftsEvidencePhrases(
@@ -1386,11 +1488,11 @@ public enum SearchMatchContextBuilder {
     }
 
     /// UTF-16 units of the scalars whose lead bytes lie in `bytes[start..<end]`.
-    fileprivate static func utf16Count(_ bytes: UnsafeBufferPointer<UInt8>, from start: Int, to end: Int) -> Int {
+    static func utf16Count(_ bytes: UnsafeBufferPointer<UInt8>, from start: Int, to end: Int) -> Int {
         var count = 0
         for index in start..<end {
             let byte = bytes[index]
-            count += (byte & 0xC0 != 0x80 ? 1 : 0) + (byte >= 0xF0 ? 1 : 0)
+            count &+= (byte & 0xC0 != 0x80 ? 1 : 0) &+ (byte >= 0xF0 ? 1 : 0)
         }
         return count
     }

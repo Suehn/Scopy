@@ -201,6 +201,27 @@ final class SearchMatchContextBuilderTests: XCTestCase {
         XCTAssertEqual(ascii.fragments.flatMap(highlightedText), ["abc"])
     }
 
+    func testFuzzyEvidenceHighlightsAContiguousOccurrenceAfterTheGreedyMatch() throws {
+        // Greedy a0 b2 b4 scores 24; "abb" at 3, ending after it, scores 25.
+        let ascii = try XCTUnwrap(makeContext(query: "abb", mode: .fuzzy, text: "aababb"))
+        XCTAssertEqual(ascii.fragments.flatMap(\.highlightedRanges), [SearchMatchTextRange(offset: 3, length: 3)])
+
+        // Greedy 0, 4, 6 scores 20; 数学题 at 7, before the bound 2 * 6 - 0 - 4 = 8, scores 21.
+        let cjk = try XCTUnwrap(makeContext(query: "数学题", mode: .fuzzyPlus, text: "数xxx学y题数学题"))
+        XCTAssertEqual(cjk.fragments.flatMap(\.highlightedRanges), [SearchMatchTextRange(offset: 7, length: 3)])
+
+        // At the bound the scores tie and greedy stands: 0, 1, 5 and "abc" at 6 both score 22.
+        let tie = try XCTUnwrap(makeContext(query: "abc", mode: .fuzzy, text: "abxxxcabc"))
+        XCTAssertEqual(tie.fragments.flatMap(highlightedText), ["ab", "c"])
+    }
+
+    func testFuzzyEvidenceFollowsAnOccurrenceAcrossTheNoteSeparator() throws {
+        // `a_b_ab\ncd`: greedy 0...8 scores 38, "ab\ncd" at 4 scores 42.
+        let context = try XCTUnwrap(makeContext(query: "ab\ncd", mode: .fuzzy, text: "a_b_ab", note: "cd"))
+        XCTAssertEqual(context.fragments.map(\.source), [.content, .note])
+        XCTAssertEqual(context.fragments.flatMap(highlightedText), ["ab", "cd"])
+    }
+
     func testASCIIFuzzyEvidenceMatchesInsideADecomposedCharacterLikeTheScore() throws {
         let context = try XCTUnwrap(
             makeContext(query: "cafe", mode: .fuzzy, text: "/Users/example/Cafe\u{301}.txt")
@@ -211,7 +232,7 @@ final class SearchMatchContextBuilderTests: XCTestCase {
 
     /// Every text of up to nine characters over two letters, against every three- and
     /// four-character query, on the character path (CJK) and the UTF-16 path (ASCII): evidence
-    /// highlights the greedy match, or the contiguous occurrence that ends it.
+    /// highlights the greedy match, or the first contiguous occurrence when it scores higher.
     func testFuzzyEvidenceMatchesItsDefinitionExhaustively() throws {
         for alphabet in [Array("原文"), Array("ab")] {
             func strings(length: Int) -> [[Character]] {
@@ -464,16 +485,19 @@ final class SearchMatchContextBuilderTests: XCTestCase {
         )
     }
 
+    /// The greedy match, or the first contiguous occurrence when it scores higher: when it starts
+    /// before `2 * last - first - 2 * (m - 1)`.
     private func expectedHighlights(text: [Character], query: [Character]) -> [SearchMatchTextRange]? {
         var positions: [Int] = []
         for (position, character) in text.enumerated()
         where positions.count < query.count && character == query[positions.count] {
             positions.append(position)
         }
-        guard let last = positions.last, positions.count == query.count else { return nil }
-        let start = last - (query.count - 1)
-        if Array(text[start...last]) == query {
-            positions = Array(start...last)
+        guard let first = positions.first, let last = positions.last, positions.count == query.count else { return nil }
+        let count = query.count
+        if let start = (0...(text.count - count)).first(where: { Array(text[$0..<($0 + count)]) == query }),
+           start < 2 * last - first - 2 * (count - 1) {
+            positions = Array(start..<(start + count))
         }
         var ranges: [SearchMatchTextRange] = []
         for position in positions {
