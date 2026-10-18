@@ -49,7 +49,14 @@ public enum SearchMatchContextBuilder {
 
     fileprivate struct FuzzyTerm {
         let text: String
-        let lowercasedCharacters: [Character]
+        let pattern: FuzzyPattern
+    }
+
+    /// A lowercased fuzzy term as `FuzzyMatcher` compares it: UTF-16 units for an ASCII term,
+    /// characters otherwise.
+    fileprivate enum FuzzyPattern {
+        case utf16([UInt16])
+        case characters([Character])
     }
 
     fileprivate struct UnicodeToken {
@@ -708,7 +715,11 @@ public enum SearchMatchContextBuilder {
     }
 
     private static func makeFuzzyTerm(_ text: String) -> FuzzyTerm {
-        FuzzyTerm(text: text, lowercasedCharacters: Array(text.lowercased()))
+        let lower = text.lowercased()
+        return FuzzyTerm(
+            text: text,
+            pattern: lower.canBeConverted(to: .ascii) ? .utf16(Array(lower.utf16)) : .characters(Array(lower))
+        )
     }
 
     private static func exactMatches(
@@ -760,10 +771,11 @@ public enum SearchMatchContextBuilder {
         tokenizer: Unicode61Tokenizer?,
         cancellationCheck: @escaping () throws -> Void
     ) throws -> MatchSet {
+        let sources = searchableSources(plainText: plainText, note: note)
         if term.text.count <= 2 {
             return try literalMatches(
                 term.text,
-                sources: searchableSources(plainText: plainText, note: note),
+                sources: sources,
                 termIndex: 0,
                 cancellationCheck: cancellationCheck
             )
@@ -771,8 +783,7 @@ public enum SearchMatchContextBuilder {
 
         if let witness = try fuzzyWitness(
             term: term,
-            plainText: plainText,
-            note: note,
+            sources: sources,
             termIndex: 0,
             cancellationCheck: cancellationCheck
         ) {
@@ -783,7 +794,7 @@ public enum SearchMatchContextBuilder {
         guard let tokenizer else { throw BuildError.unicode61Unavailable(SQLITE_ERROR) }
         return try ftsPhraseMatches(
             phrases: prefilterPhrases,
-            sources: searchableSources(plainText: plainText, note: note),
+            sources: sources,
             tokenizer: tokenizer,
             cancellationCheck: cancellationCheck
         )
@@ -813,8 +824,7 @@ public enum SearchMatchContextBuilder {
                 )
             } else if let witness = try fuzzyWitness(
                 term: term,
-                plainText: plainText,
-                note: note,
+                sources: sources,
                 termIndex: termIndex,
                 cancellationCheck: cancellationCheck
             ) {
@@ -960,57 +970,125 @@ public enum SearchMatchContextBuilder {
         return result
     }
 
+    /// The leftmost greedy subsequence match that `FuzzyMatcher` scores, over the elements it
+    /// compares in `content + "\n" + note`. When the elements that end it spell the whole term,
+    /// that contiguous occurrence scores higher than the scattered match, so it is shown instead.
     private static func fuzzyWitness(
         term: FuzzyTerm,
-        plainText: String,
-        note: String?,
+        sources: [EvidenceSource],
         termIndex: Int,
         cancellationCheck: @escaping () throws -> Void
     ) throws -> [RawMatch]? {
-        let queryCharacters = term.lowercasedCharacters
-        guard !queryCharacters.isEmpty else { return nil }
+        switch term.pattern {
+        case .utf16(let units):
+            return try fuzzyWitness(
+                pattern: units,
+                elements: { $0.utf16 },
+                sources: sources,
+                termIndex: termIndex,
+                cancellationCheck: cancellationCheck
+            )
+        case .characters(let characters):
+            return try fuzzyWitness(
+                pattern: characters,
+                elements: { $0 },
+                sources: sources,
+                termIndex: termIndex,
+                cancellationCheck: cancellationCheck
+            )
+        }
+    }
 
-        var queryIndex = 0
+    /// Feeds each original character's lowercased elements to the greedy match, so every match
+    /// maps back to the character it came from.
+    private static func fuzzyWitness<Elements: Sequence>(
+        pattern: [Elements.Element],
+        elements: (String) -> Elements,
+        sources: [EvidenceSource],
+        termIndex: Int,
+        cancellationCheck: @escaping () throws -> Void
+    ) throws -> [RawMatch]? where Elements.Element: Equatable {
+        guard !pattern.isEmpty else { return nil }
+        var matched = 0
         var matches: [RawMatch] = []
 
-        func consume(_ text: String, source: SearchMatchSource) throws {
-            guard queryIndex < queryCharacters.count else { return }
+        for (sourceIndex, evidenceSource) in sources.enumerated() {
+            if sourceIndex > 0 {
+                for element in elements("\n") where element == pattern[matched] {
+                    matched += 1
+                    if matched == pattern.count { return matches }
+                }
+            }
             var utf16Location = 0
-            for (characterIndex, character) in text.enumerated() {
+            var utf8Offset = 0
+            for (characterIndex, character) in evidenceSource.text.enumerated() {
                 if characterIndex % Constants.cancellationPollInterval == 0 {
                     try cancellationCheck()
                 }
                 let characterString = String(character)
                 let characterLength = characterString.utf16.count
-                for foldedCharacter in characterString.lowercased() {
-                    guard queryIndex < queryCharacters.count else { break }
-                    if foldedCharacter == queryCharacters[queryIndex] {
-                        let rawMatch = RawMatch(
-                            source: source,
-                            range: NSRange(location: utf16Location, length: characterLength),
-                            termIndex: termIndex
-                        )
-                        if matches.last != rawMatch {
-                            matches.append(rawMatch)
-                        }
-                        queryIndex += 1
+                let lowered = characterString.lowercased()
+                for (elementIndex, element) in elements(lowered).enumerated()
+                where element == pattern[matched] {
+                    let rawMatch = RawMatch(
+                        source: evidenceSource.source,
+                        range: NSRange(location: utf16Location, length: characterLength),
+                        termIndex: termIndex
+                    )
+                    if matches.last != rawMatch {
+                        matches.append(rawMatch)
                     }
+                    matched += 1
+                    guard matched == pattern.count else { continue }
+                    return contiguousOccurrence(
+                        of: pattern,
+                        elements: elements,
+                        endingWith: Array(elements(lowered).prefix(elementIndex + 1)),
+                        of: rawMatch,
+                        atUTF8Offset: utf8Offset,
+                        in: evidenceSource.text
+                    ) ?? matches
                 }
-                if queryIndex >= queryCharacters.count { return }
                 utf16Location += characterLength
+                utf8Offset += characterString.utf8.count
             }
         }
+        return nil
+    }
 
-        try consume(plainText, source: .content)
-        if queryIndex < queryCharacters.count,
-           queryCharacters[queryIndex] == "\n" {
-            queryIndex += 1
+    /// The characters of `text` whose lowercased elements, through `lastElements` of the
+    /// character `last` (at `utf8Offset`), end with the whole pattern; nil when they do not or
+    /// would reach before the start of `text`.
+    private static func contiguousOccurrence<Elements: Sequence>(
+        of pattern: [Elements.Element],
+        elements: (String) -> Elements,
+        endingWith lastElements: [Elements.Element],
+        of last: RawMatch,
+        atUTF8Offset utf8Offset: Int,
+        in text: String
+    ) -> [RawMatch]? where Elements.Element: Equatable {
+        var collected = lastElements
+        var characters = [last]
+        var index = text.utf8.index(text.utf8.startIndex, offsetBy: utf8Offset)
+        var location = last.range.location
+        while collected.count < pattern.count, index > text.startIndex {
+            text.formIndex(before: &index)
+            let characterString = String(text[index])
+            let length = characterString.utf16.count
+            location -= length
+            collected.insert(contentsOf: Array(elements(characterString.lowercased())), at: 0)
+            characters.insert(
+                RawMatch(
+                    source: last.source,
+                    range: NSRange(location: location, length: length),
+                    termIndex: last.termIndex
+                ),
+                at: 0
+            )
         }
-        if let note, queryIndex < queryCharacters.count {
-            try consume(note, source: .note)
-        }
-
-        return queryIndex == queryCharacters.count ? matches : nil
+        guard collected.count >= pattern.count,
+              collected.suffix(pattern.count).elementsEqual(pattern) else { return nil }
+        return characters
     }
 
     private static func ftsEvidencePhrases(

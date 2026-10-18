@@ -65,7 +65,7 @@ final class SearchBackendConsistencyTests: XCTestCase {
 
         let page = try await service.search(
             query: SearchRequest(
-                query: "cafe",
+                query: "fe",
                 mode: .fuzzy,
                 forceFullFuzzy: true,
                 limit: 10,
