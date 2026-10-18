@@ -8,7 +8,7 @@ Launches a build against a copy of the real snapshot database, then per cycle:
   open   global hotkey -> panel window on screen -> app answers a cheap Accessibility query again
   enter  return key    -> content on the app's private pasteboard -> panel window gone
 """
-import argparse, json, os, shutil, signal, subprocess, sys, tempfile, time
+import argparse, glob, json, os, shutil, signal, subprocess, sys, tempfile, time
 
 S = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(S, '..', '..'))
@@ -30,11 +30,6 @@ a = ap.parse_args()
 
 out = os.path.join(REPO, 'logs', 'perf-panel', a.label)
 os.makedirs(out, exist_ok=True)
-DB_FILES = ('clipboard.db', 'clipboard.db-wal', 'clipboard.db-shm',
-            'clipboard.db.fullindex.v7.bin', 'clipboard.db.fullindex.v7.bin.metadata.plist',
-            'clipboard.db.fullindex.v7.bin.sha256',
-            'clipboard.db.shortindex.v4.bin', 'clipboard.db.shortindex.v4.bin.sha256')
-
 def make_db():
     if a.reuse_db:
         d = os.path.join(REPO, 'logs', 'perf-panel', 'db-warm')
@@ -43,10 +38,9 @@ def make_db():
         os.makedirs(d, exist_ok=True)
     else:
         d = tempfile.mkdtemp(prefix='scopy-panel-db-')
-    for f in DB_FILES:
-        src = os.path.join(REPO, 'perf-db', f)
-        if os.path.exists(src):
-            shutil.copy(src, os.path.join(d, f))
+    # The database, its WAL, and whatever index caches the snapshot holds, at any cache version.
+    for src in glob.glob(os.path.join(REPO, 'perf-db', 'clipboard.db*')):
+        shutil.copy(src, os.path.join(d, os.path.basename(src)))
     return d
 
 dbdir = make_db()
