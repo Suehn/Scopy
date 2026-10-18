@@ -397,11 +397,12 @@ public enum SearchMatchContextBuilder {
             lock.lock()
             defer { lock.unlock() }
 
-            let tokens = try source.utf8.withContiguousStorageIfAvailable { bytes in
-                try tokens(in: source, bytes: bytes, flags: flags, cancellationCheck: cancellationCheck)
+            let tokenized = try source.utf8.withContiguousStorageIfAvailable {
+                (bytes: UnsafeBufferPointer<UInt8>) throws -> UnicodeTokens in
+                try self.tokens(in: source, bytes: bytes, flags: flags, cancellationCheck: cancellationCheck)
             }
-            guard let tokens else { throw BuildError.invalidUnicode61Range }
-            return tokens
+            guard let tokenized else { throw BuildError.invalidUnicode61Range }
+            return tokenized
         }
 
         private func tokens(
