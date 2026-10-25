@@ -3,26 +3,40 @@ import ScopyKit
 
 @MainActor
 struct HistoryListState {
+    private enum Pagination {
+        /// The key of the last applied recent row; nil after the oldest row is loaded.
+        case recent(continuingAfter: RecentHistoryCursor?)
+        /// Search pages continue at the loaded row count; staged results may have no total yet.
+        case search(hasMore: Bool)
+    }
+
     private(set) var items: [ClipboardItemDTO] = []
     private(set) var pinnedItems: [ClipboardItemDTO] = []
     private(set) var unpinnedItems: [ClipboardItemDTO] = []
-    private(set) var loadedCount: Int = 0
     private(set) var totalCount: Int = 0
-    private(set) var canLoadMore: Bool = false
+    private var pagination: Pagination = .search(hasMore: false)
     /// Bumped on every `items` mutation. Observing this instead of `items` avoids SwiftUI's
     /// element-wise array comparison (O(loaded plain-text bytes)) on the main thread.
     private(set) var projectionGeneration: UInt64 = 0
-    /// Where the recent list's next page starts: the key of the last row its pages returned, kept
-    /// while rows above it are inserted, deleted or moved. `nil` once the oldest row is loaded.
-    private(set) var recentCursor: RecentHistoryCursor?
-    /// Recent pages continue from `recentCursor`; search pages continue from `loadedCount`.
-    private var pagesByRecentKey = false
-
     private var itemIndexByID: [UUID: Int] = [:]
+
+    var loadedCount: Int { items.count }
+
+    var canLoadMore: Bool {
+        switch pagination {
+        case .recent(let cursor): return cursor != nil
+        case .search(let hasMore): return hasMore
+        }
+    }
+
+    /// Inserting, deleting or moving rows above this key leaves the next recent page unchanged.
+    var recentCursor: RecentHistoryCursor? {
+        guard case .recent(let cursor) = pagination else { return nil }
+        return cursor
+    }
 
     mutating func replaceItems(_ newItems: [ClipboardItemDTO]) {
         items = newItems
-        loadedCount = newItems.count
         rebuildDerivedState()
         recomputeCanLoadMore()
     }
@@ -32,12 +46,9 @@ struct HistoryListState {
         total: Int,
         hasMore: Bool
     ) {
-        pagesByRecentKey = false
-        recentCursor = nil
+        pagination = .search(hasMore: hasMore)
         items = newItems
-        loadedCount = newItems.count
         totalCount = total
-        canLoadMore = hasMore
         rebuildDerivedState()
     }
 
@@ -46,9 +57,10 @@ struct HistoryListState {
         total: Int,
         continuingAfter cursor: RecentHistoryCursor?
     ) {
-        replacePage(items: newItems, total: total, hasMore: cursor != nil)
-        pagesByRecentKey = true
-        recentCursor = cursor
+        pagination = .recent(continuingAfter: cursor)
+        items = newItems
+        totalCount = total
+        rebuildDerivedState()
     }
 
     mutating func appendPage(
@@ -58,14 +70,13 @@ struct HistoryListState {
     ) {
         appendItems(newItems)
         totalCount = total
-        canLoadMore = hasMore
+        pagination = .search(hasMore: hasMore)
     }
 
     /// Appends rows of a recent page; `cursor` is where the rows after them start.
     mutating func appendRecentPage(items newItems: [ClipboardItemDTO], continuingAfter cursor: RecentHistoryCursor?) {
         appendItems(newItems)
-        recentCursor = cursor
-        canLoadMore = cursor != nil
+        pagination = .recent(continuingAfter: cursor)
     }
 
     private mutating func appendItems(_ newItems: [ClipboardItemDTO]) {
@@ -85,13 +96,12 @@ struct HistoryListState {
             index += 1
         }
         items.append(contentsOf: accepted)
-        loadedCount = items.count
         projectionGeneration &+= 1
     }
 
     mutating func updatePagination(total: Int, hasMore: Bool) {
         totalCount = total
-        canLoadMore = hasMore
+        pagination = .search(hasMore: hasMore)
     }
 
     mutating func updateTotalCount(_ total: Int) {
@@ -107,8 +117,8 @@ struct HistoryListState {
 
     /// Offset pages only: whether a recent page follows is the cursor's, not a count's.
     mutating func recomputeCanLoadMore() {
-        guard !pagesByRecentKey, totalCount >= 0 else { return }
-        canLoadMore = loadedCount < totalCount
+        guard case .search = pagination, totalCount >= 0 else { return }
+        pagination = .search(hasMore: loadedCount < totalCount)
     }
 
     func indexOfItem(withID id: UUID) -> Int? {
@@ -151,7 +161,6 @@ struct HistoryListState {
     mutating func removeItem(withID id: UUID) -> Bool {
         guard let index = indexOfItem(withID: id) else { return false }
         items.remove(at: index)
-        loadedCount = items.count
         rebuildDerivedState()
         recomputeCanLoadMore()
         return true
@@ -165,7 +174,6 @@ struct HistoryListState {
         items.removeAll { ids.contains($0.id) }
         let removedCount = previousCount - items.count
         guard removedCount > 0 else { return 0 }
-        loadedCount = items.count
         rebuildDerivedState()
         recomputeCanLoadMore()
         return removedCount
@@ -175,7 +183,6 @@ struct HistoryListState {
     mutating func insertItem(_ item: ClipboardItemDTO, at index: Int) {
         guard indexOfItem(withID: item.id) == nil else { return }
         items.insert(item, at: min(max(0, index), items.count))
-        loadedCount = items.count
         rebuildDerivedState()
         recomputeCanLoadMore()
     }
@@ -184,7 +191,7 @@ struct HistoryListState {
     mutating func upsertRecentItem(_ item: ClipboardItemDTO) -> Bool {
         // A row now sorting after the cursor belongs to a later page; kept here, it would sit
         // ahead of the rows that page still brings.
-        if pagesByRecentKey, !item.isPinned, let recentCursor, recentCursor.precedes(item) {
+        if !item.isPinned, let recentCursor, recentCursor.precedes(item) {
             return removeItem(withID: item.id)
         }
         if let index = indexOfItem(withID: item.id) {
@@ -197,7 +204,6 @@ struct HistoryListState {
             return item.id.uuidString < $0.id.uuidString
         } ?? items.endIndex
         items.insert(item, at: index)
-        loadedCount = items.count
         rebuildDerivedState()
         recomputeCanLoadMore()
         return true

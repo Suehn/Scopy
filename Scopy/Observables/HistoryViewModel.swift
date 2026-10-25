@@ -330,7 +330,7 @@ final class HistoryViewModel {
 
     // MARK: - Properties
 
-    @ObservationIgnored private var service: ClipboardServiceProtocol
+    @ObservationIgnored private let service: ClipboardServiceProtocol
     @ObservationIgnored private let settingsViewModel: SettingsViewModel
     @ObservationIgnored private var timing: Timing = .production
 
@@ -347,14 +347,13 @@ final class HistoryViewModel {
 
     /// The row removed by the last delete while its backend delete is still deferred. The footer
     /// offers Undo and ⌘Z restores the row only while this is set.
-    private(set) var undoableDeletionID: UUID?
-    @ObservationIgnored private var pendingDeletion: PendingDeletion?
+    var undoableDeletionID: UUID? { pendingDeletion?.item.id }
+    private var pendingDeletion: PendingDeletion?
     @ObservationIgnored private var inFlightDeletions: [UUID: Task<Bool, Never>] = [:]
     @ObservationIgnored private var isTerminating = false
     @ObservationIgnored private var deletionFailureGeneration: UInt64 = 0
-    /// Changes only when the rows are replaced by another query or cleared; `searchVersion` also
-    /// advances for in-flight work invalidated by a deletion event or a search refresh, which
-    /// keep the same rows.
+    /// Changes when the user requests another projection or clears it. History events supersede
+    /// request work, but Undo still belongs to the same query and loaded rows.
     @ObservationIgnored private var projectionIdentity = UUID()
     @ObservationIgnored private var quickSlotHintsVisible = false
 
@@ -444,7 +443,7 @@ final class HistoryViewModel {
             followsPersistedDefaultSearchMode = false
         }
     }
-    var isLoading: Bool = false
+    var isLoading: Bool { requests.isLoading }
     var selectedID: UUID? {
         didSet {
             guard selectedID != oldValue else { return }
@@ -512,7 +511,7 @@ final class HistoryViewModel {
 
     var isScrolling: Bool = false
 
-    private var searchVersion: Int = 0
+    private let requests = HistoryRequestLifecycle()
     /// Advances on every history event. A recent page read while it moved may predate the commit
     /// the event describes, so it is read again from the same cursor.
     @ObservationIgnored private var recentMutationEpoch: UInt64 = 0
@@ -584,12 +583,6 @@ final class HistoryViewModel {
         return String(localized: "Mode: \(mode) · Coverage: \(coverage) · Sort: \(searchSortDisplayName(for: trimmed))")
     }
 
-    @ObservationIgnored private var searchTask: Task<Void, Never>?
-    /// From `search()` until its rows land: the rows on screen may still answer an older query.
-    /// Interrupted searches leave it set, so the next history change starts a search again.
-    @ObservationIgnored private var searchIsPending = false
-    @ObservationIgnored private var loadMoreTask: Task<Void, Never>?
-    @ObservationIgnored private var refineTask: Task<Void, Never>?
     @ObservationIgnored private var storageDetailsTask: Task<Void, Never>?
     @ObservationIgnored private var recentAppsRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var persistedDefaultSearchMode: SearchMode = SettingsDTO.default.defaultSearchMode
@@ -619,11 +612,6 @@ final class HistoryViewModel {
         self.timing = timing
     }
 
-    func updateService(_ service: ClipboardServiceProtocol) {
-        cancelTask(&storageDetailsTask)
-        self.service = service
-    }
-
     func applyScrollProfileSearchIfNeeded() async {
         let environment = ProcessInfo.processInfo.environment
         guard !didApplyScrollProfileSearch,
@@ -638,16 +626,12 @@ final class HistoryViewModel {
         }
         searchQuery = query
         search()
-        await searchTask?.value
+        await requests.waitForPrimary()
     }
 
     func stop() {
-        searchVersion &+= 1
-        isLoading = false
+        requests.cancel()
         captureReadBlocked = false
-        cancelTask(&searchTask)
-        cancelTask(&loadMoreTask)
-        cancelTask(&refineTask)
         cancelTask(&storageDetailsTask)
         cancelTask(&recentAppsRefreshTask)
         cancelTask(&historyCountTask)
@@ -767,15 +751,15 @@ final class HistoryViewModel {
             if isUnfilteredList {
                 // Refresh only the authoritative count. Re-fetching the first page here would
                 // collapse a user's already-loaded pagination depth back to the initial 50 rows.
-                let projectionVersion = searchVersion
+                let projectionVersion = requests.version
                 let epoch = recentMutationEpoch
                 do {
                     let stats = try await service.getStorageStats()
-                    guard projectionVersion == searchVersion, epoch == recentMutationEpoch, isUnfilteredList else { return }
+                    guard requests.isCurrent(projectionVersion), epoch == recentMutationEpoch, isUnfilteredList else { return }
                     mutateProjection { $0.updateTotalCount(stats.itemCount) }
                     settingsViewModel.storageStats = stats
                 } catch {
-                    guard projectionVersion == searchVersion, epoch == recentMutationEpoch, isUnfilteredList else { return }
+                    guard requests.isCurrent(projectionVersion), epoch == recentMutationEpoch, isUnfilteredList else { return }
                     // Exact committed IDs are still the best available authority on a transient
                     // stats read failure; duplicate bulk events do not decrement twice.
                     mutateProjection { $0.decrementTotalCount(by: newlyDeletedCount) }
@@ -897,23 +881,21 @@ final class HistoryViewModel {
 
     func load() async {
         guard isUnfilteredList else { return }
-        searchVersion &+= 1
-        cancelTask(&loadMoreTask)
-        await loadRecent()
+        let task = requests.replace { [self] version in
+            await loadRecent(version: version)
+        }
+        await withTaskCancellationHandler(operation: {
+            await task.value
+        }, onCancel: {
+            task.cancel()
+        })
     }
 
-    private func loadRecent() async {
+    private func loadRecent(version currentVersion: HistoryRequestLifecycle.Version) async {
         cancelTask(&storageDetailsTask)
-        let currentVersion = searchVersion
         guard shouldApplyLoadResult(version: currentVersion) else { return }
 
-        isLoading = true
         fetchFailureMessage = nil
-        defer {
-            if currentVersion == searchVersion {
-                isLoading = false
-            }
-        }
 
         do {
             let startTime = CFAbsoluteTimeGetCurrent()
@@ -950,8 +932,8 @@ final class HistoryViewModel {
         }
     }
 
-    private func shouldApplyLoadResult(version: Int) -> Bool {
-        !Task.isCancelled && version == searchVersion && isUnfilteredList
+    private func shouldApplyLoadResult(version: HistoryRequestLifecycle.Version) -> Bool {
+        requests.isCurrent(version) && isUnfilteredList
     }
 
     /// Reads of one recent page before a read that overlapped events is used anyway. Ingest replay
@@ -968,7 +950,7 @@ final class HistoryViewModel {
     private func fetchSettledRecentPage(
         limit: Int,
         after cursor: RecentHistoryCursor?,
-        version: Int
+        version: HistoryRequestLifecycle.Version
     ) async throws -> (page: RecentHistoryPage, epoch: UInt64, overlappingEvents: [ClipboardEvent])? {
         recentReadsInFlight += 1
         defer {
@@ -1059,7 +1041,7 @@ final class HistoryViewModel {
         setItemIfChanged(at: index, to: updated)
     }
 
-    private func scheduleStorageDetailsRefresh(version: Int) {
+    private func scheduleStorageDetailsRefresh(version: HistoryRequestLifecycle.Version) {
         cancelTask(&storageDetailsTask)
         storageDetailsTask = Task {
             do {
@@ -1100,7 +1082,7 @@ final class HistoryViewModel {
     static let loadMorePrefetchRows = 40
 
     func rowDidAppear(itemID: UUID) {
-        guard canLoadMore, !isLoading, loadMoreTask == nil else { return }
+        guard canLoadMore, !isLoading, !requests.hasPendingPage else { return }
         guard let index = indexOfItem(withID: itemID), index >= loadedCount - Self.loadMorePrefetchRows else { return }
         Task { await loadMore() }
     }
@@ -1112,36 +1094,13 @@ final class HistoryViewModel {
 
     func loadMore() async {
         ScrollPerformanceProfile.shared.incrementCounter(name: "list.load_more_attempt")
-        if let inFlightTask = loadMoreTask {
-            await inFlightTask.value
-            return
-        }
-
-        let currentVersion = searchVersion
-
-        let task = Task {
-            defer {
-                if currentVersion == searchVersion {
-                    loadMoreTask = nil
-                }
-            }
-            guard !Task.isCancelled else { return }
-            // After a failure the rows may not belong to the current request; paging waits for a retry.
-            guard canLoadMore, !isLoading, fetchFailureMessage == nil else { return }
-
-            isLoading = true
-            defer {
-                if currentVersion == searchVersion {
-                    isLoading = false
-                }
-            }
-
+        // After a failure the rows may not belong to the current request; paging waits for a retry.
+        await requests.paginate(when: canLoadMore && fetchFailureMessage == nil) { [self] currentVersion in
             do {
                 if !isUnfilteredList {
                     // When current result is prefilter (total = -1), force full fuzzy before paging.
                     if (searchCoverage == .stagedRefine || searchCoverage == .incomplete),
                        (searchMode == .fuzzy || searchMode == .fuzzyPlus) {
-                        cancelTask(&refineTask)
                         let expectedLimit = loadedCount + Self.loadMorePageSize
                         let request = SearchRequest(
                             query: searchQuery,
@@ -1158,7 +1117,7 @@ final class HistoryViewModel {
                             name: "list.pagination_request"
                         )
                         let result = try await service.search(query: request)
-                        guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                        guard requests.isCurrent(currentVersion) else { return }
                         guard await applyRefinedSearchPage(with: result, version: currentVersion) else { return }
                         searchCoverage = result.coverage
                         return
@@ -1181,7 +1140,7 @@ final class HistoryViewModel {
                         name: "list.pagination_request"
                     )
                     let result = try await service.search(query: request)
-                    guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                    guard requests.isCurrent(currentVersion) else { return }
                     prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
                     guard await appendSearchPage(with: result, version: currentVersion) else { return }
                     searchCoverage = result.coverage
@@ -1206,7 +1165,7 @@ final class HistoryViewModel {
                         repeat {
                             if start > 0 {
                                 try? await Task.sleep(nanoseconds: 20_000_000)
-                                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                                guard requests.isCurrent(currentVersion) else { return }
                                 guard recentMutationEpoch == settled.epoch else { continue pages }
                             }
                             let end = min(page.items.count, start + chunkRows)
@@ -1227,7 +1186,7 @@ final class HistoryViewModel {
                     searchCoverage = .complete
                 }
             } catch {
-                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                guard requests.isCurrent(currentVersion) else { return }
                 if searchCoverage.isStagedRefine {
                     searchCoverage = .incomplete
                 }
@@ -1235,9 +1194,6 @@ final class HistoryViewModel {
                 ScopyLog.app.error("Failed to load more: \(error.localizedDescription, privacy: .private)")
             }
         }
-
-        loadMoreTask = task
-        await task.value
     }
 
     // MARK: - Search
@@ -1248,60 +1204,46 @@ final class HistoryViewModel {
     /// failure never reads as "No results". A valid candidate without renderable evidence is not a
     /// failed search and keeps the row with its ordinary metadata.
     func search() {
-        cancelTask(&searchTask)
-        cancelTask(&refineTask)
+        projectionIdentity = UUID()
+        startSearch()
+    }
+
+    /// Starts a first-page request without changing which query owns the displayed rows. Both
+    /// user searches and event refreshes use this path; only the user search replaces identity.
+    private func startSearch() {
         cancelTask(&storageDetailsTask)
         fetchFailureMessage = nil
 
-        searchVersion += 1
-        projectionIdentity = UUID()
-        let currentVersion = searchVersion
-
-        cancelTask(&loadMoreTask)
-
         if isUnfilteredList {
-            searchTask = Task {
-                guard !Task.isCancelled else { return }
-                guard currentVersion == searchVersion else { return }
-                await load()
+            requests.replace { [self] version in
+                await loadRecent(version: version)
             }
             return
         }
 
-        // Own the loading state across the debounce.
-        isLoading = true
-        searchIsPending = true
-        searchTask = Task {
-            defer {
-                if currentVersion == searchVersion {
-                    isLoading = false
-                    searchIsPending = false
-                }
-            }
-            let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = SearchRequest(
+            query: searchQuery,
+            mode: searchMode,
+            sortMode: ftsSortMode,
+            appFilter: appFilter,
+            typeFilter: typeFilter,
+            typeFilters: typeFilters,
+            limit: Self.initialPageSize,
+            offset: 0
+        )
+        requests.replace { [self] currentVersion in
+            let query = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
             let debounceNs = effectiveSearchDebounceNs(for: query)
             try? await Task.sleep(nanoseconds: debounceNs)
-            guard !Task.isCancelled else { return }
-            guard currentVersion == searchVersion else { return }
+            guard requests.isCurrent(currentVersion) else { return }
 
             do {
                 let startTime = CFAbsoluteTimeGetCurrent()
-
-                let request = SearchRequest(
-                    query: searchQuery,
-                    mode: searchMode,
-                    sortMode: ftsSortMode,
-                    appFilter: appFilter,
-                    typeFilter: typeFilter,
-                    typeFilters: typeFilters,
-                    limit: Self.initialPageSize,
-                    offset: 0
-                )
                 let result = try await service.search(query: request)
-                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                guard requests.isCurrent(currentVersion) else { return }
                 let prefilterItems = acceptedSearchHits(result.hits).map(\.item)
                 prewarmDisplayText(for: prefilterItems)
-                let refineFollows = (searchMode == .fuzzy || searchMode == .fuzzyPlus)
+                let refineFollows = (request.mode == .fuzzy || request.mode == .fuzzyPlus)
                     && result.coverage.isStagedRefine
                 // An empty prefilter page is not an answer while the full pass is still coming:
                 // publishing it would flash "No results" until the refine brings rows back.
@@ -1313,26 +1255,19 @@ final class HistoryViewModel {
 
                 var pendingRefine: Task<Void, Never>?
                 if refineFollows {
-                    let refineQuery = searchQuery
-                    let refineMode = searchMode
-                    let refineAppFilter = appFilter
-                    let refineTypeFilter = typeFilter
-                    let refineTypeFilters = typeFilters
-                    let refineVersion = currentVersion
-
-                    let refine = Task {
-                        let trimmed = refineQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let refine = requests.refine(version: currentVersion) { [self] in
+                        let trimmed = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
                         let delayNs: UInt64 = trimmed.count <= 2 ? timing.refineShortQueryDelayNs : timing.refineLongQueryDelayNs
                         try? await Task.sleep(nanoseconds: delayNs)
-                        guard !Task.isCancelled, refineVersion == searchVersion else { return }
+                        guard requests.isCurrent(currentVersion) else { return }
 
                         let refineRequest = SearchRequest(
-                            query: refineQuery,
-                            mode: refineMode,
-                            sortMode: ftsSortMode,
-                            appFilter: refineAppFilter,
-                            typeFilter: refineTypeFilter,
-                            typeFilters: refineTypeFilters,
+                            query: request.query,
+                            mode: request.mode,
+                            sortMode: request.sortMode,
+                            appFilter: request.appFilter,
+                            typeFilter: request.typeFilter,
+                            typeFilters: request.typeFilters,
                             forceFullFuzzy: true,
                             limit: Self.initialPageSize,
                             offset: 0
@@ -1340,13 +1275,13 @@ final class HistoryViewModel {
 
                         do {
                             let refined = try await service.search(query: refineRequest)
-                            guard !Task.isCancelled, refineVersion == searchVersion else { return }
+                            guard requests.isCurrent(currentVersion) else { return }
 
                             prewarmDisplayText(for: acceptedSearchHits(refined.hits).map(\.item))
                             replaceSearchPage(with: refined, skippingIdenticalRefine: true)
                             searchCoverage = refined.coverage
                         } catch {
-                            guard !Task.isCancelled, refineVersion == searchVersion else { return }
+                            guard requests.isCurrent(currentVersion) else { return }
                             if deferredEmptyPage == nil, !searchCoverage.isStagedRefine {
                                 return
                             }
@@ -1355,7 +1290,6 @@ final class HistoryViewModel {
                             ScopyLog.app.warning("Refine search failed: \(error.localizedDescription, privacy: .private)")
                         }
                     }
-                    refineTask = refine
                     if deferredEmptyPage != nil { pendingRefine = refine }
                 }
 
@@ -1366,7 +1300,7 @@ final class HistoryViewModel {
                 // screen cannot start paging for this one.
                 await pendingRefine?.value
             } catch {
-                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                guard requests.isCurrent(currentVersion) else { return }
                 searchCoverage = .incomplete
                 reportFetchFailure(String(localized: "Search failed"), error)
                 ScopyLog.app.error("Search failed: \(error.localizedDescription, privacy: .private)")
@@ -1375,21 +1309,15 @@ final class HistoryViewModel {
     }
 
     /// Re-runs the current search after a capture, content change or deletion. Within the first
-    /// page, or while a search for a new query is still running, that is a plain `search()`. Past
+    /// page, or while a search for a new query is still running, it restarts the first page. Past
     /// it, one request at offset 0 covers every loaded row, so the change lands without collapsing
     /// the rows the user paged through back to the first page. The refresh holds the paging slot,
     /// so a `loadMore` waits for it instead of reading an offset the change just moved.
     private func refreshSearchAfterHistoryChange() {
-        guard loadedCount > Self.initialPageSize, !searchIsPending else {
-            search()
+        guard loadedCount > Self.initialPageSize, !requests.replacementIsPending else {
+            startSearch()
             return
         }
-        cancelTask(&loadMoreTask)
-        cancelTask(&refineTask)
-        // An interrupted page must neither land nor release the slot or the loading state.
-        searchVersion &+= 1
-        isLoading = false
-        let currentVersion = searchVersion
         let request = SearchRequest(
             query: searchQuery,
             mode: searchMode,
@@ -1403,24 +1331,19 @@ final class HistoryViewModel {
             offset: 0
         )
         let debounceNs = effectiveSearchDebounceNs(for: searchQuery.trimmingCharacters(in: .whitespacesAndNewlines))
-        loadMoreTask = Task {
-            defer {
-                if currentVersion == searchVersion {
-                    loadMoreTask = nil
-                }
-            }
+        requests.refresh { [self] currentVersion in
             // A burst of events costs one request.
             try? await Task.sleep(nanoseconds: debounceNs)
-            guard !Task.isCancelled, currentVersion == searchVersion else { return }
+            guard requests.isCurrent(currentVersion) else { return }
             do {
                 let result = try await service.search(query: request)
-                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                guard requests.isCurrent(currentVersion) else { return }
                 prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
                 replaceSearchPage(with: result, skippingIdenticalRefine: true)
                 searchCoverage = result.coverage
                 fetchFailureMessage = nil
             } catch {
-                guard !Task.isCancelled, currentVersion == searchVersion else { return }
+                guard requests.isCurrent(currentVersion) else { return }
                 searchCoverage = .incomplete
                 reportFetchFailure(String(localized: "Search failed"), error)
                 ScopyLog.app.error("Search refresh failed: \(error.localizedDescription, privacy: .private)")
@@ -1617,7 +1540,6 @@ final class HistoryViewModel {
                 await self?.commitPendingDeletion(token: token)
             }
         )
-        undoableDeletionID = item.id
         if let previous { await sendDeletion(previous) }
     }
 
@@ -1625,7 +1547,6 @@ final class HistoryViewModel {
         guard let pending = pendingDeletion else { return }
         pending.commit.cancel()
         pendingDeletion = nil
-        undoableDeletionID = nil
         revive(pending)
     }
 
@@ -1634,7 +1555,6 @@ final class HistoryViewModel {
         guard let pending = pendingDeletion else { return }
         pending.commit.cancel()
         pendingDeletion = nil
-        undoableDeletionID = nil
         await sendDeletion(pending)
     }
 
@@ -1656,7 +1576,6 @@ final class HistoryViewModel {
     private func commitPendingDeletion(token: UUID) async {
         guard let pending = pendingDeletion, pending.token == token else { return }
         pendingDeletion = nil
-        undoableDeletionID = nil
         await sendDeletion(pending)
     }
 
@@ -1686,7 +1605,6 @@ final class HistoryViewModel {
     private func discardPendingDeletion() {
         pendingDeletion?.commit.cancel()
         pendingDeletion = nil
-        undoableDeletionID = nil
     }
 
     /// A pending deletion is undone implicitly when the backend publishes the same row again
@@ -1918,12 +1836,8 @@ final class HistoryViewModel {
     /// a key and read again after any event themselves.
     private func invalidateInFlightProjectionWorkForDeletion() {
         guard !isUnfilteredList else { return }
-        cancelTask(&searchTask)
-        cancelTask(&loadMoreTask)
-        cancelTask(&refineTask)
+        requests.cancel()
         cancelTask(&storageDetailsTask)
-        searchVersion &+= 1
-        isLoading = false
     }
 
     private func resolvePinnedSurvivors(
@@ -1954,13 +1868,9 @@ final class HistoryViewModel {
     private func prepareForItemsCleared(
         pinnedSurvivors: PinnedSurvivorResolution
     ) {
-        cancelTask(&searchTask)
-        cancelTask(&loadMoreTask)
-        cancelTask(&refineTask)
+        requests.cancel()
         cancelTask(&storageDetailsTask)
-        searchVersion &+= 1
         projectionIdentity = UUID()
-        isLoading = false
         selectedID = nil
         lastSelectionSource = .programmatic
         let preservedItems = isUnfilteredList ? pinnedSurvivors.items : []
@@ -1980,7 +1890,7 @@ final class HistoryViewModel {
         }
 
         search()
-        await searchTask?.value
+        await requests.waitForPrimary()
     }
 
     private func resolvedFileURLs(for item: ClipboardItemDTO) async -> [URL] {
@@ -2043,7 +1953,7 @@ final class HistoryViewModel {
         reconcileSelectionAfterProjectionReplacement()
     }
 
-    private func applyRefinedSearchPage(with result: SearchResultPage, version: Int) async -> Bool {
+    private func applyRefinedSearchPage(with result: SearchResultPage, version: HistoryRequestLifecycle.Version) async -> Bool {
         let hits = acceptedSearchHits(result.hits)
         let existingIDs = Set(items.map(\.id))
         let newHits = hits.filter { !existingIDs.contains($0.item.id) }
@@ -2061,20 +1971,20 @@ final class HistoryViewModel {
             guard await appendSearchPage(with: additions, version: version) else { return false }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
-        guard !Task.isCancelled, version == searchVersion else { return false }
+        guard requests.isCurrent(version) else { return false }
         replaceSearchPage(with: result, skippingIdenticalRefine: true)
         return true
     }
 
-    private func appendSearchPage(with result: SearchResultPage, version: Int) async -> Bool {
-        guard !Task.isCancelled, version == searchVersion else { return false }
+    private func appendSearchPage(with result: SearchResultPage, version: HistoryRequestLifecycle.Version) async -> Bool {
+        guard requests.isCurrent(version) else { return false }
         if result.hits.isEmpty {
             mutateProjection { $0.updatePagination(total: result.total, hasMore: result.hasMore) }
             return true
         }
         var start = 0
         while start < result.hits.count {
-            guard !Task.isCancelled, version == searchVersion else { return false }
+            guard requests.isCurrent(version) else { return false }
             let end = min(start + Self.loadMoreApplyChunkRows, result.hits.count)
             let hits = acceptedSearchHits(Array(result.hits[start..<end]))
             let resultItems = hits.map(\.item)

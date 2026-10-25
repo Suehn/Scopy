@@ -118,37 +118,46 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     }
 
     func testDeletesStartedDuringACommitAreAllSentAndTheNewestStaysUndoable() async {
-        let service = HistoryViewModelRegressionService(items: makeItems(count: 4))
-        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
-        viewModel.configureTiming(.longUndoWindowRegressionTests)
-        defer { viewModel.stop() }
-        await viewModel.load()
-        let (first, second, third, fourth) = (viewModel.items[0], viewModel.items[1], viewModel.items[2], viewModel.items[3])
+        for searches in [false, true] {
+            let service = HistoryViewModelRegressionService(items: makeItems(count: 4))
+            let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+            viewModel.configureTiming(.longUndoWindowRegressionTests)
+            defer { viewModel.stop() }
+            await viewModel.load()
+            if searches {
+                viewModel.searchQuery = "item"
+                viewModel.searchMode = .exact
+                viewModel.search()
+                await waitUntil(timeout: 1.0) { !viewModel.isLoading }
+            }
+            let (first, second, third, fourth) = (viewModel.items[0], viewModel.items[1], viewModel.items[2], viewModel.items[3])
 
-        await viewModel.delete(first)
-        // The second delete commits the first one; the backend suspends that commit, and the third
-        // delete starts while the second is still inside it.
-        let firstDeleteStarted = expectation(description: "Backend delete of the first row started")
-        service.suspendNextDelete = true
-        service.onDeleteStarted = { firstDeleteStarted.fulfill() }
-        let secondDelete = Task { await viewModel.delete(second) }
-        await fulfillment(of: [firstDeleteStarted], timeout: 1.0)
-        let thirdDelete = Task { await viewModel.delete(third) }
-        await waitUntil(timeout: 1.0) { viewModel.undoableDeletionID == third.id }
-        XCTAssertEqual(viewModel.undoableDeletionID, third.id, "The newest delete owns the undo slot")
-        service.resumeDelete()
-        await secondDelete.value
-        await thirdDelete.value
+            await viewModel.delete(first)
+            // The second delete commits the first one; the backend suspends that commit, and the third
+            // delete starts while the second is still inside it.
+            let firstDeleteStarted = expectation(description: "Backend delete of the first row started")
+            service.suspendNextDelete = true
+            service.onDeleteStarted = { firstDeleteStarted.fulfill() }
+            let secondDelete = Task { await viewModel.delete(second) }
+            await fulfillment(of: [firstDeleteStarted], timeout: 1.0)
+            let thirdDelete = Task { await viewModel.delete(third) }
+            await waitUntil(timeout: 1.0) { viewModel.undoableDeletionID == third.id }
+            XCTAssertEqual(viewModel.undoableDeletionID, third.id, "The newest delete owns the undo slot")
+            service.resumeDelete()
+            await secondDelete.value
+            await thirdDelete.value
 
-        XCTAssertEqual(service.items.map(\.id), [third.id, fourth.id], "Both earlier deletes reached the backend")
-        XCTAssertEqual(viewModel.items.map(\.id), [fourth.id])
+            XCTAssertEqual(service.items.map(\.id), [third.id, fourth.id], "Both earlier deletes reached the backend")
+            XCTAssertEqual(viewModel.items.map(\.id), [fourth.id])
 
-        // The backend publishes the two deletions; the third row must still be undoable in place.
-        await viewModel.handleEvent(.itemDeleted(first.id))
-        await viewModel.handleEvent(.itemDeleted(second.id))
-        await viewModel.undoPendingDeletion()
-        XCTAssertEqual(viewModel.items.map(\.id), [third.id, fourth.id], "Undo after real deletion events puts the row back")
-        XCTAssertEqual(service.items.map(\.id), [third.id, fourth.id])
+            // The backend publishes the two deletions; the third row must still be undoable in place.
+            await viewModel.handleEvent(.itemDeleted(first.id))
+            await viewModel.handleEvent(.itemDeleted(second.id))
+            await waitUntil(timeout: 1.0) { !viewModel.isLoading }
+            await viewModel.undoPendingDeletion()
+            XCTAssertEqual(viewModel.items.map(\.id), [third.id, fourth.id], "Undo after real deletion events puts the row back")
+            XCTAssertEqual(service.items.map(\.id), [third.id, fourth.id])
+        }
     }
 
     func testPagingSkipsTheRowWhoseDeleteIsStillDeferred() async {
@@ -166,20 +175,33 @@ final class HistoryViewModelRegressionTests: XCTestCase {
     }
 
     func testPagingAfterADeletionEventStillSkipsThePendingRow() async {
-        let all = makeItems(count: 120)
-        let service = HistoryViewModelRegressionService(items: all)
-        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
-        viewModel.configureTiming(.longUndoWindowRegressionTests)
-        defer { viewModel.stop() }
-        await viewModel.load()
+        for searches in [false, true] {
+            let all = makeItems(count: 120)
+            let service = HistoryViewModelRegressionService(items: all)
+            let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+            viewModel.configureTiming(.longUndoWindowRegressionTests)
+            defer { viewModel.stop() }
+            await viewModel.load()
+            if searches {
+                viewModel.searchQuery = "item"
+                viewModel.searchMode = .exact
+                viewModel.search()
+                await waitUntil(timeout: 1.0) { !viewModel.isLoading }
+            }
 
-        await viewModel.delete(viewModel.items[0])
-        await viewModel.delete(viewModel.items[0])
-        // The first delete was committed by the second; its backend event arrives before paging.
-        await viewModel.handleEvent(.itemDeleted(all[0].id))
-        await viewModel.loadMore()
+            await viewModel.delete(viewModel.items[0])
+            await viewModel.delete(viewModel.items[0])
+            // The first delete was committed by the second; its backend event arrives before paging.
+            await viewModel.handleEvent(.itemDeleted(all[0].id))
+            await waitUntil(timeout: 1.0) { !viewModel.isLoading }
+            await viewModel.loadMore()
+            if searches {
+                XCTAssertEqual(service.searchRequests.last?.offset, HistoryViewModel.initialPageSize,
+                               "The refresh still counts the deferred backend row in the next offset")
+            }
 
-        XCTAssertEqual(viewModel.items.map(\.id), all.dropFirst(2).map(\.id), "No duplicate and no gap around the deferred row")
+            XCTAssertEqual(viewModel.items.map(\.id), all.dropFirst(2).map(\.id), "No duplicate and no gap around the deferred row")
+        }
     }
 
     func testUndoOfADeepRowKeepsTheLoadedPages() async {
