@@ -86,7 +86,7 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(finishCount, 1)
     }
 
-    func testDeinitFinishesActiveRowExitIntentExactlyOnce() async {
+    func testDeinitFinishesActiveRowExitIntentExactlyOnce() async throws {
         let interactionCoordinator = HistoryListInteractionCoordinator()
         let itemID = UUID()
         let finished = expectation(description: "active row-exit intent finished during teardown")
@@ -103,13 +103,13 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(interactionCoordinator.beginHoverPreviewTransfer(for: itemID))
+        let transferToken = try XCTUnwrap(interactionCoordinator.beginHoverPreviewTransferToken(for: itemID))
         coordinator?.startRowExitIntent(
             from: .zero,
             onDismiss: { },
             onFinish: {
                 finishCount += 1
-                interactionCoordinator.endHoverPreviewTransfer(for: itemID)
+                interactionCoordinator.endHoverPreviewTransfer(token: transferToken)
                 finished.fulfill()
             }
         )

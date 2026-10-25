@@ -21,11 +21,27 @@ struct HistoryRowLiveState: Equatable {
 /// whole `List` body and diffing every loaded item.
 @MainActor
 final class HistoryRowLiveStateFanout {
+    /// Identifies one mounted row, independently of the item's identity. Pinning or list
+    /// virtualization can mount its replacement before the old row disappears.
+    struct RegistrationToken: Equatable {
+        let itemID: UUID
+        private let identity = UUID()
+
+        init(itemID: UUID) {
+            self.itemID = itemID
+        }
+    }
+
+    private struct Registration {
+        let token: RegistrationToken
+        let sink: (HistoryRowLiveState) -> Void
+    }
+
     private(set) var selectedID: UUID?
     private(set) var presentedPreview: HoverPreviewPopoverState?
     private var evidence: [UUID: SearchMatchContext] = [:]
     private var quickSlots: [UUID: Int] = [:]
-    private var sinks: [UUID: (HistoryRowLiveState) -> Void] = [:]
+    private var registrations: [UUID: Registration] = [:]
 
     /// Runs after a selection change was fanned out. `follow` is true for keyboard navigation,
     /// where the list scrolls the selected row into view.
@@ -40,26 +56,30 @@ final class HistoryRowLiveStateFanout {
         )
     }
 
-    /// Registers the visible row for `itemID` and returns its state right now.
+    /// Registers this visible row and returns its state right now.
     @discardableResult
-    func register(itemID: UUID, sink: @escaping (HistoryRowLiveState) -> Void) -> HistoryRowLiveState {
-        sinks[itemID] = sink
-        return state(for: itemID)
+    func register(
+        _ token: RegistrationToken,
+        sink: @escaping (HistoryRowLiveState) -> Void
+    ) -> HistoryRowLiveState {
+        registrations[token.itemID] = Registration(token: token, sink: sink)
+        return state(for: token.itemID)
     }
 
-    func unregister(itemID: UUID) {
-        sinks[itemID] = nil
+    func unregister(_ token: RegistrationToken) {
+        guard registrations[token.itemID]?.token == token else { return }
+        registrations[token.itemID] = nil
     }
 
     func update(selectedID newID: UUID?, follow: Bool) {
         let oldID = selectedID
         guard oldID != newID else { return }
         selectedID = newID
-        if let oldID, let sink = sinks[oldID] {
-            sink(state(for: oldID))
+        if let oldID, let registration = registrations[oldID] {
+            registration.sink(state(for: oldID))
         }
-        if let newID, let sink = sinks[newID] {
-            sink(state(for: newID))
+        if let newID, let registration = registrations[newID] {
+            registration.sink(state(for: newID))
         }
         onSelectionChanged?(newID, follow)
     }
@@ -69,11 +89,11 @@ final class HistoryRowLiveStateFanout {
         let previous = presentedPreview
         guard previous != next else { return }
         presentedPreview = next
-        if let previousID = previous?.itemID, let sink = sinks[previousID] {
-            sink(state(for: previousID))
+        if let previousID = previous?.itemID, let registration = registrations[previousID] {
+            registration.sink(state(for: previousID))
         }
-        if let nextID = next?.itemID, nextID != previous?.itemID, let sink = sinks[nextID] {
-            sink(state(for: nextID))
+        if let nextID = next?.itemID, nextID != previous?.itemID, let registration = registrations[nextID] {
+            registration.sink(state(for: nextID))
         }
     }
 
@@ -89,8 +109,8 @@ final class HistoryRowLiveStateFanout {
         #endif
         let previous = evidence
         evidence = next
-        for (itemID, sink) in sinks where previous[itemID] != next[itemID] {
-            sink(state(for: itemID))
+        for (itemID, registration) in registrations where previous[itemID] != next[itemID] {
+            registration.sink(state(for: itemID))
         }
     }
 
@@ -99,8 +119,8 @@ final class HistoryRowLiveStateFanout {
         let previous = quickSlots
         guard previous != next else { return }
         quickSlots = next
-        for (itemID, sink) in sinks where previous[itemID] != next[itemID] {
-            sink(state(for: itemID))
+        for (itemID, registration) in registrations where previous[itemID] != next[itemID] {
+            registration.sink(state(for: itemID))
         }
     }
 }

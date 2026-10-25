@@ -274,13 +274,6 @@ final class HistoryListInteractionCoordinator {
         publishPassivePathSnapshot()
     }
 
-    /// Compatibility cleanup for legacy callers. New production adapters must retain the token
-    /// returned by `beginPointerInteraction()` and use the token-matched overload above.
-    func endPointerInteraction() {
-        guard let pointerInteractionToken else { return }
-        endPointerInteraction(token: pointerInteractionToken)
-    }
-
     /// Cancels every passive-path ownership and scheduled restoration.
     func tearDownPassivePath() {
         invalidateCooldown(keepDeadline: false)
@@ -291,23 +284,8 @@ final class HistoryListInteractionCoordinator {
         publishPassivePathSnapshot()
     }
 
-    /// Claims the short row-to-popover handoff for one source row. Other rows stay visually
-    /// hoverable, but defer selection and preview work until this ownership ends.
-    @discardableResult
-    func beginHoverPreviewTransfer(for itemID: UUID) -> Bool {
-        if hoverPreviewTransferOwnerID == itemID {
-            return true
-        }
-        guard hoverPreviewTransferToken == nil else {
-            return false
-        }
-        hoverPreviewTransferToken = HoverPreviewTransferToken(itemID: itemID)
-        publishPassivePathSnapshot()
-        return true
-    }
-
-    /// Tokenized production ownership. A delayed completion from an old safe-corridor intent
-    /// cannot end a newer transfer for the same row ID.
+    /// Claims the short row-to-popover handoff. A delayed completion from an old safe-corridor
+    /// intent cannot end a newer transfer for the same row ID.
     func beginHoverPreviewTransferToken(
         for itemID: UUID
     ) -> HoverPreviewTransferToken? {
@@ -321,11 +299,6 @@ final class HistoryListInteractionCoordinator {
     func endHoverPreviewTransfer(token: HoverPreviewTransferToken) {
         guard hoverPreviewTransferToken == token else { return }
         finishHoverPreviewTransfer(itemID: token.itemID)
-    }
-
-    func endHoverPreviewTransfer(for itemID: UUID) {
-        guard hoverPreviewTransferOwnerID == itemID else { return }
-        finishHoverPreviewTransfer(itemID: itemID)
     }
 
     private func finishHoverPreviewTransfer(itemID: UUID) {

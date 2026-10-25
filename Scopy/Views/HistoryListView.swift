@@ -651,6 +651,7 @@ private struct HistoryLiveRow<Content: View>: View, Equatable {
     let fanout: HistoryRowLiveStateFanout
     let content: (ClipboardItemDTO, HistoryRowContext, HistoryRowLiveState) -> Content
     @State private var live: HistoryRowLiveState
+    @State private var registrationToken: HistoryRowLiveStateFanout.RegistrationToken?
 
     init(
         item: ClipboardItemDTO,
@@ -672,13 +673,22 @@ private struct HistoryLiveRow<Content: View>: View, Equatable {
     var body: some View {
         content(item, context, live)
             .onAppear {
-                live = fanout.register(itemID: item.id) { state in
+                let token: HistoryRowLiveStateFanout.RegistrationToken
+                if let registrationToken {
+                    token = registrationToken
+                } else {
+                    token = .init(itemID: item.id)
+                    registrationToken = token
+                }
+                live = fanout.register(token) { state in
                     live = state
                 }
                 historyViewModel.rowDidAppear(itemID: item.id)
             }
             .onDisappear {
-                fanout.unregister(itemID: item.id)
+                if let registrationToken {
+                    fanout.unregister(registrationToken)
+                }
             }
     }
 }

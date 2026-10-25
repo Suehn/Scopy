@@ -7,9 +7,9 @@ final class HistoryRowLiveStateFanoutTests: XCTestCase {
         let fanout = HistoryRowLiveStateFanout()
         let a = UUID(), b = UUID(), c = UUID()
         var log: [String] = []
-        fanout.register(itemID: a) { log.append("a:\($0.isSelected)") }
-        fanout.register(itemID: b) { log.append("b:\($0.isSelected)") }
-        fanout.register(itemID: c) { log.append("c:\($0.isSelected)") }
+        fanout.register(.init(itemID: a)) { log.append("a:\($0.isSelected)") }
+        fanout.register(.init(itemID: b)) { log.append("b:\($0.isSelected)") }
+        fanout.register(.init(itemID: c)) { log.append("c:\($0.isSelected)") }
 
         fanout.update(selectedID: a, follow: false)
         fanout.update(selectedID: b, follow: true)
@@ -25,10 +25,11 @@ final class HistoryRowLiveStateFanoutTests: XCTestCase {
         let a = UUID()
         fanout.update(selectedID: a, follow: false)
         var received: [HistoryRowLiveState] = []
+        let token = HistoryRowLiveStateFanout.RegistrationToken(itemID: a)
 
-        XCTAssertTrue(fanout.register(itemID: a) { received.append($0) }.isSelected)
-        XCTAssertFalse(fanout.register(itemID: UUID()) { _ in }.isSelected)
-        fanout.unregister(itemID: a)
+        XCTAssertTrue(fanout.register(token) { received.append($0) }.isSelected)
+        XCTAssertFalse(fanout.register(.init(itemID: UUID())) { _ in }.isSelected)
+        fanout.unregister(token)
         fanout.update(selectedID: nil, follow: false)
 
         XCTAssertTrue(received.isEmpty)
@@ -50,5 +51,31 @@ final class HistoryRowLiveStateFanoutTests: XCTestCase {
         XCTAssertTrue(calls[0].1)
         XCTAssertNil(calls[1].0)
         XCTAssertFalse(calls[1].1)
+    }
+
+    func testDisappearingRowCannotUnregisterItsReplacement() {
+        let fanout = HistoryRowLiveStateFanout()
+        let itemID = UUID()
+        let oldRow = HistoryRowLiveStateFanout.RegistrationToken(itemID: itemID)
+        let newRow = HistoryRowLiveStateFanout.RegistrationToken(itemID: itemID)
+        var oldValues: [HistoryRowLiveState] = []
+        var newValues: [HistoryRowLiveState] = []
+
+        fanout.register(oldRow) { oldValues.append($0) }
+        fanout.register(newRow) { newValues.append($0) }
+        fanout.unregister(oldRow)
+        fanout.update(selectedID: itemID, follow: false)
+        fanout.updateQuickSlots([itemID: 1])
+        fanout.updatePresentedPreview(.init(itemID: itemID, kind: .text))
+
+        XCTAssertTrue(oldValues.isEmpty)
+        XCTAssertEqual(newValues.count, 3)
+        XCTAssertTrue(newValues.last?.isSelected == true)
+        XCTAssertEqual(newValues.last?.quickSlot, 1)
+        XCTAssertEqual(newValues.last?.presentedPreview, .text)
+
+        fanout.unregister(newRow)
+        fanout.update(selectedID: nil, follow: false)
+        XCTAssertEqual(newValues.count, 3)
     }
 }

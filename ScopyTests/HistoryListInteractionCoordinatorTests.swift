@@ -68,13 +68,13 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
     func testPointerInteractionSuppressesPreviewWithoutChangingScrollState() {
         let coordinator = HistoryListInteractionCoordinator()
 
-        coordinator.beginPointerInteraction()
+        let token = coordinator.beginPointerInteraction()
 
         XCTAssertFalse(coordinator.isScrolling)
         XCTAssertTrue(coordinator.isPointerInteractionActive)
         XCTAssertTrue(coordinator.isHoverPreviewSuppressed)
 
-        coordinator.endPointerInteraction()
+        coordinator.endPointerInteraction(token: token)
 
         XCTAssertFalse(coordinator.isPointerInteractionActive)
         XCTAssertFalse(coordinator.isHoverPreviewSuppressed)
@@ -331,16 +331,14 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
         let sourceItemID = UUID()
         let adjacentItemID = UUID()
 
-        XCTAssertTrue(coordinator.beginHoverPreviewTransfer(for: sourceItemID))
+        let transfer = tryUnwrap(coordinator.beginHoverPreviewTransferToken(for: sourceItemID))
         XCTAssertEqual(coordinator.hoverPreviewTransferOwnerID, sourceItemID)
         XCTAssertFalse(coordinator.isHoverPreviewTransferBlocked(for: sourceItemID))
         XCTAssertTrue(coordinator.isHoverPreviewTransferBlocked(for: adjacentItemID))
-        XCTAssertFalse(coordinator.beginHoverPreviewTransfer(for: adjacentItemID))
+        XCTAssertNil(coordinator.beginHoverPreviewTransferToken(for: adjacentItemID))
+        XCTAssertNil(coordinator.beginHoverPreviewTransferToken(for: sourceItemID))
 
-        coordinator.endHoverPreviewTransfer(for: adjacentItemID)
-        XCTAssertEqual(coordinator.hoverPreviewTransferOwnerID, sourceItemID)
-
-        coordinator.endHoverPreviewTransfer(for: sourceItemID)
+        coordinator.endHoverPreviewTransfer(token: transfer)
         XCTAssertNil(coordinator.hoverPreviewTransferOwnerID)
     }
 
@@ -355,9 +353,9 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
             onEvent: { passiveEvents.append($0) },
             restore: {}
         ))
-        XCTAssertTrue(coordinator.beginHoverPreviewTransfer(for: sourceItemID))
+        let transfer = tryUnwrap(coordinator.beginHoverPreviewTransferToken(for: sourceItemID))
 
-        coordinator.endHoverPreviewTransfer(for: sourceItemID)
+        coordinator.endHoverPreviewTransfer(token: transfer)
 
         let expected = HistoryListInteractionCoordinator.Event.hoverPreviewTransferEnded(
             itemID: sourceItemID
@@ -384,9 +382,9 @@ final class HistoryListInteractionCoordinatorTests: XCTestCase {
             onEvent: { currentEvents.append($0) },
             restore: {}
         ))
-        XCTAssertTrue(coordinator.beginHoverPreviewTransfer(for: sourceItemID))
+        let transfer = tryUnwrap(coordinator.beginHoverPreviewTransferToken(for: sourceItemID))
 
-        coordinator.endHoverPreviewTransfer(for: sourceItemID)
+        coordinator.endHoverPreviewTransfer(token: transfer)
 
         XCTAssertEqual(staleEventCount, 0)
         XCTAssertEqual(
