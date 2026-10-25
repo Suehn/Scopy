@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import XCTest
 
 @testable import ScopyKit
@@ -34,7 +35,7 @@ private actor CleanupCommitGate {
 
 @MainActor
 final class ClipboardServiceCleanupTests: XCTestCase {
-    func testCancelledCallerStillPublishesCleanupCommittedBeforeCancellation() async throws {
+    func testStopDrainsCommittedCleanupAndKeepsItsWriterLockAfterCallerCancellation() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-cleanup-cancellation-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -86,10 +87,36 @@ final class ClipboardServiceCleanupTests: XCTestCase {
 
         await gate.waitUntilPaused()
         updateTask.cancel()
+        let stopTask = Task { await service.stop() }
+        await waitForConditionAsync(timeout: 2, pollInterval: 0.01) {
+            await service.isDrainingStorageRequestsForTesting
+        }
+        do {
+            _ = try await service.fetchRecent(limit: 1, offset: 0)
+            XCTFail("Shutdown must reject new storage requests while draining the admitted ones")
+        } catch {
+            if case ClipboardBackend.ClipboardBackendError.notStarted = error {
+                // Expected: the admitted cleanup owns the store, but new callers cannot borrow it.
+            } else {
+                XCTFail("Unexpected shutdown admission error: \(error)")
+            }
+        }
+
+        let lockPath = directory.appendingPathComponent(StorageRootLock.lockFileName).path
+        do {
+            let descriptor = try StorageRootLock.lockFile(atPath: lockPath)
+            close(descriptor)
+            XCTFail("Shutdown released its writer lock while committed cleanup was still paused")
+        } catch {
+            XCTAssertEqual(error as? StorageRootLock.HeldByAnotherProcess, .init(rootPath: directory.path))
+        }
+
         await gate.release()
         await fulfillment(of: [removalDelivered], timeout: 2.0)
         _ = try? await updateTask.value
-        await service.stop()
+        await stopTask.value
+        let reacquired = try StorageRootLock.lockFile(atPath: lockPath)
+        close(reacquired)
 
         XCTAssertEqual(deliveredIDs, [oldest.id])
         let verifier = StorageService(databasePath: databasePath)

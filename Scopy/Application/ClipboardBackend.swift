@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// The backend facade: composes monitor, storage, search, and settings, and owns the event stream.
-/// `ClipboardMonitor` is `@MainActor` and crossed with `MainActor.run {}`; `StorageService` is its own actor,
+/// `ClipboardMonitor` is `@MainActor`; `StorageService` is its own actor,
 /// so storage calls never touch the main thread. The UI reaches this actor through `RealClipboardService`.
 actor ClipboardBackend {
     // MARK: - Types
@@ -159,19 +159,37 @@ actor ClipboardBackend {
     private var monitorTask: Task<Void, Never>?
     private var storageRootLock: StorageRootLock?
     private var memoryPressureSources: [any DispatchSourceMemoryPressure] = []
-    private var isStarted = false
+    private enum Lifecycle {
+        case stopped
+        case starting(Task<Void, Error>)
+        case running
+        case stopping(Task<Void, Never>)
+    }
+
+    private var lifecycle: Lifecycle = .stopped
+    private var isStarted: Bool {
+        if case .running = lifecycle { return true }
+        return false
+    }
+    private var activeStorageRequests = 0
+    private var storageRequestsDrained: CheckedContinuation<Void, Never>?
+    #if DEBUG
+    var isDrainingStorageRequestsForTesting: Bool { storageRequestsDrained != nil }
+    #endif
+    private var orphanCleanupTask: Task<Void, Never>?
     private var captureStatusMonitorID: UUID?
     private var captureStatusRevision: UInt64 = 0
+    private var captureStatusTask: Task<Void, Never>?
 
     // MARK: - Cleanup Scheduling
 
     private var cleanupTask: Task<Void, Never>?
-    private var isCleanupRunning = false
+    private var cleanupDeadline: ContinuousClock.Instant?
     private var lastLightCleanupAt: Date = .distantPast
     private var lastFullCleanupAt: Date = .distantPast
     private let lightCleanupInterval: TimeInterval = 60
     private let fullCleanupInterval: TimeInterval = 3600
-    private let cleanupDebounceDelay: TimeInterval = 2.0
+    private let cleanupDebounceDelay: Duration = .seconds(2)
 
     // MARK: - File Size Computation
 
@@ -218,6 +236,8 @@ actor ClipboardBackend {
     deinit {
         monitorTask?.cancel()
         cleanupTask?.cancel()
+        orphanCleanupTask?.cancel()
+        captureStatusTask?.cancel()
         if let thumbnailGenerationQueue {
             Task.detached {
                 await thumbnailGenerationQueue.stop()
@@ -236,8 +256,30 @@ actor ClipboardBackend {
     // MARK: - Lifecycle
 
     func start() async throws {
-        guard !isStarted else { return }
+        switch lifecycle {
+        case .running:
+            return
+        case .starting(let task):
+            try await task.value
+        case .stopping(let task):
+            await task.value
+            try await start()
+        case .stopped:
+            let task = Task {
+                do {
+                    try await startResources()
+                    lifecycle = .running
+                } catch {
+                    lifecycle = .stopped
+                    throw error
+                }
+            }
+            lifecycle = .starting(task)
+            try await task.value
+        }
+    }
 
+    private func startResources() async throws {
         // Claim the storage root before any spool or directory work so a second process
         // cannot orphan-sweep payloads or double-capture the pasteboard.
         let databasePath = databasePath
@@ -325,34 +367,30 @@ actor ClipboardBackend {
                 await Task.yield()
             }
 
-            await MainActor.run {
-                monitor.startMonitoring()
-            }
-
-            let monitorTask = Task { [weak self] in
-                guard let self else { return }
-                guard let stream = await self.getMonitorStream() else { return }
-                for await content in stream {
-                    guard !Task.isCancelled else { break }
-                    await self.handleNewContent(content)
-                }
-            }
-
             self.settings = loadedSettings
             self.monitor = monitor
             self.storage = storage
             self.search = search
-            self.monitorTask = monitorTask
             self.storageRootLock = rootLock
-            self.isStarted = true
             startMemoryPressureMonitoring()
 
             await startBackgroundMediaQueuesIfNeeded()
-
             scheduleThumbnailCacheIndexBuildIfNeeded(thumbnailCacheRoot: storage.thumbnailCacheDirectoryPath)
-
-            Task { [storage] in
+            orphanCleanupTask = Task { [storage] in
                 try? await storage.cleanupOrphanedFiles()
+            }
+
+            await monitor.startMonitoring()
+            let stream = monitor.contentStream
+            monitorTask = Task { [weak self] in
+                for await content in stream {
+                    guard !Task.isCancelled else {
+                        IngestEnvelopeProcessor.cleanupPayloadIfNeeded(content.payload, ownership: content.fileOwnership)
+                        break
+                    }
+                    guard let self else { return }
+                    await self.handleNewContent(content)
+                }
             }
         } catch {
             self.captureStatusMonitorID = nil
@@ -384,64 +422,79 @@ actor ClipboardBackend {
     }
 
     private func handleMemoryPressure(critical: Bool) async {
+        guard let storage = try? beginStorageRequest() else { return }
+        defer { endStorageRequest() }
         await search?.trimSessionMemory(critical ? .memoryCritical : .memoryWarning)
         if critical {
-            await storage?.repository.releaseMemory()
+            await storage.repository.releaseMemory()
         }
     }
 
     func stop() async {
-        guard isStarted else { return }
-        isStarted = false
-        captureStatusMonitorID = nil
+        switch lifecycle {
+        case .stopped:
+            return
+        case .starting(let task):
+            _ = try? await task.value
+            await stop()
+        case .stopping(let task):
+            await task.value
+        case .running:
+            let task = Task {
+                await stopResources()
+                lifecycle = .stopped
+            }
+            lifecycle = .stopping(task)
+            await task.value
+        }
+    }
 
-        let monitor = monitor
-        let storage = storage
-        let search = search
-        let rootLock = storageRootLock
-        storageRootLock = nil
+    private func stopResources() async {
+        captureStatusMonitorID = nil
         memoryPressureSources.forEach { $0.cancel() }
         memoryPressureSources = []
 
+        // Keep every resource and task owner until its work has returned. A cancelled task may
+        // still own a spool write, a committed cleanup publication, or a managed-file unlink.
+        monitorTask?.cancel()
+        cleanupTask?.cancel()
+        orphanCleanupTask?.cancel()
+        thumbnailCacheIndexTask?.cancel()
+        captureStatusTask?.cancel()
+        await monitor?.stopAndWait()
         await stopBackgroundMediaQueues()
+        await monitorTask?.value
+        await cleanupTask?.value
+        await orphanCleanupTask?.value
+        await thumbnailCacheIndexTask?.value
+        await captureStatusTask?.value
 
+        if activeStorageRequests > 0 {
+            await withCheckedContinuation { storageRequestsDrained = $0 }
+        }
+
+        // Only the writer, closing after the read connection, can checkpoint and truncate WAL.
+        await search?.close()
+        await storage?.close()
+
+        monitorTask = nil
+        cleanupTask = nil
+        orphanCleanupTask = nil
+        thumbnailCacheIndexTask = nil
+        captureStatusTask = nil
+        thumbnailCacheIndex = nil
         self.monitor = nil
         self.storage = nil
         self.search = nil
-        thumbnailCacheIndex = nil
-
-        thumbnailCacheIndexTask?.cancel()
-        thumbnailCacheIndexTask = nil
-
-        monitorTask?.cancel()
-        monitorTask = nil
-
-        cleanupTask?.cancel()
-        cleanupTask = nil
-
-        if let monitor {
-            await MainActor.run {
-                monitor.stopMonitoring()
-            }
-        }
-
-        // Close the read-only search connection first: only the writer, closing last, can checkpoint
-        // and truncate the WAL, so the next launch starts without frames to replay.
-        if let search {
-            await search.close()
-        }
-
-        if let storage {
-            await storage.close()
-        }
-
-        rootLock?.release()
+        storageRootLock?.release()
+        storageRootLock = nil
     }
 
     // MARK: - Data Access
 
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let items = try await storage.fetchRecent(limit: limit, offset: offset)
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(items.count)
@@ -452,7 +505,8 @@ actor ClipboardBackend {
     }
 
     func fetchPinned() async throws -> [ClipboardItemDTO] {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let items = try await storage.fetchPinned()
         var dtos: [ClipboardItemDTO] = []
         dtos.reserveCapacity(items.count)
@@ -463,7 +517,8 @@ actor ClipboardBackend {
     }
 
     func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let page = try await storage.fetchHistoryPage(limit: limit, after: cursor)
         var pinned: [ClipboardItemDTO] = []
         var items: [ClipboardItemDTO] = []
@@ -473,7 +528,8 @@ actor ClipboardBackend {
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let search = try requireSearch()
 
         let result = try await search.search(request: query)
@@ -504,7 +560,8 @@ actor ClipboardBackend {
     }
 
     private func setPinned(itemID: UUID, pinned: Bool) async throws {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         _ = try requireSearch()
         guard let lease = await itemMutationGate.acquire(itemID: itemID) else {
             throw CancellationError()
@@ -527,7 +584,8 @@ actor ClipboardBackend {
     }
 
     func updateNote(itemID: UUID, note: String?) async throws {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         _ = try requireSearch()
 
         guard let existing = try await storage.findByID(itemID) else {
@@ -550,7 +608,8 @@ actor ClipboardBackend {
     }
 
     func delete(itemID: UUID) async throws {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let search = try requireSearch()
 
         try await storage.deleteItem(itemID)
@@ -562,7 +621,8 @@ actor ClipboardBackend {
     }
 
     func clearAll() async throws {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let search = try requireSearch()
 
         try await storage.deleteAllExceptPinned()
@@ -583,7 +643,8 @@ actor ClipboardBackend {
     }
 
     func fileURLs(itemID: UUID) async throws -> [URL] {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         guard let item = try await storage.findByID(itemID) else { return [] }
         let originalURLs = await resolvedFileURLs(for: item, storage: storage)
         if !originalURLs.isEmpty {
@@ -603,7 +664,8 @@ actor ClipboardBackend {
         imageWriteMode: ClipboardMonitor.ImagePasteboardWriteMode
     ) async throws {
         let monitor = try requireMonitor()
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         _ = try requireSearch()
 
         guard let item = try await storage.findByID(itemID) else {
@@ -878,6 +940,10 @@ actor ClipboardBackend {
     }
 
     func updateSettings(_ requestedPatch: SettingsPatch) async throws -> SettingsDTO {
+        // Settings can be saved before startup. Only a running session applies storage side effects.
+        let sessionStorage = isStarted ? try beginStorageRequest() : nil
+        let sessionMonitor = sessionStorage == nil ? nil : monitor
+        defer { if sessionStorage != nil { endStorageRequest() } }
         let oldSettings = settings
         let oldPollingMs = settings.clipboardPollingIntervalMs
 
@@ -887,13 +953,13 @@ actor ClipboardBackend {
 
         if monitorPollingInterval == nil,
            oldPollingMs != newSettings.clipboardPollingIntervalMs,
-           let monitor {
+           let monitor = sessionMonitor {
             await MainActor.run {
                 monitor.setPollingInterval(TimeInterval(newSettings.clipboardPollingIntervalMs) / 1000.0)
             }
         }
 
-        if let storage = storage {
+        if let storage = sessionStorage {
             if patch.affectsThumbnailCache {
                 await stopThumbnailGenerationQueue()
                 invalidateThumbnailCacheIndex()
@@ -932,14 +998,16 @@ actor ClipboardBackend {
     }
 
     func getStorageStats() async throws -> (itemCount: Int, sizeBytes: Int) {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let count = try await storage.getItemCount()
         let contentSize = try await storage.getTotalSize()
         return (count, contentSize)
     }
 
     func getDetailedStorageStats() async throws -> StorageStatsDTO {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let count = try await storage.getItemCount()
         let dbSize = storage.getDatabaseFileSize()
         let externalSize = try await storage.getExternalStorageSizeForStats()
@@ -957,7 +1025,8 @@ actor ClipboardBackend {
     }
 
     func syncExternalImageSizeBytesFromDisk() async throws -> Int {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         let updated = try await storage.syncExternalImageSizeBytesFromDisk()
         if updated > 0 {
             await search?.applyCommittedChanges()
@@ -967,13 +1036,15 @@ actor ClipboardBackend {
     }
 
     func getImageData(itemID: UUID) async throws -> Data? {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         guard let item = try await storage.findByID(itemID) else { return nil }
         return await storage.loadPayloadData(for: item)
     }
 
     func optimizeImage(itemID: UUID) async throws -> ImageOptimizationOutcomeDTO {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         guard !Task.isCancelled else {
             return Self.cancelledImageOptimizationOutcome(originalBytes: 0)
         }
@@ -1484,17 +1555,22 @@ actor ClipboardBackend {
     }
 
     func getRecentApps(limit: Int) async throws -> [String] {
-        let storage = try requireStorage()
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
         return try await storage.getRecentApps(limit: limit)
     }
 
     // MARK: - Internals
 
-    private func publishCaptureReadStatus(_ blocked: Bool, revision: UInt64, monitorID: UUID) async {
-        // Callback tasks can arrive after stop/restart or out of order.
+    private func publishCaptureReadStatus(_ blocked: Bool, revision: UInt64, monitorID: UUID) {
+        // Callback tasks can arrive after stop/restart or out of order. The latest status owns
+        // its send task, so queue backpressure cannot keep an obsolete sender alive on shutdown.
         guard captureStatusMonitorID == monitorID, revision > captureStatusRevision else { return }
         captureStatusRevision = revision
-        await yieldEvent(.captureReadBlocked(blocked))
+        captureStatusTask?.cancel()
+        captureStatusTask = Task { [eventQueue] in
+            await eventQueue.enqueue(.captureReadBlocked(blocked))
+        }
     }
 
     private func requireMonitor() throws -> ClipboardMonitor {
@@ -1502,19 +1578,25 @@ actor ClipboardBackend {
         return monitor
     }
 
-    private func requireStorage() throws -> StorageService {
-        guard let storage else { throw ClipboardBackendError.notStarted }
+    /// Public requests borrow the running store across suspension. Shutdown stops admission and
+    /// waits for the last borrower before closing SQLite or releasing the storage-root lock.
+    private func beginStorageRequest() throws -> StorageService {
+        guard isStarted, let storage else { throw ClipboardBackendError.notStarted }
+        activeStorageRequests += 1
         return storage
+    }
+
+    private func endStorageRequest() {
+        activeStorageRequests -= 1
+        if activeStorageRequests == 0 {
+            storageRequestsDrained?.resume()
+            storageRequestsDrained = nil
+        }
     }
 
     private func requireSearch() throws -> SearchEngineImpl {
         guard let search else { throw ClipboardBackendError.notStarted }
         return search
-    }
-
-    private func getMonitorStream() async -> AsyncStream<ClipboardMonitor.ClipboardContent>? {
-        guard let monitor else { return nil }
-        return monitor.contentStream
     }
 
     private func handleNewContent(_ content: ClipboardMonitor.ClipboardContent) async {
@@ -1728,20 +1810,35 @@ actor ClipboardBackend {
     }
 
     private func scheduleCleanup(storage: StorageService) {
-        cleanupTask?.cancel()
+        guard isStarted else { return }
+        cleanupDeadline = .now.advanced(by: cleanupDebounceDelay)
+        guard cleanupTask == nil else { return }
         cleanupTask = Task { [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: UInt64(cleanupDebounceDelay * 1_000_000_000))
+            await self?.runScheduledCleanup(storage: storage)
+        }
+    }
+
+    /// One task owns both debounce and cleanup. New captures move the deadline without cancelling
+    /// an already-running cleanup or losing its task handle after a commit.
+    private func runScheduledCleanup(storage: StorageService) async {
+        defer {
+            cleanupTask = nil
+            cleanupDeadline = nil
+        }
+        while let deadline = cleanupDeadline, !Task.isCancelled {
+            do {
+                try await Task.sleep(until: deadline)
+            } catch {
+                return
+            }
             guard !Task.isCancelled else { return }
-            await self.runCleanupIfNeeded(storage: storage)
+            guard cleanupDeadline == deadline else { continue }
+            cleanupDeadline = nil
+            await runCleanupIfNeeded(storage: storage)
         }
     }
 
     private func runCleanupIfNeeded(storage: StorageService) async {
-        guard !isCleanupRunning else { return }
-        isCleanupRunning = true
-        defer { isCleanupRunning = false }
-
         let now = Date()
         let needsFull = now.timeIntervalSince(lastFullCleanupAt) >= fullCleanupInterval
         let needsLight = now.timeIntervalSince(lastLightCleanupAt) >= lightCleanupInterval
@@ -1767,7 +1864,11 @@ actor ClipboardBackend {
     }
 
     private func startThumbnailGenerationQueueIfNeeded() async {
-        guard isStarted, thumbnailGenerationQueue == nil else { return }
+        guard thumbnailGenerationQueue == nil else { return }
+        switch lifecycle {
+        case .starting, .running: break
+        case .stopped, .stopping: return
+        }
 
         let queue = ThumbnailWorkQueue(
             workerLimit: maxConcurrentThumbnailGenerations,
@@ -1797,7 +1898,11 @@ actor ClipboardBackend {
     }
 
     private func startFileSizeComputationQueueIfNeeded() async {
-        guard isStarted, fileSizeComputationQueue == nil else { return }
+        guard fileSizeComputationQueue == nil else { return }
+        switch lifecycle {
+        case .starting, .running: break
+        case .stopped, .stopping: return
+        }
 
         let queue = FileSizeWorkQueue(
             workerLimit: maxConcurrentFileSizeComputations,

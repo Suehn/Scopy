@@ -180,6 +180,9 @@ public final class ClipboardMonitor {
     private var monitoringSessionID: UInt64 = 0
 
     private var isCheckingClipboard = false
+    private var captureDrained: CheckedContinuation<Void, Never>?
+    private var ingestWorkerTask: Task<Void, Never>?
+    private var shutdownTask: Task<Void, Never>?
 
     private var pendingPersistRetry: PendingPersistRetry?
 
@@ -199,6 +202,11 @@ public final class ClipboardMonitor {
 
     /// Test injection: delay applied before each envelope is processed.
     var ingestProcessingDelay: Duration = .zero
+
+    #if DEBUG
+    var beforeDurablePersistenceForTesting: (@Sendable () async -> Void)?
+    var isShuttingDownForTesting: Bool { shutdownTask != nil }
+    #endif
 
     private let contentQueue: AsyncBoundedQueue<ClipboardContent>
 
@@ -269,8 +277,9 @@ public final class ClipboardMonitor {
         let jobs = AsyncBoundedQueue<IngestJob>(capacity: ScopyThresholds.ingestMaxPendingItems)
         self.ingestJobs = jobs
         self.handledChangeCount = pasteboard.changeCount
-        // One worker drains the FIFO for the monitor's lifetime; deinit finishes the queue.
-        Task { [weak self] in
+        // One worker drains the FIFO for the monitor's lifetime; shutdown joins it before the
+        // backend releases the spool's storage-root lock.
+        ingestWorkerTask = Task { [weak self] in
             while let job = await jobs.dequeue() {
                 guard let self else { return }
                 await self.process(job)
@@ -308,6 +317,7 @@ public final class ClipboardMonitor {
     }
 
     deinit {
+        ingestWorkerTask?.cancel()
         Task { [contentQueue, ingestJobs] in
             await ingestJobs.finish()
             await contentQueue.finish()
@@ -326,7 +336,7 @@ public final class ClipboardMonitor {
         // The timer is added to the main run loop; started elsewhere it would never fire.
         assert(Thread.isMainThread, "startMonitoring must be called on main thread")
 
-        guard !isMonitoring else { return }
+        guard !isMonitoring, shutdownTask == nil else { return }
         isMonitoring = true
         monitoringSessionID &+= 1
         handledChangeCount = pasteboard.changeCount
@@ -352,6 +362,30 @@ public final class ClipboardMonitor {
         publishIngestSnapshot()
     }
 
+    /// Permanently closes this monitor and waits for every task that can touch its spool.
+    /// `stopMonitoring` alone only pauses polling so the same monitor can be started again.
+    func stopAndWait() async {
+        if let shutdownTask {
+            await shutdownTask.value
+            return
+        }
+        let replay = replayTask
+        stopMonitoring()
+        ingestWorkerTask?.cancel()
+        let task = Task {
+            await ingestJobs.finish()
+            await contentQueue.finish()
+            await replay?.value
+            await ingestWorkerTask?.value
+            ingestWorkerTask = nil
+            if isCheckingClipboard {
+                await withCheckedContinuation { captureDrained = $0 }
+            }
+        }
+        shutdownTask = task
+        await task.value
+    }
+
     public func setPollingInterval(_ interval: TimeInterval) {
         pollingInterval = max(0.1, min(5.0, interval)) // Clamp between 100ms and 5s
         if isMonitoring {
@@ -366,7 +400,11 @@ public final class ClipboardMonitor {
         guard !isCheckingClipboard else { return }
         let sessionID = monitoringSessionID
         isCheckingClipboard = true
-        defer { isCheckingClipboard = false }
+        defer {
+            isCheckingClipboard = false
+            captureDrained?.resume()
+            captureDrained = nil
+        }
 
         if let retry = pendingPersistRetry {
             guard await submitDurableCapture(retry.rawData, logFailure: false) else { return }
@@ -486,9 +524,15 @@ public final class ClipboardMonitor {
         let sessionID = monitoringSessionID
         let envelopeURL: URL
         let ingestDirectory = ingestSpoolDirectory
+        #if DEBUG
+        let beforePersistence = beforeDurablePersistenceForTesting
+        #endif
         do {
             envelopeURL = try await Task.detached(priority: .userInitiated) {
-                try IngestSpool.persistPendingEnvelope(for: rawData, in: ingestDirectory)
+                #if DEBUG
+                await beforePersistence?()
+                #endif
+                return try IngestSpool.persistPendingEnvelope(for: rawData, in: ingestDirectory)
             }.value
         } catch {
             if logFailure {

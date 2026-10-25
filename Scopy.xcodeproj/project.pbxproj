@@ -31,6 +31,7 @@
 		08C8AD849C0EC181764970E4 /* MarkdownHTMLDocumentBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E671677DECEAFE931657E79D /* MarkdownHTMLDocumentBuilder.swift */; };
 		08E87F7EC45D297E1A477546 /* MarkdownPreviewNavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69C8E31A934581C57B87146A /* MarkdownPreviewNavigationPolicyTests.swift */; };
 		091E8BF4E5D21C87F210496F /* HistoryListState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74563B8569159BF7E9365CEA /* HistoryListState.swift */; };
+		099A57BC2C1528FD5C3DA41A /* ClipboardBackendLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A58BD88C7737EFE2F94838D /* ClipboardBackendLifecycleTests.swift */; };
 		09CFA669C13ECCE22A36FE64 /* HistoryProfileDatasetFingerprintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E5BC3C78931E99A757A8DCD /* HistoryProfileDatasetFingerprintTests.swift */; };
 		0A3464D1E1E60C948E1AC997 /* KaTeX_SansSerif-Regular.woff2 in Resources */ = {isa = PBXBuildFile; fileRef = F16334487FE981B66D0438B5 /* KaTeX_SansSerif-Regular.woff2 */; };
 		0A46D56EF38BA9AFB4530284 /* KaTeX_Fraktur-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A690791438CF49B62239C05F /* KaTeX_Fraktur-Regular.ttf */; };
@@ -378,6 +379,7 @@
 		864224810A476156A991A548 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EA7C6CDC077B8CCDFF0DD486 /* Assets.xcassets */; };
 		86DD62086FF07DFB117F798B /* KaTeX_Math-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1ADABCABCFD7B7E85F0224D3 /* KaTeX_Math-Italic.ttf */; };
 		873A9F6DEDF8C403C50A8BF2 /* KaTeX_Script-Regular.woff in Resources */ = {isa = PBXBuildFile; fileRef = 024FB47EE00106753C4DB412 /* KaTeX_Script-Regular.woff */; };
+		873CF3F84AB5CF5096029B70 /* ClipboardBackendLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A58BD88C7737EFE2F94838D /* ClipboardBackendLifecycleTests.swift */; };
 		877A7C4CCD68E76263B6AF19 /* KaTeX_SansSerif-Italic.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CD07D7CE6BE8E39A3AF4651C /* KaTeX_SansSerif-Italic.ttf */; };
 		87A4E9A4908A85DA539E7E8D /* favicon-elebank-150.png in Resources */ = {isa = PBXBuildFile; fileRef = 6E5C450193B29D5753E24B39 /* favicon-elebank-150.png */; };
 		8819DE47B0864E39DF44F165 /* SourceIconTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C5CB69A5654AB258FE2835 /* SourceIconTests.swift */; };
@@ -937,6 +939,7 @@
 		882512301DAD1066E78BBBED /* LiveMarkdownDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveMarkdownDocument.swift; sourceTree = "<group>"; };
 		896E7E53DDFA91945E5BF7A2 /* currency-shell-vars.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "currency-shell-vars.md"; sourceTree = "<group>"; };
 		89A7A79DE091E0B7690EC16B /* FullIndexPendingEventsCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullIndexPendingEventsCleanupTests.swift; sourceTree = "<group>"; };
+		8A58BD88C7737EFE2F94838D /* ClipboardBackendLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardBackendLifecycleTests.swift; sourceTree = "<group>"; };
 		8ACB57C715F93F048BD919DC /* SettingsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsComponents.swift; sourceTree = "<group>"; };
 		8B2D906C211948F48A3A1046 /* raw-html-literal-markdown.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "raw-html-literal-markdown.md"; sourceTree = "<group>"; };
 		8C25A96207E0DA2587E7AFBB /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
@@ -1399,6 +1402,7 @@
 				C8E1D7C3153B156AF59F4FBD /* AppStateTests.swift */,
 				023E68BDF955E586D8078DC5 /* AsyncPermitPoolTests.swift */,
 				199A898A7754BB5CF5B53D8A /* ChatGPTMarkdownRendererTests.swift */,
+				8A58BD88C7737EFE2F94838D /* ClipboardBackendLifecycleTests.swift */,
 				54B5EF90109BAAE3D5DE40FF /* ClipboardCopyContractTests.swift */,
 				B7F6A4A5A639C7926F3B656D /* ClipboardItemContentRevisionTests.swift */,
 				B48DDD4A33C8F8F615B17CA0 /* ClipboardItemDisplayTextTests.swift */,
@@ -2208,6 +2212,7 @@
 				058BFCE0B478C3A010F211C5 /* AppearanceSettingsPage.swift in Sources */,
 				BD26FBC4FA965C4B6B94797F /* AsyncPermitPoolTests.swift in Sources */,
 				640D7E79DC5DCDDE0C63DB65 /* ChatGPTMarkdownRendererTests.swift in Sources */,
+				873CF3F84AB5CF5096029B70 /* ClipboardBackendLifecycleTests.swift in Sources */,
 				CCDE740284857B93B2126E28 /* ClipboardCopyContractTests.swift in Sources */,
 				11FA8A82156E9ABA9B5684CD /* ClipboardItemContentRevision.swift in Sources */,
 				E244587D677D757A58F9BD0E /* ClipboardItemContentRevisionTests.swift in Sources */,
@@ -2414,6 +2419,7 @@
 				9746B0E3394739E5BF814BA8 /* AppearanceSettingsPage.swift in Sources */,
 				14991DCEDB36BD1064A00E7F /* AsyncPermitPoolTests.swift in Sources */,
 				1DB469972C46FA103B70DA76 /* ChatGPTMarkdownRendererTests.swift in Sources */,
+				099A57BC2C1528FD5C3DA41A /* ClipboardBackendLifecycleTests.swift in Sources */,
 				AD4A298CB2C80F436C326900 /* ClipboardCopyContractTests.swift in Sources */,
 				F7EB584B89AE2D90AAD76F98 /* ClipboardItemContentRevision.swift in Sources */,
 				A24B7EBA78639DD07651AEE6 /* ClipboardItemContentRevisionTests.swift in Sources */,
