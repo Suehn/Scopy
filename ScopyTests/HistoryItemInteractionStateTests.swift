@@ -10,7 +10,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         let id = UUID()
         let original = revision(id: id, hash: "old", text: "old text", sizeBytes: 8)
         let replacement = revision(id: id, hash: "new", text: "new text", sizeBytes: 8)
-        let state = HistoryItemInteractionState(revision: original, relativeTimeText: "now")
+        let state = HistoryItemInteractionState(revision: original)
 
         let previewTask = sleepingTask()
         let markdownTask = sleepingTask()
@@ -32,10 +32,9 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         state.rowController.exportActionTask = exportTask
         state.rowController.isExportingPNG = true
 
-        XCTAssertTrue(state.reconcile(to: replacement, relativeTimeText: "1m"))
+        XCTAssertTrue(state.reconcile(to: replacement))
 
         XCTAssertEqual(state.revision, replacement)
-        XCTAssertEqual(state.rowController.relativeTimeText, "1m")
         XCTAssertFalse(state.previewCoordinator.isHovering)
         XCTAssertNil(state.previewCoordinator.hoverPreviewTask)
         XCTAssertNil(state.previewCoordinator.hoverMarkdownTask)
@@ -58,7 +57,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         let id = UUID()
         let original = revision(id: id, hash: "old", text: "Image", sizeBytes: 100)
         let optimized = revision(id: id, hash: "optimized", text: "Image", sizeBytes: 60)
-        let state = HistoryItemInteractionState(revision: original, relativeTimeText: "now")
+        let state = HistoryItemInteractionState(revision: original)
 
         let start = tryUnwrap(state.beginOptimization())
         let outcome = ImageOptimizationOutcomeDTO(
@@ -69,7 +68,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         )
 
         XCTAssertTrue(state.acceptsOptimizationOutcome(outcome, startedAt: start))
-        XCTAssertTrue(state.reconcile(to: optimized, relativeTimeText: "now"))
+        XCTAssertTrue(state.reconcile(to: optimized))
         XCTAssertEqual(state.revision, optimized)
     }
 
@@ -77,10 +76,10 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         let id = UUID()
         let original = revision(id: id, hash: "old", text: "Image", sizeBytes: 100)
         let unrelated = revision(id: id, hash: "external", text: "Image", sizeBytes: 75)
-        let state = HistoryItemInteractionState(revision: original, relativeTimeText: "now")
+        let state = HistoryItemInteractionState(revision: original)
         let start = tryUnwrap(state.beginOptimization())
 
-        XCTAssertTrue(state.reconcile(to: unrelated, relativeTimeText: "now"))
+        XCTAssertTrue(state.reconcile(to: unrelated))
         XCTAssertFalse(
             state.acceptsOptimizationOutcome(
                 ImageOptimizationOutcomeDTO(
@@ -100,7 +99,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         let original = revision(id: id, hash: "old", text: "Image", sizeBytes: 100)
         let unrelated = revision(id: id, hash: "external", text: "Image", sizeBytes: 100)
 
-        let unchangedState = HistoryItemInteractionState(revision: original, relativeTimeText: "now")
+        let unchangedState = HistoryItemInteractionState(revision: original)
         let unchangedStart = tryUnwrap(unchangedState.beginOptimization())
         XCTAssertTrue(
             unchangedState.acceptsOptimizationOutcome(
@@ -109,9 +108,9 @@ final class HistoryItemInteractionStateTests: XCTestCase {
             )
         )
 
-        let replacedState = HistoryItemInteractionState(revision: original, relativeTimeText: "now")
+        let replacedState = HistoryItemInteractionState(revision: original)
         let replacedStart = tryUnwrap(replacedState.beginOptimization())
-        _ = replacedState.reconcile(to: unrelated, relativeTimeText: "now")
+        _ = replacedState.reconcile(to: unrelated)
         XCTAssertFalse(
             replacedState.acceptsOptimizationOutcome(
                 ImageOptimizationOutcomeDTO(
@@ -126,8 +125,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
 
     func testTearDownIsIdempotentAndCancelsEveryOwnedTask() {
         let state = HistoryItemInteractionState(
-            revision: revision(id: UUID(), hash: "hash", text: "text", sizeBytes: 4),
-            relativeTimeText: "now"
+            revision: revision(id: UUID(), hash: "hash", text: "text", sizeBytes: 4)
         )
         let optimizeTask = sleepingTask()
         let feedbackTask = sleepingTask()
@@ -156,8 +154,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
 
     func testRowDisappearanceSuspendsPreviewButPreservesEveryExplicitUserAction() throws {
         let state = HistoryItemInteractionState(
-            revision: revision(id: UUID(), hash: "hash", text: "text", sizeBytes: 4),
-            relativeTimeText: "now"
+            revision: revision(id: UUID(), hash: "hash", text: "text", sizeBytes: 4)
         )
         let previewTask = sleepingTask()
         let rowExportTask = sleepingTask()
@@ -201,8 +198,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
     func testRetainedSessionStoreUsesStableAttachmentsAndEnforcesHardCapacity() {
         let store = HistoryItemInteractionSessionStore(capacity: 1)
         let first = HistoryItemInteractionState(
-            revision: revision(id: UUID(), hash: "first", text: "first", sizeBytes: 5),
-            relativeTimeText: "now"
+            revision: revision(id: UUID(), hash: "first", text: "first", sizeBytes: 5)
         )
         first.rowController.presentNoteEditor(note: "draft")
         let originalAttachment = store.makeAttachmentToken()
@@ -221,8 +217,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         XCTAssertTrue(store.contains(first))
 
         let second = HistoryItemInteractionState(
-            revision: revision(id: UUID(), hash: "second", text: "second", sizeBytes: 6),
-            relativeTimeText: "now"
+            revision: revision(id: UUID(), hash: "second", text: "second", sizeBytes: 6)
         )
         second.rowController.presentNoteEditor(note: "another draft")
         let secondAttachment = store.makeAttachmentToken()
@@ -244,8 +239,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
     func testReplacementAttachmentRejectsStaleViewCallbackAndPreservesExplicitExport() throws {
         let store = HistoryItemInteractionSessionStore(capacity: 2)
         let state = HistoryItemInteractionState(
-            revision: revision(id: UUID(), hash: "hash", text: "text", sizeBytes: 4),
-            relativeTimeText: "now"
+            revision: revision(id: UUID(), hash: "hash", text: "text", sizeBytes: 4)
         )
         let oldAttachment = store.makeAttachmentToken()
         state.activateViewAttachment(oldAttachment)
@@ -286,7 +280,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         let id = UUID()
         let original = revision(id: id, hash: "old", text: "old", sizeBytes: 10)
         let updated = revision(id: id, hash: "new", text: "new", sizeBytes: 12)
-        let state = HistoryItemInteractionState(revision: original, relativeTimeText: "now")
+        let state = HistoryItemInteractionState(revision: original)
         state.rowController.presentNoteEditor(note: "keep this draft")
         let store = HistoryItemInteractionSessionStore()
         let attachment = store.makeAttachmentToken()
@@ -328,8 +322,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
     func testExplicitDeleteAndClearGenerationTearDownRetainedSessions() {
         let deletedID = UUID()
         let deletedState = HistoryItemInteractionState(
-            revision: revision(id: deletedID, hash: "deleted", text: "deleted", sizeBytes: 7),
-            relativeTimeText: "now"
+            revision: revision(id: deletedID, hash: "deleted", text: "deleted", sizeBytes: 7)
         )
         deletedState.rowController.presentNoteEditor(note: "deleted draft")
         let store = HistoryItemInteractionSessionStore()
@@ -365,8 +358,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
 
         let clearID = UUID()
         let clearState = HistoryItemInteractionState(
-            revision: revision(id: clearID, hash: "clear", text: "clear", sizeBytes: 5),
-            relativeTimeText: "now"
+            revision: revision(id: clearID, hash: "clear", text: "clear", sizeBytes: 5)
         )
         clearState.rowController.presentNoteEditor(note: "clear draft")
         let clearAttachment = store.makeAttachmentToken()

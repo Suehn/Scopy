@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class HistoryItemRowControllerTests: XCTestCase {
     func testBeginAndFinishExportingPNGUpdateState() {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         controller.exportMessage = "old"
         controller.exportActionTask = makeSleepingTask()
 
@@ -22,7 +22,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testClearExportFeedbackClearsMessageAndCancelsResetTask() {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         controller.exportMessage = "PNG copied"
         let task = makeSleepingTask()
         controller.exportMessageTask = task
@@ -35,7 +35,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testExportAuthorizationRequiresExactLiveTokenAndIsInvalidatedByCancellation() throws {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         XCTAssertTrue(controller.beginExportingPNG())
         let firstToken = try XCTUnwrap(controller.exportAuthorizationToken)
         controller.exportActionTask = makeSleepingTask()
@@ -56,7 +56,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testPresentDismissAndNormalizeNoteDraft() {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
 
         controller.presentNoteEditor(note: "  hello world  ")
         XCTAssertTrue(controller.isNoteEditorPresented)
@@ -80,7 +80,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testSuccessfulNoteSaveDismissesOnlyTheUnchangedDraft() throws {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         controller.presentNoteEditor(note: "draft")
         let request = try XCTUnwrap(controller.beginNoteSave())
         let task = makeSleepingTask()
@@ -98,7 +98,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testFailedNoteSaveKeepsEditorAndDraftForRetry() throws {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         controller.presentNoteEditor(note: "important draft")
         let request = try XCTUnwrap(controller.beginNoteSave())
 
@@ -113,7 +113,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testSuccessfulOldSaveCannotClearDraftEditedWhileRequestWasInFlight() throws {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         controller.presentNoteEditor(note: "first")
         let request = try XCTUnwrap(controller.beginNoteSave())
 
@@ -129,7 +129,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testCancelledOldSaveCannotClearDraftFromReopenedEditor() throws {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         controller.presentNoteEditor(note: "first")
         let oldRequest = try XCTUnwrap(controller.beginNoteSave())
 
@@ -147,7 +147,7 @@ final class HistoryItemRowControllerTests: XCTestCase {
     }
 
     func testCancelTaskHelpersClearAndCancelOwnedTasks() {
-        let controller = HistoryItemRowController(relativeTimeText: "1m")
+        let controller = HistoryItemRowController()
         let optimizeTask = makeSleepingTask()
         let exportTask = makeSleepingTask()
 

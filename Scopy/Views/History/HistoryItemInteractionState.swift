@@ -24,10 +24,10 @@ final class HistoryItemInteractionState {
     @ObservationIgnored private var expectedOptimizationContentHash: String?
     @ObservationIgnored private var optimizationFeedbackRevision: ClipboardItemContentRevision?
 
-    init(revision: ClipboardItemContentRevision, relativeTimeText: String) {
+    init(revision: ClipboardItemContentRevision) {
         itemID = revision.itemID
         self.revision = revision
-        rowController = HistoryItemRowController(relativeTimeText: relativeTimeText)
+        rowController = HistoryItemRowController()
         previewCoordinator = HistoryItemPreviewCoordinator()
         previewModel = HoverPreviewModel()
     }
@@ -39,12 +39,8 @@ final class HistoryItemInteractionState {
     /// also item-owned while in flight; its completion still needs an exact resulting hash proof
     /// before feedback is accepted for the replacement revision.
     @discardableResult
-    func reconcile(
-        to newRevision: ClipboardItemContentRevision,
-        relativeTimeText: String
-    ) -> Bool {
+    func reconcile(to newRevision: ClipboardItemContentRevision) -> Bool {
         guard !isTornDown, itemID == newRevision.itemID else { return false }
-        rowController.relativeTimeText = relativeTimeText
         guard revision != newRevision else { return false }
 
         revision = newRevision
@@ -350,10 +346,7 @@ final class HistoryItemInteractionSessionStore {
             }
 
             if let revision = snapshot.revision(for: itemID) {
-                _ = state.reconcile(
-                    to: revision,
-                    relativeTimeText: state.rowController.relativeTimeText
-                )
+                state.reconcile(to: revision)
             }
             if !state.hasExplicitUserOwnedWork {
                 state.tearDown()

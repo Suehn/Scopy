@@ -18,8 +18,6 @@ final class HistoryRowControlState {
 
 @MainActor
 struct HistoryItemView: View, Equatable {
-    @Environment(\.historyRelativeTimeClock) private var relativeTimeClock
-
     let item: ClipboardItemDTO
     let isSelected: Bool
     let quickSlot: Int?
@@ -70,6 +68,7 @@ struct HistoryItemView: View, Equatable {
     #if DEBUG
     /// Rows built so far in this process.
     static var initCountForTesting = 0
+    static var bodyCountForTesting = 0
     #endif
 
     private struct RowHighlight: Equatable {
@@ -240,11 +239,6 @@ struct HistoryItemView: View, Equatable {
         nonmutating set { interactionState?.previewCoordinator.markdownFilePreviewCacheKey = newValue }
     }
 
-    private var relativeTimeText: String {
-        get { interactionState?.rowController.relativeTimeText ?? relativeTime }
-        nonmutating set { interactionState?.rowController.relativeTimeText = newValue }
-    }
-
     private var isOptimizingImage: Bool {
         get { interactionState?.rowController.isOptimizingImage ?? false }
         nonmutating set { interactionState?.rowController.isOptimizingImage = newValue }
@@ -368,14 +362,11 @@ struct HistoryItemView: View, Equatable {
                 ) else { return nil }
                 current.activateViewAttachment(attachmentToken)
             }
-            current.reconcile(to: contentRevision, relativeTimeText: relativeTime)
+            current.reconcile(to: contentRevision)
             return current
         }
 
-        let created = HistoryItemInteractionState(
-            revision: contentRevision,
-            relativeTimeText: relativeTime
-        )
+        let created = HistoryItemInteractionState(revision: contentRevision)
         if let attachmentToken = control.sessionAttachmentToken {
             created.activateViewAttachment(attachmentToken)
         }
@@ -437,7 +428,7 @@ struct HistoryItemView: View, Equatable {
                   attachmentToken: control.sessionAttachmentToken
               ),
               state.ownsViewAttachment(control.sessionAttachmentToken) else { return }
-        let changed = state.reconcile(to: contentRevision, relativeTimeText: relativeTime)
+        let changed = state.reconcile(to: contentRevision)
         guard changed else { return }
 
         requestPopover(nil)
@@ -529,7 +520,7 @@ struct HistoryItemView: View, Equatable {
             current.tearDown()
         }
         interactionState = retained
-        retained.reconcile(to: contentRevision, relativeTimeText: relativeTime)
+        retained.reconcile(to: contentRevision)
     }
 
     private func handlePopoverDismissRequest(
@@ -602,21 +593,11 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    /// From the prewarmed icon cache, so the row body never waits on LaunchServices.
-    private var appIcon: NSImage? {
-        guard let bundleID = descriptor.appIconBundleID else { return nil }
-        return IconService.shared.icon(bundleID: bundleID)
-    }
-
     /// Resolved from the presentation cache on demand rather than in `init`: SwiftUI initializes
     /// every ForEach child whenever the list changes (a page load initializes hundreds of rows),
     /// while only the visible rows ever render.
     private var descriptor: HistoryItemRowDescriptor {
         HistoryItemPresentationCache.shared.rowDescriptor(for: item, settings: settings)
-    }
-
-    private var thumbnailHeight: CGFloat {
-        descriptor.thumbnailHeight
     }
 
     private var previewDelay: TimeInterval {
@@ -756,131 +737,17 @@ struct HistoryItemView: View, Equatable {
         )
     }
 
-    private var canShowFileThumbnail: Bool {
-        descriptor.canShowFileThumbnail
-    }
-
-    /// Precomputed, so the body does no per-render string work.
-    private var metadataText: String {
-        descriptor.metadataText
-    }
-
-    private var titleText: String {
-        descriptor.titleText
-    }
-
-    /// Derived here rather than in `init`: SwiftUI re-initializes every `ForEach` child on every list
-    /// update, but a row's body only runs when the row actually changed. Building the evidence text in
-    /// `init` made each search keystroke pay one attributed string, one accessibility string and one
-    /// descriptor lookup for every loaded row.
-    private var searchEvidence: (text: AttributedString, accessibilityText: String)? {
-        guard let searchMatchContext else { return nil }
-        return (
-            SearchMatchPresentation.attributedText(
-                context: searchMatchContext,
-                itemType: item.type,
-                metadataPrefix: descriptor.searchMetadataPrefix
-            ),
-            SearchMatchPresentation.accessibilityDescription(
-                context: searchMatchContext,
-                itemType: item.type
-            )
-        )
-    }
-
-    @ViewBuilder
-    private var secondaryLine: some View {
-        if let searchEvidence {
-            Text(searchEvidence.text)
-                .accessibilityLabel(searchEvidence.accessibilityText)
-                .accessibilityIdentifier("HistoryItem.MatchEvidence")
-        } else {
-            Text(metadataText)
-        }
-    }
-
-    @ViewBuilder
-    private var contentView: some View {
-        switch item.type {
-        case .image where showThumbnails:
-            // With a thumbnail, an image row shows the thumbnail and its metadata, not an "Image" title.
-            HStack(spacing: ScopySpacing.md) {
-                HistoryItemThumbnailView(
-                    thumbnailPath: item.thumbnailPath,
-                    height: thumbnailHeight,
-                    interactionCoordinator: interactionCoordinator
-                )
-                secondaryLine
-                    .font(ScopyTypography.caption)
-                    .foregroundStyle(ScopyColors.mutedText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-        case .file:
-            HStack(spacing: ScopySpacing.sm) {
-                if canShowFileThumbnail {
-                    HistoryItemFileThumbnailView(
-                        thumbnailPath: item.thumbnailPath,
-                        height: thumbnailHeight,
-                        kind: filePreviewKind ?? .other,
-                        interactionCoordinator: interactionCoordinator
-                    )
-                } else {
-                    Image(systemName: ScopyIcons.file)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: thumbnailHeight, height: thumbnailHeight)
-                }
-                VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
-                    Text(titleText)
-                        .font(ScopyTypography.body)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    secondaryLine
-                        .font(ScopyTypography.caption)
-                        .foregroundStyle(ScopyColors.mutedText)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-        case .image:
-            VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
-                HStack(spacing: ScopySpacing.sm) {
-                    Image(systemName: ScopyIcons.image)
-                        .foregroundStyle(.green)
-                    Text(titleText)
-                        .font(ScopyTypography.body)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                secondaryLine
-                    .font(ScopyTypography.caption)
-                    .foregroundStyle(ScopyColors.mutedText)
-                    .lineLimit(1)
-                    .padding(.leading, ScopySpacing.md)
-            }
-        default:
-            VStack(alignment: .leading, spacing: ScopySpacing.xxs) {
-                Text(titleText)
-                    .font(ScopyTypography.body)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                secondaryLine
-                    .font(ScopyTypography.caption)
-                    .foregroundStyle(ScopyColors.mutedText)
-                    .lineLimit(1)
-                    .padding(.leading, ScopySpacing.md)
-            }
-        }
-    }
-
     // MARK: - Body
 
     var body: some View {
+        #if DEBUG
+        Self.bodyCountForTesting += 1
+        #endif
         let profileStart = ScrollPerformanceProfile.isEnabled ? CFAbsoluteTimeGetCurrent() : nil
         defer {
             if let profileStart {
                 ScrollPerformanceProfile.recordTiming(
-                    name: "swiftui.row_body_ms",
+                    name: "swiftui.row_host_body_ms",
                     elapsedMs: (CFAbsoluteTimeGetCurrent() - profileStart) * 1000
                 )
             }
@@ -903,8 +770,15 @@ struct HistoryItemView: View, Equatable {
     /// `PointerRegionUpdater.updatePointerRegion` was 5.7% of main-thread samples and falls to
     /// zero when the row carries no button. Tap target, identifier and the button role for
     /// assistive technology are unchanged.
-    private var rowActivationSurface: some View {
-        rowActivationLabel
+    private func rowActivationSurface(descriptor: HistoryItemRowDescriptor) -> some View {
+        HistoryItemRowLabel(
+            item: item,
+            descriptor: descriptor,
+            searchMatchContext: searchMatchContext,
+            statusMessage: statusMessage,
+            quickSlot: quickSlot,
+            interactionCoordinator: interactionCoordinator
+        )
             .contentShape(Rectangle())
             .onTapGesture(perform: handlePrimaryAction)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -915,62 +789,11 @@ struct HistoryItemView: View, Equatable {
             .accessibilityAction(.default, handlePrimaryAction)
     }
 
-    private var rowActivationLabel: some View {
-        HStack(alignment: .center, spacing: ScopySpacing.sm) {
-            // Pinned rows carry a colored bar on the leading edge.
-            if item.isPinned {
-                Capsule()
-                    .fill(ScopyColors.selectionBorder)
-                    .frame(width: ScopySize.Width.pinIndicator, height: ScopySize.Height.pinIndicator)
-            }
-
-            if let icon = appIcon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
-                    .cornerRadius(ScopySize.Corner.sm)
-            } else {
-                Image(systemName: ScopyIcons.app)
-                    .font(.system(size: ScopySize.Icon.sm))
-                    .foregroundStyle(ScopyColors.mutedText)
-                    .frame(width: ScopySize.Icon.listApp, height: ScopySize.Icon.listApp)
-            }
-
-            contentView
-
-            Spacer(minLength: ScopySpacing.md)
-
-            if item.isPinned {
-                Image(systemName: ScopyIcons.pin)
-                    .font(.system(size: ScopySize.Icon.pin))
-                    .foregroundStyle(.orange)
-            }
-
-            if let statusMessage, !statusMessage.isEmpty {
-                Text(statusMessage)
-                    .font(ScopyTypography.microMono)
-                    .foregroundStyle(ScopyColors.mutedText)
-            }
-
-            // While ⌘ is held the slot replaces the time in the same font, so the row height
-            // and trailing layout do not move.
-            if let quickSlot {
-                Text(verbatim: "⌘\(quickSlot)")
-                    .font(ScopyTypography.microMono)
-                    .foregroundStyle(ScopyColors.mutedText)
-            } else {
-                Text(relativeTime)
-                    .font(ScopyTypography.microMono)
-                    .foregroundStyle(ScopyColors.mutedText)
-            }
-        }
-    }
-
     private var rowVisualContent: some View {
-        let needsThumbnailHeight = descriptor.needsThumbnailHeight
+        let descriptor = descriptor
 
         return HStack(alignment: .center, spacing: ScopySpacing.sm) {
-            rowActivationSurface
+            rowActivationSurface(descriptor: descriptor)
 
             if Self.shouldShowOptimizeButton(
                 itemType: item.type,
@@ -1001,7 +824,7 @@ struct HistoryItemView: View, Equatable {
         }
         .padding(.horizontal, ScopySpacing.md)
         .padding(.vertical, ScopySpacing.sm)
-        .frame(minHeight: needsThumbnailHeight ? thumbnailHeight + ScopySpacing.lg : ScopySize.Height.listItem)
+        .frame(minHeight: descriptor.needsThumbnailHeight ? descriptor.thumbnailHeight + ScopySpacing.lg : ScopySize.Height.listItem)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             if isSelected || isHovering {
@@ -1032,9 +855,6 @@ struct HistoryItemView: View, Equatable {
                 HistoryListUITestProbe.shared.recordRowAppeared(itemID: item.id)
             }
             attachRetainedInteractionStateIfNeeded()
-        }
-        .onChange(of: item.lastUsedAt) { _, _ in
-            updateRelativeTimeText()
         }
         .onChange(of: contentRevision) { _, _ in
             reconcileInteractionStateIfNeeded()
@@ -2069,19 +1889,6 @@ struct HistoryItemView: View, Equatable {
         }
     }
 
-    // MARK: - Relative Time Formatting
-
-    private var relativeTime: String {
-        let bucket = relativeTimeClock?.bucket ?? HistoryRelativeTimeClock.bucket(for: Date())
-        return HistoryItemPresentationCache.shared.relativeTimeText(for: item, bucket: bucket)
-    }
-
-    private func updateRelativeTimeText() {
-        let next = relativeTime
-        guard next != relativeTimeText else { return }
-        relativeTimeText = next
-    }
-
     private func handleScrollDidStart(state: HistoryItemInteractionState) {
         guard shouldResetPreviewOnScroll else { return }
         state.previewCoordinator.isHovering = false
@@ -2091,7 +1898,6 @@ struct HistoryItemView: View, Equatable {
     }
 
     private func handleScrollDidEnd(state: HistoryItemInteractionState) {
-        updateRelativeTimeText()
         releaseInteractionStateIfIdle(expected: state)
     }
 

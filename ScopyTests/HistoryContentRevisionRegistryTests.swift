@@ -196,12 +196,10 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let pinnedItem = try! XCTUnwrap(appState.historyViewModel.pinnedItems.first)
         let unpinnedItem = try! XCTUnwrap(appState.historyViewModel.unpinnedItems.first)
         let pinnedState = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: pinnedItem),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: pinnedItem)
         )
         let unpinnedState = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: unpinnedItem),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: unpinnedItem)
         )
         pinnedState.rowController.presentNoteEditor(note: "pinned draft")
         unpinnedState.rowController.presentNoteEditor(note: "unpinned draft")
@@ -245,12 +243,10 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         let pinnedItem = try! XCTUnwrap(appState.historyViewModel.pinnedItems.first)
         let unpinnedItem = try! XCTUnwrap(appState.historyViewModel.unpinnedItems.first)
         let pinnedState = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: pinnedItem),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: pinnedItem)
         )
         let unpinnedState = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: unpinnedItem),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: unpinnedItem)
         )
         pinnedState.rowController.presentNoteEditor(note: "pinned draft survives read failure")
         unpinnedState.rowController.presentNoteEditor(note: "deleted unpinned draft")
@@ -311,8 +307,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         )
 
         let interactionState = HistoryItemInteractionState(
-            revision: evictedRevision,
-            relativeTimeText: "now"
+            revision: evictedRevision
         )
         interactionState.rowController.presentNoteEditor(note: "retained")
         let store = HistoryItemInteractionSessionStore()
@@ -331,8 +326,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         var registry = BoundedHistoryContentRevisionRegistry(capacity: 2)
         _ = registry.merge(items: items, allowRevivingDeletedItems: false)
         let state = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: items[0]),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: items[0])
         )
         state.rowController.presentNoteEditor(note: "must not survive a lost tombstone")
         let store = HistoryItemInteractionSessionStore()
@@ -385,8 +379,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         XCTAssertNil(registry.snapshot.revision(for: unpinnedItem.id))
 
         let state = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: unpinnedItem),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: unpinnedItem)
         )
         state.rowController.presentNoteEditor(note: "evicted unpinned draft")
         let store = HistoryItemInteractionSessionStore()
@@ -413,8 +406,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         XCTAssertNil(registry.snapshot.revision(for: firstPinnedItem.id))
 
         let state = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: firstPinnedItem),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: firstPinnedItem)
         )
         state.rowController.presentNoteEditor(note: "capacity-evicted pinned draft")
         let store = HistoryItemInteractionSessionStore()
@@ -446,8 +438,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         XCTAssertNil(registry.snapshot.revision(for: capacityEvictedPinnedItem.id))
 
         let state = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: capacityEvictedPinnedItem),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: capacityEvictedPinnedItem)
         )
         state.rowController.presentNoteEditor(note: "unknown pinned draft")
         let store = HistoryItemInteractionSessionStore()
@@ -476,8 +467,7 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         XCTAssertTrue(registry.setPinned(itemID: item.id, isPinned: true))
 
         let state = HistoryItemInteractionState(
-            revision: ClipboardItemContentRevision(item: item),
-            relativeTimeText: "now"
+            revision: ClipboardItemContentRevision(item: item)
         )
         state.rowController.presentNoteEditor(note: "pinned draft")
         let store = HistoryItemInteractionSessionStore()

@@ -48,7 +48,6 @@ final class HistoryItemPresentationCache {
     }
 
     private struct RelativeTimeCacheEntry {
-        let revision: ClipboardItemContentRevision
         let lastUsedAt: Date
         let bucket: Int64
         let text: String
@@ -325,13 +324,12 @@ final class HistoryItemPresentationCache {
     }
 
     func relativeTimeText(
-        for item: ClipboardItemDTO,
+        itemID: UUID,
+        lastUsedAt: Date,
         bucket: Int64
     ) -> String {
-        let revision = ClipboardItemContentRevision.resolve(item: item)
-        if let cached = relativeTimeCache[item.id],
-           cached.revision == revision,
-           cached.lastUsedAt == item.lastUsedAt,
+        if let cached = relativeTimeCache[itemID],
+           cached.lastUsedAt == lastUsedAt,
            cached.bucket == bucket {
             ScrollPerformanceProfile.shared.incrementCounter(name: "row.relative_time_cache_hit")
             return cached.text
@@ -341,17 +339,16 @@ final class HistoryItemPresentationCache {
             timeIntervalSince1970: TimeInterval(bucket) * HistoryRelativeTimeClock.bucketDuration
         )
         let text = relativeTimeFormatter.localizedString(
-            for: item.lastUsedAt,
+            for: lastUsedAt,
             relativeTo: referenceDate
         )
         relativeTimeCache.insert(
             RelativeTimeCacheEntry(
-                revision: revision,
-                lastUsedAt: item.lastUsedAt,
+                lastUsedAt: lastUsedAt,
                 bucket: bucket,
                 text: text
             ),
-            forKey: item.id
+            forKey: itemID
         )
         ScrollPerformanceProfile.shared.incrementCounter(name: "row.relative_time_cache_miss")
         return text

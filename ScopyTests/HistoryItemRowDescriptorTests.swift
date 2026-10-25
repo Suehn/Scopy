@@ -200,9 +200,9 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
         let relativeFirst = makeItem(type: .text, plainText: "relative first")
         let relativeSecond = makeItem(type: .text, plainText: "relative second")
         let relativeThird = makeItem(type: .text, plainText: "relative third")
-        _ = cache.relativeTimeText(for: relativeFirst, bucket: 100)
-        _ = cache.relativeTimeText(for: relativeSecond, bucket: 100)
-        _ = cache.relativeTimeText(for: relativeThird, bucket: 100)
+        _ = cache.relativeTimeText(itemID: relativeFirst.id, lastUsedAt: relativeFirst.lastUsedAt, bucket: 100)
+        _ = cache.relativeTimeText(itemID: relativeSecond.id, lastUsedAt: relativeSecond.lastUsedAt, bucket: 100)
+        _ = cache.relativeTimeText(itemID: relativeThird.id, lastUsedAt: relativeThird.lastUsedAt, bucket: 100)
         XCTAssertNil(cache.relativeTimeBucketForTesting(itemID: relativeFirst.id))
         XCTAssertEqual(cache.relativeTimeBucketForTesting(itemID: relativeThird.id), 100)
 

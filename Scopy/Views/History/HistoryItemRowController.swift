@@ -17,7 +17,6 @@ final class HistoryItemRowController {
         case failed
     }
 
-    var relativeTimeText: String
     var isOptimizingImage = false
     var optimizeMessage: String?
     var exportMessage: String?
@@ -44,10 +43,6 @@ final class HistoryItemRowController {
     @ObservationIgnored private(set) var noteSaveToken: UUID?
     @ObservationIgnored private var noteDraftGeneration: UInt64 = 0
     private var originalNormalizedNote: String?
-
-    init(relativeTimeText: String) {
-        self.relativeTimeText = relativeTimeText
-    }
 
     func cancelOptimizeMessageTask() {
         optimizeMessageTask?.cancel()
