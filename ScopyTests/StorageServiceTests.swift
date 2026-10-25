@@ -282,7 +282,7 @@ final class StorageServiceTests: XCTestCase {
         let replacementData = Data("replacement payload".utf8)
         let replacementHash = "replacement-\(UUID().uuidString)"
         do {
-            try await competing.updateItemPayload(
+            try await competing.replacePayloadForTesting(
                 id: item.id,
                 contentHash: replacementHash,
                 sizeBytes: replacementData.count,
@@ -353,7 +353,7 @@ final class StorageServiceTests: XCTestCase {
         let replacementData = Data("new file payload".utf8)
         let replacementHash = "replacement-\(UUID().uuidString)"
         do {
-            try await competing.updateItemPayload(
+            try await competing.replacePayloadForTesting(
                 id: item.id,
                 contentHash: replacementHash,
                 sizeBytes: replacementData.count,
@@ -622,7 +622,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(reopened.fileSizeBytes, initialFileSize)
 
         let updatedSize = initialSize + 4_096
-        try await reopenedStorage.updateItemPayload(
+        try await reopenedStorage.replacePayloadForTesting(
             id: reopened.id,
             contentHash: reopened.contentHash,
             sizeBytes: updatedSize,
@@ -1099,7 +1099,7 @@ final class StorageServiceTests: XCTestCase {
         try await Task.sleep(nanoseconds: 10_000_000)
         let survivor = try await diskStorage.upsertItem(makeLargeTestContent())
         let sharedRef = try XCTUnwrap(oldest.storageRef)
-        try await diskStorage.updateItemPayload(
+        try await diskStorage.replacePayloadForTesting(
             id: survivor.id,
             contentHash: "shared-ref-survivor-\(UUID().uuidString)",
             sizeBytes: survivor.sizeBytes,
@@ -1378,7 +1378,7 @@ final class StorageServiceTests: XCTestCase {
         try Data([0x01, 0x02, 0x03]).write(to: invalidRef)
 
         let item = try await routedStorage.upsertItem(makeLargeTestContent())
-        try await routedStorage.updateItemPayload(
+        try await routedStorage.replacePayloadForTesting(
             id: item.id,
             contentHash: "invalid-ref-\(UUID().uuidString)",
             sizeBytes: item.sizeBytes,
@@ -1615,7 +1615,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertNotEqual(persisted.storageRef, oldURL.path)
     }
 
-    func testOrphanCleanupAbortsWhenOldSourceIsRestoredAfterSnapshot() async throws {
+    func testOrphanCleanupPreservesRestoredSourceAndReclaimsUnrelatedOrphan() async throws {
         let (diskStorage, baseURL) = try await makeTemporaryStorage(
             prefix: "cleanup-restore-race",
             fileOps: .live
@@ -1638,6 +1638,9 @@ final class StorageServiceTests: XCTestCase {
         )
         let optimized = try XCTUnwrap(optimizedResult)
         XCTAssertTrue(FileManager.default.fileExists(atPath: oldURL.path))
+        let orphanURL = oldURL.deletingLastPathComponent()
+            .appendingPathComponent("\(UUID().uuidString).dat")
+        try Data([0x19]).write(to: orphanURL)
 
         let gate = StorageMetadataUpdateGate()
         await diskStorage.setOrphanCleanupInterlockForTesting { point in
@@ -1660,6 +1663,10 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(restored, StorageService.ExternalSourceReconciliationResult.adopted)
         XCTAssertTrue(FileManager.default.fileExists(atPath: oldURL.path))
         XCTAssertEqual(try Data(contentsOf: oldURL), oldData)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: orphanURL.path),
+            "A source adoption must not abandon unrelated orphan reclamation"
+        )
         let persistedResult = try await diskStorage.findByID(item.id)
         let persisted = try XCTUnwrap(persistedResult)
         XCTAssertEqual(persisted.storageRef, oldURL.path)

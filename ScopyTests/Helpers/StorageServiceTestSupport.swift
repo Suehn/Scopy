@@ -9,4 +9,24 @@ extension StorageService {
         }
         return item
     }
+
+    /// Installs a fixture replacement through the production payload transaction.
+    func replacePayloadForTesting(
+        id: UUID,
+        contentHash: String,
+        sizeBytes: Int,
+        storageRef: String?,
+        rawData: Data?
+    ) async throws {
+        guard let expected = try await findByID(id),
+              try await compareAndSwapItemPayload(
+                expected: expected,
+                contentHash: contentHash,
+                sizeBytes: sizeBytes,
+                storageRef: storageRef,
+                rawData: rawData
+              ) != nil else {
+            throw StorageError.updateFailed("Fixture payload no longer owns its row")
+        }
+    }
 }

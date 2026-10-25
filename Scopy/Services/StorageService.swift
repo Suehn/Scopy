@@ -23,6 +23,14 @@ private actor ExternalFileReservationRegistry {
         waiters.forEach { $0.continuation.resume(returning: nil) }
     }
 
+    /// Reclamation skips live work; a later sweep can retry once its owner releases the path.
+    func acquireIfAvailable(resourceKey: String) -> Reservation? {
+        guard !resourceKey.isEmpty, !Task.isCancelled, owners[resourceKey] == nil else { return nil }
+        let reservation = Reservation(id: UUID(), resourceKeys: [resourceKey])
+        markOwned(reservation)
+        return reservation
+    }
+
     func acquire(resourceKeys: [String]) async -> Reservation? {
         let normalized = Array(Set(resourceKeys.filter { !$0.isEmpty })).sorted()
         guard !normalized.isEmpty, !Task.isCancelled else { return nil }
@@ -146,7 +154,6 @@ public actor StorageService {
     enum OrphanCleanupInterlockPoint: Sendable {
         case afterEnumerationBeforeOwnershipValidation
         case afterOwnershipValidationBeforeRemove(path: String)
-        case afterFinalOwnershipValidationBeforeRemove(path: String)
     }
 
     enum CleanupInterlockPoint: Sendable {
@@ -270,8 +277,6 @@ public actor StorageService {
 
     nonisolated let repository: SQLiteClipboardRepository
 
-    private var protectedExternalFilenameRefCounts: [String: Int] = [:]
-    private var externalPayloadCommitGeneration: UInt64 = 0
     private var externalImageSourceLeaseReservations: [
         UUID: ExternalFileReservationRegistry.Reservation
     ] = [:]
@@ -482,7 +487,6 @@ public actor StorageService {
         var storageRef: String? = nil
         var inlineData: Data? = nil
         var externalReservation: ExternalFileReservationRegistry.Reservation?
-        var protectedExternalFilename: String?
         var repositoryCommitAttempted = false
 
         do {
@@ -511,9 +515,6 @@ public actor StorageService {
                         throw CancellationError()
                     }
                     externalReservation = reservation
-                    let filename = URL(fileURLWithPath: path).lastPathComponent
-                    protectedExternalFilename = filename
-                    beginProtectingExternalFilename(filename)
                     try await Task.detached(priority: .utility) {
                         try StorageService.writeAtomically(data, to: path)
                     }.value
@@ -539,9 +540,6 @@ public actor StorageService {
                         throw CancellationError()
                     }
                     externalReservation = reservation
-                    let filename = URL(fileURLWithPath: path).lastPathComponent
-                    protectedExternalFilename = filename
-                    beginProtectingExternalFilename(filename)
                     try await Task.detached(priority: .utility) {
                         if content.fileOwnership == .durableSpool {
                             try StorageService.copyFileRetainingSource(from: url, to: path)
@@ -622,17 +620,16 @@ public actor StorageService {
                     )
                 )
             }
-            await releaseExternalPublicationGuards(
-                protectedFilename: protectedExternalFilename,
-                reservation: externalReservation
-            )
+            if let externalReservation {
+                await sharedExternalFileReservations.release(externalReservation)
+            }
             return outcome
         } catch {
             // A COMMIT error is not proof that SQLite rejected the transaction. Resolve by the
             // durable receipt before reclaiming the unique candidate, otherwise an ambiguous
-            // success could leave a committed row pointing at a removed file. Keep both the
-            // process-wide reservation and cleanup generation guard until that resolution is
-            // complete so a reentrant orphan-cleanup pass cannot remove the candidate first.
+            // success could leave a committed row pointing at a removed file. Keep the
+            // process-wide reservation until that resolution is complete so orphan cleanup
+            // cannot remove the candidate first.
             if let ingestID = content.ingestID, repositoryCommitAttempted {
                 await ingestCommitInterlock?(
                     .beforeReceiptResolution(candidatePath: storageRef)
@@ -650,10 +647,9 @@ public actor StorageService {
                            ingestURL.path != item?.storageRef {
                             try? FileManager.default.removeItem(at: ingestURL)
                         }
-                        await releaseExternalPublicationGuards(
-                            protectedFilename: protectedExternalFilename,
-                            reservation: externalReservation
-                        )
+                        if let externalReservation {
+                            await sharedExternalFileReservations.release(externalReservation)
+                        }
                         guard let item else { return .alreadyApplied(nil) }
                         return item.id == id ? .inserted(item) : .updated(item)
                     }
@@ -665,10 +661,9 @@ public actor StorageService {
                        ingestURL.path != storageRef {
                         try? FileManager.default.removeItem(at: ingestURL)
                     }
-                    await releaseExternalPublicationGuards(
-                        protectedFilename: protectedExternalFilename,
-                        reservation: externalReservation
-                    )
+                    if let externalReservation {
+                        await sharedExternalFileReservations.release(externalReservation)
+                    }
                     throw error
                 }
             }
@@ -679,23 +674,10 @@ public actor StorageService {
             if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
                 try? FileManager.default.removeItem(at: ingestURL)
             }
-            await releaseExternalPublicationGuards(
-                protectedFilename: protectedExternalFilename,
-                reservation: externalReservation
-            )
+            if let externalReservation {
+                await sharedExternalFileReservations.release(externalReservation)
+            }
             throw error
-        }
-    }
-
-    private func releaseExternalPublicationGuards(
-        protectedFilename: String?,
-        reservation: ExternalFileReservationRegistry.Reservation?
-    ) async {
-        if let protectedFilename {
-            endProtectingExternalFilename(protectedFilename)
-        }
-        if let reservation {
-            await sharedExternalFileReservations.release(reservation)
         }
     }
 
@@ -741,22 +723,6 @@ public actor StorageService {
         )
     }
 
-    nonisolated func updateItemPayload(
-        id: UUID,
-        contentHash: String,
-        sizeBytes: Int,
-        storageRef: String?,
-        rawData: Data?
-    ) async throws {
-        try await repository.updateItemPayload(
-            id: id,
-            contentHash: contentHash,
-            sizeBytes: sizeBytes,
-            storageRef: storageRef,
-            rawData: rawData
-        )
-    }
-
     /// Commits an asynchronously transformed payload only while the persisted row still matches
     /// the transform's input snapshot. Returns `nil` for deletion or same-ID replacement.
     nonisolated func compareAndSwapItemPayload(
@@ -789,8 +755,6 @@ public actor StorageService {
     ) async throws -> ClipboardStoredItem? {
         let finalURL = URL(fileURLWithPath: externalStoragePath, isDirectory: true)
             .appendingPathComponent("\(UUID().uuidString).png")
-        let finalFilename = finalURL.lastPathComponent
-
         let finalReservationKey = Self.externalReservationKey(forPath: finalURL.path)
         guard let reservation = await sharedExternalFileReservations.acquire(
             resourceKeys: [finalReservationKey]
@@ -801,7 +765,6 @@ public actor StorageService {
             await sharedExternalFileReservations.release(reservation)
             throw CancellationError()
         }
-        beginProtectingExternalFilename(finalFilename)
         do {
             try Self.replaceFileAtomically(from: stagedURL, to: finalURL)
             let committedItem = try await repository.compareAndSwapItemPayload(
@@ -811,19 +774,14 @@ public actor StorageService {
                 storageRef: finalURL.path,
                 rawData: nil
             )
-            endProtectingExternalFilename(finalFilename)
-            await sharedExternalFileReservations.release(reservation)
-
-            guard let committedItem else {
+            if committedItem == nil {
                 try? FileManager.default.removeItem(at: finalURL)
-                return nil
             }
-
+            await sharedExternalFileReservations.release(reservation)
             return committedItem
         } catch {
-            endProtectingExternalFilename(finalFilename)
-            await sharedExternalFileReservations.release(reservation)
             try? FileManager.default.removeItem(at: finalURL)
+            await sharedExternalFileReservations.release(reservation)
             throw error
         }
     }
@@ -838,7 +796,6 @@ public actor StorageService {
         ) else {
             return nil
         }
-        let filename = sourceURL.lastPathComponent
         let sourceReservationKey = Self.externalReservationKey(forPath: sourceURL.path)
         guard let reservation = await sharedExternalFileReservations.acquire(
             resourceKeys: [sourceReservationKey]
@@ -854,12 +811,10 @@ public actor StorageService {
             sourceReservationKey: sourceReservationKey
         )
         externalImageSourceLeaseReservations[lease.id] = reservation
-        beginProtectingExternalFilename(filename)
 
         let result = await operation(lease)
 
         externalImageSourceLeaseReservations.removeValue(forKey: lease.id)
-        endProtectingExternalFilename(filename)
         await sharedExternalFileReservations.release(reservation)
         return result
     }
@@ -891,7 +846,6 @@ public actor StorageService {
               externalImageSourceLeaseReservations[sourceLease.id] != nil else {
             return .failedOrUnstable
         }
-        let protectedFilenames = [URL(fileURLWithPath: optimizedRef).lastPathComponent]
         let optimizedReservationKey = Self.externalReservationKey(forPath: optimizedRef)
         guard let reservation = await sharedExternalFileReservations.acquire(
             resourceKeys: [optimizedReservationKey]
@@ -902,9 +856,6 @@ public actor StorageService {
             await sharedExternalFileReservations.release(reservation)
             return .failedOrUnstable
         }
-        for filename in protectedFilenames {
-            beginProtectingExternalFilename(filename)
-        }
 
         let result = await performExternalSourceReconciliation(
             committedItem: committedItem,
@@ -912,9 +863,6 @@ public actor StorageService {
             verificationInterlock: verificationInterlock
         )
 
-        for filename in protectedFilenames {
-            endProtectingExternalFilename(filename)
-        }
         await sharedExternalFileReservations.release(reservation)
         return result
     }
@@ -1032,24 +980,6 @@ public actor StorageService {
             }
         }
         return .failed
-    }
-
-    private func beginProtectingExternalFilename(_ filename: String) {
-        protectedExternalFilenameRefCounts[filename, default: 0] += 1
-        externalPayloadCommitGeneration &+= 1
-    }
-
-    private func endProtectingExternalFilename(_ filename: String) {
-        guard let count = protectedExternalFilenameRefCounts[filename] else {
-            externalPayloadCommitGeneration &+= 1
-            return
-        }
-        if count <= 1 {
-            protectedExternalFilenameRefCounts.removeValue(forKey: filename)
-        } else {
-            protectedExternalFilenameRefCounts[filename] = count - 1
-        }
-        externalPayloadCommitGeneration &+= 1
     }
 
     public func deleteItem(_ id: UUID) async throws {
@@ -1500,11 +1430,9 @@ public actor StorageService {
             return
         }
 
-        // 1. Get all storage_ref filenames from database. Include a unique final file while its
-        // payload CAS is awaiting the repository actor.
-        let cleanupGeneration = externalPayloadCommitGeneration
-        var validRefs = try await repository.fetchExternalRefFilenames()
-        validRefs.formUnion(protectedExternalFilenameRefCounts.keys)
+        // Enumeration is advisory. Every candidate must acquire its path reservation and pass
+        // a fresh ownership check before unlink; unrelated placements never abort the sweep.
+        let validRefs = try await repository.fetchExternalRefFilenames()
 
         // 2. Enumerate all files in content directory off-main (may traverse many files)
         let contentPath = externalStoragePath
@@ -1519,9 +1447,6 @@ public actor StorageService {
             )
         }.value
         await orphanCleanupInterlock?(.afterEnumerationBeforeOwnershipValidation)
-        // A commit that began after this cleanup snapshot may have published a new unique file.
-        // Abort this pass rather than deleting against stale ownership evidence.
-        guard cleanupGeneration == externalPayloadCommitGeneration else { return }
         let filesToDelete = Array(Set(orphanedFiles + staleOptimizationStages))
         guard !filesToDelete.isEmpty else { return }
 
@@ -2003,8 +1928,8 @@ public actor StorageService {
                 group.addTask {
                     for fileURL in chunk {
                         let reservationKey = externalReservationKey(forPath: fileURL.path)
-                        guard let reservation = await reservations.acquire(
-                            resourceKeys: [reservationKey]
+                        guard let reservation = await reservations.acquireIfAvailable(
+                            resourceKey: reservationKey
                         ) else {
                             continue
                         }
@@ -2013,15 +1938,10 @@ public actor StorageService {
                             continue
                         }
 
-                        let wasReferenced = (try? await repository.isStorageRefReferenced(fileURL.path)) ?? true
-                        if !wasReferenced {
-                            await beforeRemove?(
-                                .afterOwnershipValidationBeforeRemove(path: fileURL.path)
-                            )
-                            let isNowReferenced = (try? await repository.isStorageRefReferenced(fileURL.path)) ?? true
-                            if !isNowReferenced {
+                        do {
+                            if try await !repository.isStorageRefReferenced(fileURL.path) {
                                 await beforeRemove?(
-                                    .afterFinalOwnershipValidationBeforeRemove(path: fileURL.path)
+                                    .afterOwnershipValidationBeforeRemove(path: fileURL.path)
                                 )
                                 do {
                                     try removeFile(fileURL)
@@ -2038,6 +1958,10 @@ public actor StorageService {
                                     )
                                 }
                             }
+                        } catch {
+                            ScopyLog.storage.warning(
+                                "[orphanCleanup] Failed to verify file ownership: \(error.localizedDescription, privacy: .private)"
+                            )
                         }
                         await reservations.release(reservation)
                     }

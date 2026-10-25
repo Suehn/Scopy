@@ -188,7 +188,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         let replacementHash = ClipboardMonitor.computeHashStatic(replacementData)
         let competingStorage = StorageService(databasePath: fixture.databasePath)
         try await competingStorage.open()
-        try await competingStorage.updateItemPayload(
+        try await competingStorage.replacePayloadForTesting(
             id: fixture.itemID,
             contentHash: replacementHash,
             sizeBytes: replacementData.count,
@@ -252,7 +252,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
 
         let competingStorage = StorageService(databasePath: fixture.databasePath)
         try await competingStorage.open()
-        try await competingStorage.updateItemPayload(
+        try await competingStorage.replacePayloadForTesting(
             id: fixture.itemID,
             contentHash: replacementHash,
             sizeBytes: replacementData.count,
@@ -521,7 +521,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
 
         let competingStorage = StorageService(databasePath: fixture.databasePath)
         try await competingStorage.open()
-        try await competingStorage.updateItemPayload(
+        try await competingStorage.replacePayloadForTesting(
             id: fixture.itemID,
             contentHash: replacementHash,
             sizeBytes: replacementData.count,

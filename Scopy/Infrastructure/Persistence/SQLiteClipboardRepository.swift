@@ -358,30 +358,6 @@ actor SQLiteClipboardRepository {
         }
     }
 
-    func updateItemPayload(
-        id: UUID,
-        contentHash: String,
-        sizeBytes: Int,
-        storageRef: String?,
-        rawData: Data?
-    ) throws {
-        try performWriteTransaction {
-            let sql = """
-                UPDATE clipboard_items
-                SET content_hash = ?, size_bytes = ?, storage_ref = ?, raw_data = ?
-                WHERE id = ?
-            """
-            let stmt = try prepare(sql)
-            try stmt.bindText(contentHash, at: 1)
-            try stmt.bindInt(sizeBytes, at: 2)
-            try stmt.bindText(storageRef, at: 3)
-            try stmt.bindBlob(rawData, at: 4)
-            try stmt.bindText(id.uuidString, at: 5)
-            _ = try stmt.step()
-            return try fetchItemByID(id).map(StorageCommittedChange.upserted) ?? .unindexedFields
-        }
-    }
-
     /// Replaces only the payload columns when the row still owns the exact payload snapshot that
     /// the caller read before doing asynchronous work. Metadata-only changes (pin, note, usage)
     /// intentionally do not invalidate payload ownership.
