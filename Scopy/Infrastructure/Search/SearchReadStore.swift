@@ -2,9 +2,9 @@ import Foundation
 import SQLite3
 
 /// The search engine's read-only SQLite connection and every query it runs. Owned by the engine
-/// actor and never shared: the engine interrupts this connection on timeout or cancellation, and
-/// a separate connection keeps those interrupts and the 10-40 ms FTS scans away from the
-/// repository's write transactions.
+/// actor and never shared. SQL checks the executing task's cancellation through a progress
+/// callback, so cancelling a search that awaits an index or builds evidence cannot interrupt
+/// another search. The connection also keeps FTS scans away from repository write transactions.
 final class SearchReadStore {
     struct Page {
         let items: [ClipboardStoredItem]
@@ -141,9 +141,6 @@ final class SearchReadStore {
 
     var isOpen: Bool { connection != nil }
 
-    /// For `sqlite3_interrupt` from the engine's timeout and cancellation handlers.
-    var connectionHandle: OpaquePointer? { connection?.handle }
-
     func open() throws {
         guard connection == nil else { return }
 
@@ -161,6 +158,9 @@ final class SearchReadStore {
             throw SearchEngineImpl.SearchError.searchFailed(error.localizedDescription)
         }
 
+        // The callback runs synchronously inside SQLite on the task executing this statement.
+        // No connection pointer escapes to a cancellation handler or survives close/reopen.
+        sqlite3_progress_handler(conn.handle, 1_000, { _ in Task.isCancelled ? 1 : 0 }, nil)
         connection = conn
         statementCache = [:]
         statementCacheLRU = []

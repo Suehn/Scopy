@@ -1,6 +1,5 @@
 import Darwin
 import Foundation
-import SQLite3
 import os
 
 public actor SearchEngineImpl {
@@ -51,13 +50,16 @@ public actor SearchEngineImpl {
 
     }
 
-    private struct SQLiteInterruptHandle: @unchecked Sendable {
-        let handle: OpaquePointer
-    }
-
     private struct CachedRecentItem {
         let item: ClipboardStoredItem
-        let combinedLower: String
+        // Exact and regex searches use the original fields. Only the fuzzy fallback needs
+        // a second, lowercased copy of each row, and only after its filters admit the row.
+        lazy var combinedLower: String = {
+            if let note = item.note, !note.isEmpty {
+                return (item.plainText + "\n" + note).lowercased()
+            }
+            return item.plainText.lowercased()
+        }()
     }
 
     // MARK: - Properties
@@ -146,7 +148,8 @@ public actor SearchEngineImpl {
             _ = try? await withTimeout(timeout: 2.0) { await task.value }
         }
 
-        fullIndexStore.sortedMatchesCache = nil
+        resetRecentCache()
+        fullIndexStore.reset()
         corpusMetrics = nil
         corpusMetricsUpdatedAt = .distantPast
         knownMutationSeq = nil
@@ -448,6 +451,7 @@ public actor SearchEngineImpl {
     // MARK: - Search API
 
     public func search(request: SearchRequest) async throws -> SearchResult {
+        try Task.checkCancellation()
         let startTime = CFAbsoluteTimeGetCurrent()
         let perfContext = SearchPerfContext.metricsEnabled ? SearchPerfContext() : nil
         activeSearchCount += 1
@@ -469,33 +473,18 @@ public actor SearchEngineImpl {
         }
 
         try openIfNeeded()
-        let interruptHandle = readStore.connectionHandle.map { SQLiteInterruptHandle(handle: $0) }
-
-        let result = try await withTaskCancellationHandler(operation: {
-            try await withTimeout(
-                timeout: timeout,
-                onTimeout: {
-                    if let interruptHandle {
-                        sqlite3_interrupt(interruptHandle.handle)
-                    }
+        let result = try await withTimeout(timeout: timeout) {
+            let rawResult = try await self.searchInternal(
+                request: request,
+                perf: perfContext
+            )
+            if let perfContext {
+                return try perfContext.measure("match_evidence") {
+                    try SearchMatchContextBuilder.attach(to: rawResult, request: request)
                 }
-            ) {
-                let rawResult = try await self.searchInternal(
-                    request: request,
-                    perf: perfContext
-                )
-                if let perfContext {
-                    return try perfContext.measure("match_evidence") {
-                        try SearchMatchContextBuilder.attach(to: rawResult, request: request)
-                    }
-                }
-                return try SearchMatchContextBuilder.attach(to: rawResult, request: request)
             }
-        }, onCancel: {
-            if let interruptHandle {
-                sqlite3_interrupt(interruptHandle.handle)
-            }
-        })
+            return try SearchMatchContextBuilder.attach(to: rawResult, request: request)
+        }
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
         let missingEvidenceCount = request.hasSemanticQuery
@@ -750,15 +739,7 @@ public actor SearchEngineImpl {
         guard needsRefresh else { return }
 
         let items = try readStore.fetchRecentSummaries(limit: Self.shortQueryCacheSize, offset: 0)
-        recentItemsCache = items.map { item in
-            let combined: String = {
-                if let note = item.note, !note.isEmpty {
-                    return item.plainText + "\n" + note
-                }
-                return item.plainText
-            }()
-            return CachedRecentItem(item: item, combinedLower: combined.lowercased())
-        }
+        recentItemsCache = items.map { CachedRecentItem(item: $0) }
         cacheTimestamp = now
     }
 
@@ -1031,97 +1012,36 @@ public actor SearchEngineImpl {
         tokenLower: String,
         perf: SearchPerfContext?
     ) throws -> SearchResult? {
-        if tokenLower.canBeConverted(to: .ascii) {
-            guard let candidates = shortIndexStore.candidateIDStrings(for: tokenLower) else { return nil }
-            return try searchShortFuzzyWithASCIICandidates(
-                request: request,
+        let isASCII = tokenLower.canBeConverted(to: .ascii)
+        let candidates = isASCII
+            ? shortIndexStore.candidateIDStrings(for: tokenLower)
+            : shortIndexStore.candidateIDStringsForNonASCIIBigram(tokenLower: tokenLower)
+        guard let candidates else { return nil }
+        if candidates.isEmpty {
+            return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
+        }
+        guard !shouldFallbackFromShortQueryCandidates(candidates.count, sortMode: request.sortMode) else {
+            return nil
+        }
+
+        perf?.addCounter("short_query_path_short_index", value: 1)
+        perf?.addCounter("short_query_short_index_candidates", value: candidates.count)
+        let page: SearchReadStore.Page
+        if let perf {
+            let phase = isASCII ? "short_query_short_index_fetch" : "short_query_short_index_sql_fetch"
+            page = try perf.measure(phase) {
+                try readStore.searchShortQuerySubstring(
+                    tokenLower: tokenLower,
+                    candidateIDStrings: candidates,
+                    sortMode: request.sortMode,
+                    filters: .init(request),
+                    window: .init(request)
+                )
+            }
+        } else {
+            page = try readStore.searchShortQuerySubstring(
                 tokenLower: tokenLower,
                 candidateIDStrings: candidates,
-                perf: perf
-            )
-        }
-
-        guard let candidates = shortIndexStore.candidateIDStringsForNonASCIIBigram(tokenLower: tokenLower) else {
-            return nil
-        }
-        return try searchShortFuzzyWithNonASCIICandidates(
-            request: request,
-            tokenLower: tokenLower,
-            candidateIDStrings: candidates,
-            perf: perf
-        )
-    }
-
-    private func searchShortFuzzyWithASCIICandidates(
-        request: SearchRequest,
-        tokenLower: String,
-        candidateIDStrings: [String],
-        perf: SearchPerfContext?
-    ) throws -> SearchResult? {
-        if candidateIDStrings.isEmpty {
-            return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
-        }
-
-        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count, sortMode: request.sortMode) else {
-            return nil
-        }
-
-        perf?.addCounter("short_query_path_short_index", value: 1)
-        perf?.addCounter("short_query_short_index_candidates", value: candidateIDStrings.count)
-        let page: SearchReadStore.Page
-        if let perf {
-            page = try perf.measure("short_query_short_index_fetch") {
-                try readStore.searchShortQuerySubstring(
-                    tokenLower: tokenLower,
-                    candidateIDStrings: candidateIDStrings,
-                    sortMode: request.sortMode,
-                    filters: .init(request),
-                    window: .init(request)
-                )
-            }
-        } else {
-            page = try readStore.searchShortQuerySubstring(
-                tokenLower: tokenLower,
-                candidateIDStrings: candidateIDStrings,
-                sortMode: request.sortMode,
-                filters: .init(request),
-                window: .init(request)
-            )
-        }
-        return makeZeroTimeSearchResult(page: page)
-    }
-
-    private func searchShortFuzzyWithNonASCIICandidates(
-        request: SearchRequest,
-        tokenLower: String,
-        candidateIDStrings: [String],
-        perf: SearchPerfContext?
-    ) throws -> SearchResult? {
-        if candidateIDStrings.isEmpty {
-            return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
-        }
-
-        guard !shouldFallbackFromShortQueryCandidates(candidateIDStrings.count, sortMode: request.sortMode) else {
-            return nil
-        }
-
-        perf?.addCounter("short_query_path_short_index", value: 1)
-        perf?.addCounter("short_query_short_index_candidates", value: candidateIDStrings.count)
-        let page: SearchReadStore.Page
-        if let perf {
-            page = try perf.measure("short_query_short_index_sql_fetch") {
-                try readStore.searchShortQuerySubstring(
-                    tokenLower: tokenLower,
-                    candidateIDStrings: candidateIDStrings,
-                    sortMode: request.sortMode,
-                    filters: .init(request),
-                    window: .init(request)
-                )
-            }
-        } else {
-            page = try readStore.searchShortQuerySubstring(
-                tokenLower: tokenLower,
-                candidateIDStrings: candidateIDStrings,
                 sortMode: request.sortMode,
                 filters: .init(request),
                 window: .init(request)
@@ -1346,8 +1266,9 @@ public actor SearchEngineImpl {
         var scored: [(item: ClipboardStoredItem, key: SearchRankKey)] = []
         scored.reserveCapacity(min(recentItemsCache.count, Self.shortQueryCacheSize))
 
-        for cached in recentItemsCache {
-            let item = cached.item
+        for index in recentItemsCache.indices {
+            try Task.checkCancellation()
+            let item = recentItemsCache[index].item
             if let appFilter = request.appFilter, item.appBundleID != appFilter { continue }
             if let typeFilters = request.typeFilters, !typeFilters.isEmpty {
                 if !typeFilters.contains(item.type) { continue }
@@ -1355,7 +1276,7 @@ public actor SearchEngineImpl {
                 if item.type != typeFilter { continue }
             }
 
-            guard let score = scorer.score(textLower: cached.combinedLower) else { continue }
+            guard let score = scorer.score(textLower: recentItemsCache[index].combinedLower) else { continue }
             scored.append((item: item, key: SearchRankKey(item: item, score: score)))
         }
 
@@ -1380,12 +1301,12 @@ public actor SearchEngineImpl {
         return ids.compactMap { index.idToSlot[$0] }
     }
 
-    @discardableResult
     // MARK: - Timeout
 
-    private func withTimeout<T: Sendable>(
+    /// Deadline arbitration must run outside the engine actor: the work can hold that actor in
+    /// sqlite3_step, whose progress callback exits when this group cancels its task.
+    private nonisolated func withTimeout<T: Sendable>(
         timeout: TimeInterval,
-        onTimeout: @escaping @Sendable () -> Void = {},
         _ work: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
@@ -1394,7 +1315,6 @@ public actor SearchEngineImpl {
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                onTimeout()
                 throw SearchError.timeout
             }
 
@@ -1404,9 +1324,11 @@ public actor SearchEngineImpl {
                     throw SearchError.timeout
                 }
                 group.cancelAll()
+                try Task.checkCancellation()
                 return value
             } catch {
                 group.cancelAll()
+                try Task.checkCancellation()
                 throw error
             }
         }

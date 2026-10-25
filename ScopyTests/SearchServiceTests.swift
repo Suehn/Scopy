@@ -455,7 +455,7 @@ final class SearchServiceTests: XCTestCase {
             )
             XCTFail("Expected the controlled SQLite query to exceed its search deadline")
         } catch SearchEngineImpl.SearchError.timeout {
-            // The deadline child interrupts sqlite3_step before structured task-group teardown waits.
+            // The deadline cancels the SQL task while sqlite3_step occupies the engine actor.
         }
         let timeoutElapsed = CFAbsoluteTimeGetCurrent() - startedAt
         print("SQLite timeout interrupt returned in \(String(format: "%.1f", timeoutElapsed * 1_000))ms")
@@ -464,6 +464,30 @@ final class SearchServiceTests: XCTestCase {
             1.0,
             "Timed-out SQLite work should be interrupted instead of delaying search return"
         )
+
+        let nextPage = try await search.search(request: SearchRequest(query: "", mode: .exact, limit: 3))
+        XCTAssertEqual(nextPage.items.count, 3, "The cancelled statement must leave the connection reusable")
+        XCTAssertTrue(nextPage.hasMore)
+    }
+
+    func testCloseReopenDiscardsRecentAndFullIndexSnapshots() async throws {
+        let original = try await storage.upsertItem(makeContent("alpha original"))
+        let shortRequest = SearchRequest(query: "al", mode: .exact)
+        let fullRequest = SearchRequest(query: "alpha", mode: .fuzzy, forceFullFuzzy: true)
+        let recentBeforeClose = try await search.search(request: shortRequest)
+        let fullBeforeClose = try await search.search(request: fullRequest)
+        XCTAssertEqual(recentBeforeClose.items.map(\.id), [original.id])
+        XCTAssertEqual(fullBeforeClose.items.map(\.id), [original.id])
+
+        await search.close()
+        try await storage.deleteItem(original.id)
+        let replacement = try await storage.upsertItem(makeContent("alpha replacement"))
+        try await search.open()
+
+        let recentAfterReopen = try await search.search(request: shortRequest)
+        let fullAfterReopen = try await search.search(request: fullRequest)
+        XCTAssertEqual(recentAfterReopen.items.map(\.id), [replacement.id])
+        XCTAssertEqual(fullAfterReopen.items.map(\.id), [replacement.id])
     }
 
     func testRegexSearch() async throws {
@@ -525,6 +549,8 @@ final class SearchServiceTests: XCTestCase {
             // Expected: progress callbacks make Foundation's synchronous matcher cooperative.
         }
         XCTAssertLessThan(CFAbsoluteTimeGetCurrent() - cancellationStart, 1.0)
+        let nextPage = try await search.search(request: SearchRequest(query: "", mode: .exact, limit: 1))
+        XCTAssertEqual(nextPage.items.map(\.plainText), [text])
     }
 
     func testRegexRecentOnlyExcludesOldMatchesBeyondRecentCache() async throws {
