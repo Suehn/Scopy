@@ -71,10 +71,6 @@ def walk(node):
         yield from walk(child)
 
 
-def find(observation, identifier):
-    return next((node for node in walk(observation["tree"]) if node.get("id") == identifier), None)
-
-
 def item_ids(observation):
     result = []
     for node in walk(observation["tree"]):
@@ -185,14 +181,14 @@ class Session:
     def database(self):
         return self.storage / "clipboard.db"
 
-    def start(self):
+    def start(self, arguments=()):
         self.launches += 1
         run(TOOLS / "warp", 1400, 40)
         self.log = (self.output / f"app-{self.launches}.log").open("w")
         self.process = subprocess.Popen(["/usr/bin/sandbox-exec", "-f", str(self.profile),
-            str(self.app / "Contents/MacOS/Scopy"), "-AppleLanguages", "(en)", "-AppleLocale", "en_US"],
+            str(self.app / "Contents/MacOS/Scopy"), *arguments, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"],
             env=self.env, stdout=self.log, stderr=subprocess.STDOUT)
-        wait_for(lambda: bridge("activate", self.process.pid)["pid"] == self.process.pid,
+        wait_for(lambda: bridge("activate", self.process.pid, stderr=subprocess.DEVNULL)["pid"] == self.process.pid,
                  "test app activation before the automatic panel opens")
         def panel():
             assert self.process.poll() is None, f"App exited: {self.process.returncode}"

@@ -18,6 +18,19 @@ Omit `--candidate` to validate the baseline and driver. Every run requires a new
 
 `--seed /absolute/path/to/offline/storage-root` copies a complete stopped Scopy storage root to both sides. The source must already contain `.scopy-writer.lock`; the driver holds its exclusive lock while copying and refuses symlinks. Copying the whole directory preserves `clipboard.db`, WAL state, `content/`, `ingest/`, thumbnails and search caches. Never pass a live production root. Without a seed, both sides start with the same empty storage state and empty home caches.
 
+## Markdown PNG comparison
+
+The exporter uses the real app's existing `--uitesting` auto-export entry point with a separate private export pasteboard. It defaults to `user_markdown_stress.md` and `chatgpt_rich_copy_sample.md` at 100% resolution. Each output must match the PNG on its private pasteboard, then the two versions must produce byte-identical files.
+
+```sh
+python3 scripts/e2e/export.py \
+  --baseline /absolute/path/to/baseline/Scopy.app \
+  --candidate /absolute/path/to/candidate/Scopy.app \
+  --output /absolute/path/to/a/new/export-directory
+```
+
+`--fixture` and `--resolution` may be repeated for a specifically required comparison. A byte difference fails for pixel comparison and review; dimensions alone are not equivalence. PNG and lifecycle outcomes are reported independently.
+
 ## Isolation
 
 - Each run copies the bundles and gives them one new `com.scopy.e2e.<random>` identity, reused sequentially across sides. The source bundles stay untouched. Staging changes only bundle identity, automatic-updater settings and the ad-hoc signature; source and staged executable hashes are recorded.
@@ -29,21 +42,21 @@ Omit `--candidate` to validate the baseline and driver. Every run requires a new
 
 ## Baseline provenance
 
-The redesign baseline is v0.84.0 (`6cc0c5812b3dc7e42cd738bb72ad36f035c08643`). Source `452703787eb96f0893d6f1c9e4f2ac00c4792800` has identical production source, package/build declarations and renderer assets; its differences are the Cask and task documents. Rebuild it in a checkout of that source, with independent DerivedData:
+The public baseline is v0.84.0 (peeled commit `6863791be1d3eb5de311265e0cf4f022be12dcd1`; annotated tag object `6cc0c5812b3dc7e42cd738bb72ad36f035c08643`). Use a separate checkout of that published tag and independent DerivedData:
 
 ```sh
 make markdown-assets-gate setup
 xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release \
   -derivedDataPath /absolute/path/to/Scopy-e2e-v084 build \
-  MARKETING_VERSION=0.84.0 CURRENT_PROJECT_VERSION=734
+  $(bash scripts/version.sh --xcodebuild-args)
 ```
 
-Record `git rev-parse HEAD`, `git diff v0.84.0 HEAD -- Scopy ScopyUISupport Package.swift project.yml Tools/MarkdownRenderer`, Xcode/Swift/macOS versions, resolved dependencies, renderer asset hashes, executable hash and the build log alongside the run. A version label alone is not build provenance.
+Record `git rev-parse HEAD`, `git rev-parse 'v0.84.0^{commit}'`, the complete dirty diff and its SHA-256, untracked source file hashes, Xcode/Swift/macOS versions, resolved dependencies, renderer asset hashes, executable hash and the build log alongside the run. A version label or HEAD alone is not provenance for a dirty build. Local task-specific source ancestry belongs in the run manifest, not in this public rebuild procedure.
 
 ## Interpretation and remaining coverage
 
 The differential comparison retains database order and all semantic item fields, checks a one-to-one UUID/content mapping and compares ingest receipt targets and metadata. Exact capture timestamps and random ingest IDs remain in raw evidence; creation windows, ordering, receipt count and item references are checked before normalization. It never sorts away a result-order difference or collapses duplicate rows.
 
-Passing this scenario proves the paths it executes. Search/pagination, copy shortcuts, pin/delete/undo, settings Save/Cancel, hover/pinned previews, image/file capture, PNG export and measured performance require their own real-app scenarios. The full redesign acceptance must list those outcomes rather than treating this lifecycle result as complete E2E coverage. Existing `scripts/perf-scroll` tools supply input and timing primitives; interleaved A/A and A/B are required before making performance claims.
+Passing a scenario proves the paths it executes. Search/pagination, copy shortcuts, pin/delete/undo, settings Save/Cancel, hover/pinned previews, image/file capture and measured performance require their own real-app scenarios. The full acceptance must list those outcomes rather than treating lifecycle and PNG results as complete interaction coverage. Existing `scripts/perf-scroll` tools supply input and timing primitives; interleaved A/A and A/B are required before making performance claims.
 
 For this tooling change run `make test-tooling`, compile the helpers, and run a real baseline. The narrow safety tests are `python3 -m unittest discover -s scripts/e2e -p 'test_*.py'`; they exercise refusal of active seed writers and semantic comparison regressions without a GUI.

@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CryptoKit
 import Foundation
 
 // Structured observations for the real-app driver. Input events still use perf-scroll's tools.
@@ -21,7 +22,9 @@ func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
 }
 
 func children(_ element: AXUIElement) -> [AXUIElement] {
-    (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+    ((attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []).filter {
+        attribute($0, kAXRoleAttribute) as? String != kAXMenuBarRole
+    }
 }
 
 func describe(_ element: AXUIElement, depth: Int = 0, count: inout Int) -> [String: Any] {
@@ -47,15 +50,6 @@ func describe(_ element: AXUIElement, depth: Int = 0, count: inout Int) -> [Stri
     let descendants = children(element)
     if !descendants.isEmpty { node["children"] = descendants.map { describe($0, depth: depth + 1, count: &count) } }
     return node
-}
-
-func find(_ element: AXUIElement, identifier: String, depth: Int = 0) -> AXUIElement? {
-    guard depth <= 35 else { return nil }
-    if attribute(element, kAXIdentifierAttribute) as? String == identifier { return element }
-    for child in children(element) {
-        if let match = find(child, identifier: identifier, depth: depth + 1) { return match }
-    }
-    return nil
 }
 
 func privatePasteboard(_ name: String) -> NSPasteboard {
@@ -121,7 +115,7 @@ case "quit":
     guard app.terminate() else { fail("Application rejected the quit request") }
     emit(["quit_requested": pid])
 case "pasteboard":
-    guard args.count >= 3 else { fail("Expected pasteboard <name> read|write") }
+    guard args.count >= 3 else { fail("Expected pasteboard <name> write|summary") }
     let pasteboard = privatePasteboard(args[1])
     if args[2] == "write" {
         guard args.count == 4,
@@ -138,22 +132,21 @@ case "pasteboard":
         pasteboard.clearContents()
         guard pasteboard.writeObjects([item]) else { fail("Pasteboard write failed") }
         emit(["change_count": pasteboard.changeCount])
-    } else if args[2] == "read" {
-        var representations: [String: String] = [:]
+    } else if args[2] == "summary" {
+        var representations: [String: Any] = [:]
         for type in pasteboard.types ?? [] {
-            if let bytes = pasteboard.data(forType: type) { representations[type.rawValue] = bytes.base64EncodedString() }
+            if let bytes = pasteboard.data(forType: type) {
+                representations[type.rawValue] = ["bytes": bytes.count,
+                    "sha256": SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()]
+            }
         }
         emit(["change_count": pasteboard.changeCount, "representations": representations])
     } else { fail("Unknown pasteboard operation") }
 case "ax":
     guard args.count >= 2, let pid = Int32(args[1]), AXIsProcessTrusted() else { fail("Expected PID and Accessibility trust") }
     let app = AXUIElementCreateApplication(pid)
-    if args.count >= 4, args[2] == "press" {
-        guard let element = find(app, identifier: args[3]) else { fail("Missing AX identifier \(args[3])") }
-        let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
-        guard result == .success else { fail("AXPress failed: \(result.rawValue)") }
-        emit(["pressed": args[3]])
-    } else {
+    guard args.count == 2 else { fail("Expected ax <pid>; this is an observation-only command") }
+    do {
         var count = 0
         let tree = describe(app, count: &count)
         let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
