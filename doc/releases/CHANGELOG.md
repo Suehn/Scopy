@@ -12,6 +12,27 @@
 
 - No unreleased entries.
 
+## [v0.85.0] - 2026-10-25
+
+### Changed
+
+- Capture reuses each pasteboard representation once. Shutdown waits for accepted capture, storage and publication work before closing the database and releasing its writer lock.
+- History requests, row subscriptions, relative-time updates and hotkey recording have explicit owners. Closing Settings releases its draft and input handlers; Save/Cancel and existing keyboard behavior are preserved.
+- Hover preparation, pinned previews, export and thumbnail loading retain their resources until the owned work finishes. Pending pinned windows can be invalidated before they appear, and old callbacks cannot close a replacement.
+- Search shares one UTF-8 traversal helper and reduces repeated scans and temporary allocations. SQLite cancellation follows the task executing the query.
+- Markdown tables prepare their structure once and finalize column sizes after images settle; scientific-source placeholders restore in one pass. Preview and PNG still use the same renderer and document.
+- Development, tests and releases use Xcode 26.1.1 and Swift 6, with a macOS 14 deployment target.
+
+### Fixed
+
+- EXIF-rotated hover images decode to the displayed width.
+- Invalidated thumbnail work cannot repopulate the cache or release its concurrency slot before decoding ends.
+- Orphan cleanup uses the same path reservations as payload placement, without discarding a sweep after an unrelated database write.
+
+### Performance
+
+- On the same isolated 10,000-row snapshot, Release A/A plus A–B–B–A comparisons against v0.84.0 reduced the median full-index build phase from 1,560 to 892 ms and the measured warm Chinese query from 25.187 to 21.972 ms. Warm-load time and benchmark peak RSS remained within noise; no tail-latency or whole-app improvement is claimed.
+
 ## [v0.84.0] - 2026-10-18
 
 ### Changed
