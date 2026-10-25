@@ -72,8 +72,7 @@ enum CapturedTextExtraction {
         rtfData: Data?,
         htmlData: Data?,
         string: String?,
-        appBundleID: String?,
-        parseHTMLOnMain: @MainActor @Sendable (Data) -> String?
+        appBundleID: String?
     ) async -> ClipboardMonitor.RawClipboardData? {
         // 3. RTF
         if let rtfData {
@@ -88,7 +87,7 @@ enum CapturedTextExtraction {
                     || Self.isLikelyFragmentedCopyText(rtfPlainText)
                     || Self.mayContainTeXCharacters(htmlData: htmlData, string: string)
                 if htmlTextCanWin {
-                    let extracted = await parseHTMLOnMain(htmlData)
+                    let extracted = await Self.extractPlainTextFromHTML(htmlData)
                     let htmlPlainText = Self.normalizeText(
                         Self.preferredPlainText(candidate: string, extracted: extracted, type: .html)
                     )
@@ -116,7 +115,7 @@ enum CapturedTextExtraction {
                 || Self.mayContainTeXCharacters(htmlData: htmlData, string: string)
             let plainText: String
             if needsImport {
-                let extracted = await parseHTMLOnMain(htmlData)
+                let extracted = await Self.extractPlainTextFromHTML(htmlData)
                 plainText = Self.normalizeText(Self.preferredPlainText(candidate: string, extracted: extracted, type: .html))
             } else {
                 plainText = Self.normalizeText(candidate)
@@ -419,7 +418,7 @@ enum CapturedTextExtraction {
         return attributedString.string
     }
 
-    @MainActor static func extractPlainTextFromHTML(_ data: Data) -> String? {
+    private static func extractPlainTextFromHTML(_ data: Data) async -> String? {
         if let html = Self.decodeHTMLDataToString(data),
            html.range(of: "application/x-tex", options: .caseInsensitive) != nil {
             let extracted = Self.extractMarkdownLikeTextFromKaTeXHTML(html)
@@ -428,6 +427,12 @@ enum CapturedTextExtraction {
             }
         }
 
+        return await Self.importHTMLOnMain(data)
+    }
+
+    /// The WebKit-backed attributed-string importer requires the main thread; decoding and
+    /// KaTeX extraction above operate only on the capture's owned bytes.
+    @MainActor private static func importHTMLOnMain(_ data: Data) -> String? {
         let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
             .documentType: NSAttributedString.DocumentType.html
         ]

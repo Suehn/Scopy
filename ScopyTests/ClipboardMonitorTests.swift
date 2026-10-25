@@ -116,6 +116,31 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertNil(content)
     }
 
+    func testCaptureDiscardsRepresentationsChangedByLazyProvider() async {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+        let log = collectContents()
+        defer { log.consumer?.cancel() }
+
+        let provider = ChangingPasteboardDataProvider(
+            data: Data("<p>Original</p>".utf8),
+            replacement: "Next copy"
+        )
+        let item = NSPasteboardItem()
+        XCTAssertTrue(item.setDataProvider(provider, forTypes: [.html]))
+        XCTAssertTrue(item.setString("Original", forType: .string))
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+
+        await monitor.checkClipboard()
+        await monitor.checkClipboard()
+        await assertEventually(timeout: 2.0, pollInterval: 0.01, {
+            !log.items.isEmpty
+        }, message: "The replacement copy should be captured on the next poll")
+        XCTAssertEqual(log.items.map(\.type), [.text])
+        XCTAssertEqual(log.items.map(\.plainText), ["Next copy"])
+    }
+
     func testCaptureClipboardHTMLNonUTF8ProvidesPlainTextFallback() async {
         monitor.setPollingInterval(5.0)
         monitor.startMonitoring()
@@ -638,6 +663,25 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertNotNil(content?.rawData)
     }
 
+    func testJPEGOnlyPasteboardImageProducesPNG() async throws {
+        monitor.setPollingInterval(5.0)
+        monitor.startMonitoring()
+
+        let tiffData = try XCTUnwrap(makeSolidColorTIFFData())
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiffData))
+        let jpegData = try XCTUnwrap(bitmap.representation(using: .jpeg, properties: [:]))
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setData(jpegData, forType: NSPasteboard.PasteboardType("public.jpeg")))
+
+        let content = await captureClipboard()
+        XCTAssertEqual(content?.type, .image)
+        let pngData = try XCTUnwrap(content?.rawData)
+        XCTAssertTrue(isLikelyPNG(pngData))
+        let capturedBitmap = try XCTUnwrap(NSBitmapImageRep(data: pngData))
+        XCTAssertEqual(capturedBitmap.pixelsWide, bitmap.pixelsWide)
+        XCTAssertEqual(capturedBitmap.pixelsHigh, bitmap.pixelsHigh)
+    }
+
     func testImageWithTemporaryImageFileURLPrefersImageContent() async throws {
         monitor.setPollingInterval(5.0)
         monitor.startMonitoring()
@@ -836,7 +880,10 @@ final class ClipboardMonitorTests: XCTestCase {
         let item = NSPasteboardItem()
         item.setString(plainText, forType: .string)
         item.setData(htmlData, forType: .html)
-        item.setData(tiffData, forType: .tiff)
+        // A table must not request its image preview. The provider replaces the pasteboard
+        // if read, making an eager image read observable through the production capture path.
+        let provider = ChangingPasteboardDataProvider(data: tiffData, replacement: "Unexpected image read")
+        XCTAssertTrue(item.setDataProvider(provider, forTypes: [.tiff]))
         pasteboard.writeObjects([item])
 
         let content = await captureClipboard()
@@ -1555,6 +1602,22 @@ final class ClipboardMonitorTests: XCTestCase {
     private final class ContentLog {
         var items: [ClipboardMonitor.ClipboardContent] = []
         var consumer: Task<Void, Never>?
+    }
+
+    private final class ChangingPasteboardDataProvider: NSObject, NSPasteboardItemDataProvider {
+        let data: Data
+        let replacement: String
+
+        init(data: Data, replacement: String) {
+            self.data = data
+            self.replacement = replacement
+        }
+
+        func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+            item.setData(data, forType: type)
+            pasteboard?.clearContents()
+            pasteboard?.setString(replacement, forType: .string)
+        }
     }
 
     /// Records every emitted content in order, acknowledging durable envelopes like the service.
