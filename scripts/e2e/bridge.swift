@@ -101,6 +101,17 @@ case "defaults":
 case "general-status":
     // Never request representations from the user's pasteboard, including promised data.
     emit(["change_count": NSPasteboard.general.changeCount])
+case "foreground":
+    emit(["pid": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1,
+          "bundle_id": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""])
+case "activate":
+    guard args.count == 2, let pid = Int32(args[1]),
+          let app = NSRunningApplication(processIdentifier: pid),
+          app.bundleIdentifier?.hasPrefix("com.scopy.e2e.") == true else {
+        fail("Expected a running isolated Scopy E2E app")
+    }
+    _ = app.activate(options: [])
+    emit(["pid": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1])
 case "quit":
     guard args.count == 2, let pid = Int32(args[1]),
           let app = NSRunningApplication(processIdentifier: pid),

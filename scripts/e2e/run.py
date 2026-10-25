@@ -192,6 +192,8 @@ class Session:
         self.process = subprocess.Popen(["/usr/bin/sandbox-exec", "-f", str(self.profile),
             str(self.app / "Contents/MacOS/Scopy"), "-AppleLanguages", "(en)", "-AppleLocale", "en_US"],
             env=self.env, stdout=self.log, stderr=subprocess.STDOUT)
+        wait_for(lambda: bridge("activate", self.process.pid)["pid"] == self.process.pid,
+                 "test app activation before the automatic panel opens")
         def panel():
             assert self.process.poll() is None, f"App exited: {self.process.returncode}"
             return run(TOOLS / "winpos", self.process.pid)
@@ -209,6 +211,7 @@ class Session:
         fixture = self.output / f"fixture-{name}.json"
         save(fixture, {"public.utf8-plain-text": base64.b64encode(text.encode()).decode()})
         before = len(rows(self.database))
+        assert bridge("foreground")["pid"] == self.process.pid, "Capture source app changed"
         started = time.time()
         bridge("pasteboard", self.pb, "write", fixture)
         if wait:
@@ -216,6 +219,7 @@ class Session:
             current = rows(self.database)
             match = [row for row in current if row["plain_text"] == text]
             assert len(match) == 1, f"Capture text changed or duplicated: {name}"
+            assert match[0]["app_bundle_id"] == self.domain, "Capture source differs from the isolated app"
             assert started - 1 <= match[0]["created_at"] <= time.time() + 1
             wait_for(lambda: match[0]["id"] in item_ids(bridge("ax", self.process.pid)), f"UI published {name}")
             self.observe("capture-" + name)
@@ -275,6 +279,7 @@ def lifecycle(session: Session):
     current = rows(session.database)
     match = [row for row in current if row["plain_text"] == large]
     assert len(match) == 1 and match[0]["use_count"] == 1, "Restart duplicated or lost large capture"
+    assert match[0]["app_bundle_id"] == session.domain, "Large capture source app changed"
     assert started - 1 <= match[0]["created_at"] <= time.time() + 1, "Large capture creation time is outside its operation window"
     wait_for(lambda: match[0]["id"] in item_ids(bridge("ax", session.process.pid)), "restarted UI shows large capture")
     session.observe("restarted")
