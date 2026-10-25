@@ -411,9 +411,9 @@ final class ThumbnailPipelineTests: XCTestCase {
         await queue.finish()
     }
 
-    func testThumbnailDecodeCoordinatorBoundsUniqueWorkAndSharesDuplicatePath() async throws {
+    func testThumbnailCacheBoundsUniqueWorkAndSharesDuplicatePath() async throws {
         let gate = AsyncExecutionGate<String>()
-        let coordinator = ThumbnailDecodeCoordinator(
+        let cache = ThumbnailCache.makeForTesting(
             limit: 1,
             maxPending: 2,
             maxWaiters: 4,
@@ -423,28 +423,22 @@ final class ThumbnailPipelineTests: XCTestCase {
             }
         )
 
-        let active = Task { await coordinator.load(path: "active", priority: .utility) }
-        try await waitUntil { await coordinator.snapshot().activeUniqueCount == 1 }
-        let utility = Task { await coordinator.load(path: "utility", priority: .utility) }
-        try await waitUntil { await coordinator.snapshot().pendingPaths == ["utility"] }
-        let upgraded = Task { await coordinator.load(path: "upgraded", priority: .utility) }
-        try await waitUntil { await coordinator.snapshot().pendingUniqueCount == 2 }
-        let upgradedDuplicate = Task { await coordinator.load(path: "upgraded", priority: .userInitiated) }
-        try await waitUntil { await coordinator.snapshot().totalWaiterCount == 4 }
-        let visibleReplacement = Task { await coordinator.load(path: "visible", priority: .userInitiated) }
+        let active = Task { await cache.loadImage(path: "active", priority: .utility) }
+        try await waitUntil { cache.snapshotForTesting().activeCount == 1 }
+        let utility = Task { await cache.loadImage(path: "utility", priority: .utility) }
+        try await waitUntil { cache.snapshotForTesting().pendingPaths == ["utility"] }
+        let upgraded = Task { await cache.loadImage(path: "upgraded", priority: .utility) }
+        try await waitUntil { cache.snapshotForTesting().pendingCount == 2 }
+        let upgradedDuplicate = Task { await cache.loadImage(path: "upgraded", priority: .userInitiated) }
+        try await waitUntil { cache.snapshotForTesting().waiterCount == 4 }
+        let visibleReplacement = Task { await cache.loadImage(path: "visible", priority: .userInitiated) }
 
-        try await waitUntil {
-            let snapshot = await coordinator.snapshot()
-            return snapshot.pendingPaths == ["upgraded", "visible"]
-        }
-        let bounded = await coordinator.snapshot()
-        XCTAssertEqual(bounded.activeUniqueCount, 1)
-        XCTAssertEqual(bounded.pendingUniqueCount, 2)
-        XCTAssertLessThanOrEqual(bounded.totalWaiterCount, 4)
+        try await waitUntil { cache.snapshotForTesting().pendingPaths == ["upgraded", "visible"] }
+        let bounded = cache.snapshotForTesting()
+        XCTAssertEqual(bounded.activeCount, 1)
+        XCTAssertEqual(bounded.pendingCount, 2)
+        XCTAssertEqual(bounded.waiterCount, 4)
         XCTAssertEqual(bounded.pendingUserInitiated, [true, true])
-        XCTAssertLessThanOrEqual(bounded.maxActiveUniqueCount, 1)
-        XCTAssertLessThanOrEqual(bounded.maxPendingUniqueCount, 2)
-        XCTAssertLessThanOrEqual(bounded.maxTotalWaiterCount, 4)
 
         await gate.release("active")
         await gate.release("upgraded")
@@ -455,19 +449,20 @@ final class ThumbnailPipelineTests: XCTestCase {
         _ = await upgradedDuplicate.value
         _ = await visibleReplacement.value
         try await waitUntil {
-            let snapshot = await coordinator.snapshot()
-            return snapshot.activeUniqueCount == 0 && snapshot.pendingUniqueCount == 0
+            let snapshot = cache.snapshotForTesting()
+            return snapshot.activeCount == 0 && snapshot.pendingCount == 0
         }
 
-        let invocations = await gate.snapshot().invocationCount
-        XCTAssertEqual(invocations["upgraded"], 1, "Duplicate paths must share one decode")
-        XCTAssertNil(invocations["utility"], "Visible replacement must drop the oldest utility decode")
-        await coordinator.stop()
+        let execution = await gate.snapshot()
+        XCTAssertEqual(execution.maxActiveCount, 1)
+        XCTAssertEqual(execution.invocationCount["upgraded"], 1, "Duplicate paths must share one decode")
+        XCTAssertNil(execution.invocationCount["utility"], "Visible replacement must drop the oldest utility decode")
+        XCTAssertEqual(execution.started, ["active", "upgraded", "visible"])
     }
 
     func testThumbnailDecodeCancellationDoesNotLeakWaitersOrActiveOwnership() async throws {
         let gate = AsyncExecutionGate<String>()
-        let coordinator = ThumbnailDecodeCoordinator(
+        let cache = ThumbnailCache.makeForTesting(
             limit: 1,
             maxPending: 2,
             maxWaiters: 4,
@@ -477,26 +472,22 @@ final class ThumbnailPipelineTests: XCTestCase {
             }
         )
 
-        let active = Task { await coordinator.load(path: "active", priority: .utility) }
-        try await waitUntil { await coordinator.snapshot().activeUniqueCount == 1 }
-        let pending = Task { await coordinator.load(path: "pending", priority: .utility) }
-        try await waitUntil { await coordinator.snapshot().pendingUniqueCount == 1 }
+        let active = Task { await cache.loadImage(path: "active", priority: .utility) }
+        try await waitUntil { cache.snapshotForTesting().activeCount == 1 }
+        let pending = Task { await cache.loadImage(path: "pending", priority: .utility) }
+        try await waitUntil { cache.snapshotForTesting().pendingCount == 1 }
 
         pending.cancel()
         active.cancel()
         _ = await pending.value
         _ = await active.value
         try await waitUntil {
-            let snapshot = await coordinator.snapshot()
-            return snapshot.totalWaiterCount == 0 && snapshot.pendingUniqueCount == 0
+            let snapshot = cache.snapshotForTesting()
+            return snapshot.waiterCount == 0 && snapshot.pendingCount == 0
         }
         await gate.release("active")
-        try await waitUntil { await coordinator.snapshot().activeUniqueCount == 0 }
-        await coordinator.stop()
-        let stopped = await coordinator.snapshot()
-        XCTAssertEqual(stopped.workerCount, 0)
-        XCTAssertEqual(stopped.waitingWorkerCount, 0)
-        XCTAssertEqual(stopped.totalWaiterCount, 0)
+        try await waitUntil { cache.snapshotForTesting().activeCount == 0 }
+        XCTAssertEqual(cache.snapshotForTesting().waiterCount, 0)
     }
 
     private func waitUntil(

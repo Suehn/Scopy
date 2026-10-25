@@ -24,7 +24,8 @@ NC='\033[0m'
 
 # 配置
 APP_NAME="Scopy"
-XCODE_DERIVED_DATA="${SCOPY_XCODE_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/Scopy-Release}"
+CHECKOUT_ID="$(printf '%s' "$PROJECT_DIR" | shasum | cut -c1-12)"
+XCODE_DERIVED_DATA="${SCOPY_XCODE_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/Scopy-$CHECKOUT_ID/Scopy-Release}"
 BUILD_DIR="$XCODE_DERIVED_DATA/Build/Products/Release"
 DMG_DIR=".build/dmg"
 BUILD_LOG="$XCODE_DERIVED_DATA/build-release.log"

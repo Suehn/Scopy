@@ -139,6 +139,24 @@ final class FullIndexRankerGoldenTests: XCTestCase {
         XCTAssertEqual(FullIndexRanker.candidateSlots(index: index, queryLower: " ").count, 9)
     }
 
+    func testCandidatesRetainMatchesAcrossCanonicalFormsAndGraphemeBoundaries() {
+        let texts = [
+            "café cafe\u{301} abc", "cafe\u{301} café a\u{301}bc", "原文错了嘛",
+            "å a\u{30A} 原文", "각 \u{1100}\u{1161}\u{11A8}", "😀 👩🏽‍🔬 👩‍🔬",
+            "a\r\nbc 原\u{301}文错", "\u{600}a a\u{903}b 原文错", "plain ascii only",
+        ]
+        let rows = texts.enumerated().map { Row(number: $0.offset + 1, text: $0.element, t: 0) }
+        let index = Self.makeIndex(rows)
+        for query in ["cafe", "café", "é", "å", "abc", "原文错", "角", "각", "😀", "👩", "👩‍🔬"] {
+            for mode in [SearchMode.fuzzy, .fuzzyPlus] {
+                let scorer = FuzzyMatcher.Scorer(queryLower: query, mode: mode)
+                let matches = Set(texts.indices.filter { scorer.score(textLower: texts[$0]) != nil })
+                let candidates = Set(FullIndexRanker.candidateSlots(index: index, queryLower: query))
+                XCTAssertTrue(matches.isSubset(of: candidates), "Candidate index dropped a \(mode) match for \(query)")
+            }
+        }
+    }
+
     // MARK: - Ordering
 
     func testRelevanceOrdersPinnedThenScoreThenRecencyThenUUID() throws {

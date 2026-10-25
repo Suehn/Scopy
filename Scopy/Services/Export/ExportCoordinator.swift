@@ -22,15 +22,15 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private let viewportWidthPoints: CGFloat
     private let pngquantOptions: PngquantService.Options?
     private var preservesArtworkColors = false
-    private let completion: (Result<MarkdownExportService.ExportOutcome, Error>) -> Void
+    private var completion: ((Result<MarkdownExportService.ExportOutcome, Error>) -> Void)?
     private let targetScreen: NSScreen?
     private let backingScaleFactor: CGFloat
-    var webView: WKWebView?
+    private var webView: WKWebView?
     private var hostWindow: NSWindow?
     private var timeoutTask: Task<Void, Never>?
-    private var isCompleted = false
-    private var loadTask: Task<Void, Never>?
-    private var exportTask: Task<Void, Never>?
+    private var lifetimeTask: Task<Void, Never>?
+    private var currentNavigation: WKNavigation?
+    private var navigationContinuation: CheckedContinuation<Void, Error>?
     private var stage: MarkdownExportService.ExportStage = .loadHTML {
         didSet {
             MarkdownExportService.logger.info("Export stage \(oldValue.rawValue, privacy: .public) -> \(self.stage.rawValue, privacy: .public)")
@@ -50,8 +50,6 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private var didDumpTableMetrics = false
     private let concurrencyID = UUID()
 
-    // Keep a strong reference to self until export completes
-    private static var activeCoordinators: Set<ExportCoordinator> = []
     static let concurrencyGate = MarkdownExportConcurrencyGate(
         limit: 2,
         maximumPendingCount: 8
@@ -107,46 +105,49 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
             self.startAfterAcquiringConcurrencySlot()
         }
         if submission == .rejected {
-            completeWithError(
+            deliver(.failure(
                 MarkdownExportService.ExportError.exportLimitExceeded(
                     reason: "Too many Markdown exports are already active or queued"
                 )
-            )
+            ))
         }
     }
 
     func cancel() {
-        completeWithError(CancellationError())
+        abort(CancellationError())
     }
 
     private func startAfterAcquiringConcurrencySlot() {
-        guard !isCompleted else {
-            Self.concurrencyGate.finish(id: concurrencyID)
-            return
-        }
-        // Retain self
-        Self.activeCoordinators.insert(self)
-
         // Set timeout (long exports may require multiple tiles; keep a generous budget but still fail-fast).
-        timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: 60_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self.completeWithError(MarkdownExportService.ExportError.renderingTimeout(stage: self.stage))
-            }
+        timeoutTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 60_000_000_000) }
+            catch { return }
+            guard let self else { return }
+            self.abort(MarkdownExportService.ExportError.renderingTimeout(stage: self.stage))
         }
 
-        loadTask = Task { @MainActor in
-            await self.startWebViewAndLoadHTML()
+        // This task owns the coordinator and its resources through loading, capture and encoding. Cancellation
+        // can deliver a result early; the concurrency slot remains held until the pipeline itself exits.
+        lifetimeTask = Task { @MainActor in
+            let result: Result<MarkdownExportService.ExportOutcome, Error>
+            do {
+                let webView = try await self.loadDocument()
+                result = .success(try await self.exportPNG(webView: webView))
+            } catch {
+                result = .failure(error)
+            }
+            self.deliver(result)
+            self.releaseResources()
+            self.lifetimeTask = nil
+            Self.concurrencyGate.finish(id: self.concurrencyID)
         }
     }
 
-    private func startWebViewAndLoadHTML() async {
-        guard !isCompleted else { return }
-
+    private func loadDocument() async throws -> WKWebView {
+        try Task.checkCancellation()
         await MarkdownWebKitEnvironment.prepareRules()
         // A cancel or timeout during the await must not build a WebView and window afterwards.
-        guard !isCompleted, !Task.isCancelled else { return }
+        try Task.checkCancellation()
 
         // Create offscreen WebView with an explicit viewport size to make layout deterministic.
         let config = MarkdownWebKitEnvironment.makeConfiguration()
@@ -191,49 +192,45 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
         // Load HTML
         let baseURL = Bundle.main.resourceURL?.appendingPathComponent("MarkdownPreview", isDirectory: true)
-        wv.loadHTMLString(html, baseURL: baseURL)
+        try await withCheckedThrowingContinuation { continuation in
+            navigationContinuation = continuation
+            currentNavigation = wv.loadHTMLString(html, baseURL: baseURL)
+            if currentNavigation == nil {
+                finishNavigation(.failure(MarkdownExportService.ExportError.stageFailed(stage: .loadHTML, underlying: nil)))
+            }
+        }
+        try Task.checkCancellation()
+        return wv
     }
 
     // MARK: - WKNavigationDelegate
 
-    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Task { @MainActor in
-            self.onNavigationFinished()
-        }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView === self.webView, let currentNavigation, navigation === currentNavigation else { return }
+        finishNavigation(.success(()))
     }
 
-    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        Task { @MainActor in
-            self.completeWithError(MarkdownExportService.ExportError.stageFailed(stage: .loadHTML, underlying: error))
-        }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard webView === self.webView, let currentNavigation, navigation === currentNavigation else { return }
+        abort(MarkdownExportService.ExportError.stageFailed(stage: .loadHTML, underlying: error))
     }
 
-    nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        Task { @MainActor in
-            self.completeWithError(MarkdownExportService.ExportError.stageFailed(stage: .loadHTML, underlying: error))
-        }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard webView === self.webView, let currentNavigation, navigation === currentNavigation else { return }
+        abort(MarkdownExportService.ExportError.stageFailed(stage: .loadHTML, underlying: error))
     }
 
-    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        Task { @MainActor in
-            self.completeWithError(MarkdownExportService.ExportError.stageFailed(stage: self.stage, underlying: nil))
-        }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard webView === self.webView else { return }
+        let error = MarkdownExportService.ExportError.stageFailed(stage: stage, underlying: nil)
+        abort(error)
     }
 
-    private func onNavigationFinished() {
-        guard webView != nil, !isCompleted else { return }
-
-        exportTask?.cancel()
-        exportTask = Task { @MainActor [weak self] in
-            guard let self, let webView = self.webView, !self.isCompleted else { return }
-
-            do {
-                let outcome = try await self.exportPNG(webView: webView)
-                self.completeWithSuccess(outcome)
-            } catch {
-                self.completeWithError(error)
-            }
-        }
+    private func finishNavigation(_ result: Result<Void, Error>) {
+        let continuation = navigationContinuation
+        navigationContinuation = nil
+        currentNavigation = nil
+        continuation?.resume(with: result)
     }
 
     private func evaluateJavaScript<T: Sendable>(
@@ -241,7 +238,8 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         javaScriptString: String,
         transform: @escaping (Any?) -> T
     ) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
+        try Task.checkCancellation()
+        let result: T = try await withCheckedThrowingContinuation { continuation in
             webView.evaluateJavaScript(javaScriptString) { value, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -250,6 +248,8 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 continuation.resume(returning: transform(value))
             }
         }
+        try Task.checkCancellation()
+        return result
     }
 
     private func evaluateJavaScriptBool(webView: WKWebView, javaScriptString: String) async throws -> Bool {
@@ -277,47 +277,39 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
     // MARK: - Completion
 
-    private func completeWithSuccess(_ outcome: MarkdownExportService.ExportOutcome) {
-        guard !isCompleted else { return }
-        isCompleted = true
-        cleanup()
-        completion(.success(outcome))
-    }
-
-    private func completeWithError(_ error: Error) {
-        guard !isCompleted else { return }
-        isCompleted = true
-        cleanup()
-        completion(.failure(error))
-    }
-
-    private func cleanup() {
-        let runningWork = [loadTask, exportTask].compactMap { $0 }
-        loadTask?.cancel()
-        loadTask = nil
-        exportTask?.cancel()
-        exportTask = nil
+    private func deliver(_ result: Result<MarkdownExportService.ExportOutcome, Error>) {
+        let callback = completion
+        completion = nil
         timeoutTask?.cancel()
         timeoutTask = nil
+        callback?(result)
+    }
+
+    private func abort(_ error: Error) {
+        guard completion != nil else { return }
+        lifetimeTask?.cancel()
+        finishNavigation(.failure(error))
         layoutWaiter?.resume(nil)
         layoutWaiter = nil
+        webView?.stopLoading()
+        hostWindow?.orderOut(nil)
+        // A queued export has no lifetime task or resources to drain.
+        if lifetimeTask == nil { Self.concurrencyGate.finish(id: concurrencyID) }
+        deliver(.failure(error))
+    }
+
+    private func releaseResources() {
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: ExportLayoutMessageProxy.name)
         webView?.navigationDelegate = nil
         webView?.stopLoading()
-        webView = nil
         hostWindow?.orderOut(nil)
+        hostWindow?.contentView = nil
         hostWindow = nil
-        Self.activeCoordinators.remove(self)
-        // The slot is released only once cancelled capture and encoding work has actually exited.
-        let concurrencyID = concurrencyID
-        Task { @MainActor in
-            for work in runningWork { await work.value }
-            Self.concurrencyGate.finish(id: concurrencyID)
-        }
+        webView = nil
     }
 
     private func reportProgress(_ progress: MarkdownExportService.ExportProgress) {
-        guard progress != lastProgress, !isCompleted else { return }
+        guard progress != lastProgress, completion != nil else { return }
         lastProgress = progress
         onProgress(progress)
     }
@@ -753,6 +745,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
     }
 
     private func takeSnapshot(webView: WKWebView, config: WKSnapshotConfiguration) async throws -> CGImage {
+        try Task.checkCancellation()
         let snapshot: SnapshotImage = try await withCheckedThrowingContinuation { continuation in
             webView.takeSnapshot(with: config) { image, error in
                 if let error {
@@ -766,15 +759,18 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 continuation.resume(returning: SnapshotImage(image: image))
             }
         }
+        try Task.checkCancellation()
         return try cgImage(from: snapshot.image)
     }
 
     private func createPDF(webView: WKWebView, rectPoints: CGRect) async throws -> Data {
+        try Task.checkCancellation()
         let config = WKPDFConfiguration()
         config.rect = rectPoints
 
         // WebKit can occasionally stall without invoking the completion handler (observed under UI testing).
-        // Apply a short timeout so we can fall back to the snapshot pipeline.
+        // This bounds the result wait, not the native operation: WebKit exposes no capture cancellation handle.
+        // Keep the snapshot fallback and tear down the page at pipeline exit instead of waiting forever for a reply.
         return try await withCheckedThrowingContinuation { continuation in
             var didResume = false
             var timeoutTask: Task<Void, Never>?

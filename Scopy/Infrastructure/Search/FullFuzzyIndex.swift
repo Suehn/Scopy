@@ -12,8 +12,8 @@ struct FullFuzzyIndex: Sendable {
     var tombstoneCount: Int
 
     // Scratch that posts each distinct character of one item once; reused across appends.
-    private var seenASCII = Array(repeating: false, count: 128)
     private var seenNonASCII = Set<Character>()
+    private var seenPlainScalars = Set<UInt32>()
 
     init(reserveSlots: Int) {
         items = []
@@ -26,6 +26,7 @@ struct FullFuzzyIndex: Sendable {
             idToSlot.reserveCapacity(reserveSlots)
         }
         seenNonASCII.reserveCapacity(16)
+        seenPlainScalars.reserveCapacity(64)
     }
 
     init(
@@ -49,9 +50,8 @@ struct FullFuzzyIndex: Sendable {
         items.append(item)
         idToSlot[item.id] = slot
 
-        for i in 0..<seenASCII.count {
-            seenASCII[i] = false
-        }
+        var seenASCII0: UInt64 = 0
+        var seenASCII1: UInt64 = 0
         seenNonASCII.removeAll(keepingCapacity: true)
 
         // The ASCII scorer scans UTF-16, so an ASCII base inside a combining grapheme
@@ -63,24 +63,52 @@ struct FullFuzzyIndex: Sendable {
                 continue
             }
             if byte == 32 || (9...13).contains(byte) { continue }
-            let idx = Int(byte)
-            if !seenASCII[idx] {
-                seenASCII[idx] = true
-                asciiCharPostings[idx].append(UInt32(slot))
+            if byte < 64 {
+                let bit = UInt64(1) << byte
+                if seenASCII0 & bit == 0 {
+                    seenASCII0 |= bit
+                    asciiCharPostings[Int(byte)].append(UInt32(slot))
+                }
+            } else {
+                let bit = UInt64(1) << (byte - 64)
+                if seenASCII1 & bit == 0 {
+                    seenASCII1 |= bit
+                    asciiCharPostings[Int(byte)].append(UInt32(slot))
+                }
             }
         }
         if hasNonASCII {
-            for ch in item.plainTextLower where !ch.isWhitespace && ch.asciiValue == nil {
-                guard seenNonASCII.insert(ch).inserted else { continue }
-                nonASCIICharPostings[ch, default: []].append(UInt32(slot))
-                // Likewise a short needle's scalar inside a longer character (an emoji variant).
-                guard ch.unicodeScalars.count > 1 else { continue }
-                for scalar in ch.unicodeScalars where !scalar.isASCII {
-                    let single = Character(scalar)
-                    if seenNonASCII.insert(single).inserted {
-                        nonASCIICharPostings[single, default: []].append(UInt32(slot))
+            // Hash the common single-scalar characters as integers. Only distinct scalars need
+            // Character construction and canonical hashing; complex graphemes keep String's rules.
+            seenPlainScalars.removeAll(keepingCapacity: true)
+            var text = item.plainTextLower
+            text.makeContiguousUTF8()
+            _ = text.utf8.withContiguousStorageIfAvailable { bytes in
+                var cursor = UTF8Text.CharacterCursor(bytes: bytes, text: text, offset: 0)
+                while !cursor.isAtEnd {
+                    if let scalar = cursor.plainScalar {
+                        if scalar >= 128, seenPlainScalars.insert(scalar).inserted,
+                           let value = Unicode.Scalar(scalar) {
+                            let character = Character(value)
+                            if !character.isWhitespace { seenNonASCII.insert(character) }
+                        }
+                    } else {
+                        let character = cursor.character
+                        if !character.isWhitespace, character.asciiValue == nil,
+                           seenNonASCII.insert(character).inserted {
+                            // A short needle may match a scalar inside a longer grapheme.
+                            if character.unicodeScalars.count > 1 {
+                                for scalar in character.unicodeScalars where !scalar.isASCII {
+                                    seenNonASCII.insert(Character(scalar))
+                                }
+                            }
+                        }
                     }
+                    cursor.advance()
                 }
+            }
+            for character in seenNonASCII {
+                nonASCIICharPostings[character, default: []].append(UInt32(slot))
             }
         }
         return slot

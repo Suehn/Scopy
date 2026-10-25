@@ -8,6 +8,7 @@ import {
   splitCharacterLines,
   trimBlankAndNewlines as trim
 } from "./scopyLineScan.js";
+import { createSourcePlaceholders } from "./scopySourcePlaceholders.js";
 
 // LaTeX-document-to-Markdown repair for the `latexDocumentLike` and `pdfOCRScientific` profiles
 // (policy `allowLatexDocumentNormalize`). It runs before parsing: sectioning commands become
@@ -22,31 +23,13 @@ export function normalizeLatexDocument(source) {
   if (source === "") {
     return source;
   }
-  const islands = protectSyntaxIslands(source);
-  const normalized = normalizeDocument(islands.markdown);
-  let restored = normalized;
-  for (let index = islands.placeholders.length - 1; index >= 0; index -= 1) {
-    const [placeholder, original] = islands.placeholders[index];
-    restored = restored.split(placeholder).join(original);
-  }
-  return restored;
+  const islands = createSourcePlaceholders(source, "SCOPYMARKDOWNSYNTAX");
+  return islands.restore(normalizeDocument(protectSyntaxIslands(source, islands.protect)));
 }
 
 // MARK: - Syntax islands
 
-function protectSyntaxIslands(source) {
-  let salt = 0;
-  while (source.includes(`SCOPYMARKDOWNSYNTAX${salt}`)) {
-    salt += 1;
-  }
-  const prefix = `SCOPYMARKDOWNSYNTAX${salt}`;
-  const placeholders = [];
-  const protect = (original) => {
-    const token = `${prefix}${placeholders.length}X`;
-    placeholders.push([token, original]);
-    return token;
-  };
-
+function protectSyntaxIslands(source, protect) {
   const output = [];
   let activeFence = null;
   for (const line of splitCharacterLines(source)) {
@@ -76,7 +59,7 @@ function protectSyntaxIslands(source) {
   if (activeFence) {
     output.push(protect(activeFence.lines.join("\n")));
   }
-  return { markdown: output.join("\n"), placeholders };
+  return output.join("\n");
 }
 
 function protectInlineSyntax(line, protect) {

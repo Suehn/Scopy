@@ -28,7 +28,7 @@ actor SourceIconService {
     }
 
     func icon(origin: URL, allowNetwork: Bool) async -> Data? {
-        let key = SHA256.hash(data: Data(origin.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        let key = origin.absoluteString
         if cache[key] == nil, let data = try? Data(contentsOf: fileURL(key)), data.count <= 48 * 1024,
            let entry = try? JSONDecoder().decode(Entry.self, from: data) {
             remember(entry, key: key)
@@ -76,7 +76,10 @@ actor SourceIconService {
         }
     }
 
-    private func fileURL(_ key: String) -> URL { directory.appendingPathComponent(key + ".json") }
+    private func fileURL(_ origin: String) -> URL {
+        let digest = SHA256.hash(data: Data(origin.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(digest + ".json")
+    }
 
     private func remember(_ entry: Entry, key: String) {
         cache[key] = entry

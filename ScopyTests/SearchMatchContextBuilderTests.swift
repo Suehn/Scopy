@@ -437,6 +437,23 @@ final class SearchMatchContextBuilderTests: XCTestCase {
         XCTAssertEqual(highlightedText(fragment), ["needle"])
     }
 
+    func testOverlappingFuzzyPlusTermsPreserveTheCompactFragmentWindow() throws {
+        let longTerm = "abcdefghijklmnopqrstuvwxyz" + String(repeating: "y", count: 74)
+        let context = try XCTUnwrap(
+            makeContext(
+                query: longTerm + " def",
+                mode: .fuzzyPlus,
+                text: "before: " + longTerm + " suffix"
+            )
+        )
+        let fragment = try XCTUnwrap(context.fragments.first)
+
+        XCTAssertEqual(context.occurrenceCount, 2)
+        XCTAssertEqual(context.fragments.count, 1)
+        XCTAssertEqual(fragment.text, "before: " + String(longTerm.prefix(64)) + "…")
+        XCTAssertEqual(highlightedText(fragment), [String(longTerm.prefix(64))])
+    }
+
     func testOccurrenceCountingIsBoundedAndReportedAsLowerBound() throws {
         let context = try XCTUnwrap(
             makeContext(query: "needle", mode: .exact, text: Array(repeating: "needle", count: 80).joined(separator: " "))

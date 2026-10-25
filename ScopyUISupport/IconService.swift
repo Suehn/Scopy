@@ -1,44 +1,38 @@
 import AppKit
 import Foundation
 
-/// Centralized app icon/name cache.
+/// Resolves each application's name and icon from one cached LaunchServices result.
 @MainActor
 public final class IconService {
     public static let shared = IconService()
 
-    private let iconCache: NSCache<NSString, NSImage>
-    private let nameCache: NSCache<NSString, NSString>
-    /// Bundle IDs with no installed application, so rows of uninstalled apps do not ask
-    /// LaunchServices again on every render.
-    private var missingBundleIDs: Set<String> = []
+    private final class Application {
+        let url: URL?
+        let name: String
+        var icon: NSImage?
+
+        init(bundleID: String, url: URL?) {
+            self.url = url
+            self.name = url?.deletingPathExtension().lastPathComponent ?? bundleID
+        }
+    }
+
+    private let applications = NSCache<NSString, Application>()
 
     private init() {
-        let iconCache = NSCache<NSString, NSImage>()
-        iconCache.countLimit = 500
-        self.iconCache = iconCache
-
-        let nameCache = NSCache<NSString, NSString>()
-        nameCache.countLimit = 500
-        self.nameCache = nameCache
+        applications.countLimit = 500
     }
 
     public func cachedIcon(bundleID: String) -> NSImage? {
-        iconCache.object(forKey: bundleID as NSString)
+        applications.object(forKey: bundleID as NSString)?.icon
     }
 
     public func icon(bundleID: String) -> NSImage? {
-        if let cached = cachedIcon(bundleID: bundleID) {
-            return cached
-        }
-        guard !missingBundleIDs.contains(bundleID) else { return nil }
-
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            missingBundleIDs.insert(bundleID)
-            return nil
-        }
-
+        let application = application(bundleID: bundleID)
+        if let icon = application.icon { return icon }
+        guard let url = application.url else { return nil }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
-        iconCache.setObject(icon, forKey: bundleID as NSString)
+        application.icon = icon
         return icon
     }
 
@@ -47,24 +41,30 @@ public final class IconService {
     }
 
     public func appName(bundleID: String) -> String {
-        if let cached = nameCache.object(forKey: bundleID as NSString) {
-            return cached as String
-        }
-
-        let name: String
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            name = url.deletingPathExtension().lastPathComponent
-        } else {
-            name = bundleID
-        }
-
-        nameCache.setObject(name as NSString, forKey: bundleID as NSString)
-        return name
+        application(bundleID: bundleID).name
     }
 
     public func clearAll() {
-        iconCache.removeAllObjects()
-        nameCache.removeAllObjects()
-        missingBundleIDs.removeAll()
+        applications.removeAllObjects()
     }
+
+    private func application(bundleID: String) -> Application {
+        let key = bundleID as NSString
+        if let cached = applications.object(forKey: key) { return cached }
+        let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        let application = Application(bundleID: bundleID, url: url)
+        applications.setObject(application, forKey: key)
+#if DEBUG
+        lookupCountForTesting += 1
+#endif
+        return application
+    }
+
+#if DEBUG
+    private(set) var lookupCountForTesting = 0
+
+    static func makeForTesting() -> IconService {
+        IconService()
+    }
+#endif
 }

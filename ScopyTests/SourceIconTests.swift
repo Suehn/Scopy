@@ -73,6 +73,30 @@ final class SourceIconTests: XCTestCase {
         XCTAssertEqual(IconURLProtocol.state.paths.count, count)
     }
 
+    func testExistingDiskFilenameRemainsReadableAndWarmHitSurvivesFileRemoval() async throws {
+        IconURLProtocol.state.reset(png: nil)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // SHA-256 of the origin: disk entries written by previous versions keep this name.
+        let file = directory.appendingPathComponent(
+            "226b6097bfc162bb0d06c1fbc9d6de49af744231cfdce5a13a824b4dd3c4aad4.json"
+        )
+        let entry = try JSONSerialization.data(withJSONObject: [
+            "png": Self.png.base64EncodedString(), "fetchedAt": 0
+        ])
+        try entry.write(to: file)
+        let service = SourceIconService(directory: directory, fetcher: fetcher())
+        let origin = URL(string: "https://site.example/")!
+        let diskHit = await service.icon(origin: origin, allowNetwork: false)
+        XCTAssertEqual(diskHit, Self.png)
+
+        try FileManager.default.removeItem(at: file)
+        let memoryHit = await service.icon(origin: origin, allowNetwork: false)
+        XCTAssertEqual(memoryHit, diskHit)
+        XCTAssertTrue(IconURLProtocol.state.paths.isEmpty)
+    }
+
     func testSiteIconSettingPreservesSaveCancelTransactionsAndPersistence() async throws {
         let baseline = SettingsDTO.default
         XCTAssertTrue(baseline.siteIconsEnabled)

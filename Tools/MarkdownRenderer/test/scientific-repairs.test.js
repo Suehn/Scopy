@@ -5,7 +5,7 @@ import { render } from "../src/render.js";
 import { normalizeLatexDocument } from "../src/scopyLatexDocument.js";
 import { normalizeLatexInline } from "../src/scopyLatexInline.js";
 
-// Goldens produced by the former Swift implementation; the port must match them byte for byte.
+// Scientific-profile examples, including the corrected starred/unclosed tabular boundaries.
 const { cases } = JSON.parse(readFileSync(new URL("./fixtures/scientific-repairs.json", import.meta.url), "utf8"));
 
 for (const testCase of cases) {
@@ -27,6 +27,22 @@ test("the renderer applies the scientific repairs only when the policy asks", ()
 
   const document = render(source, { allowLatexDocumentNormalize: true, allowLatexInlineTextNormalize: true }).html;
   assert.match(document, /<h1>Energy<\/h1>/);
+});
+
+test("scientific document islands retain distinct values and authored token-like text", () => {
+  const literal = "SCOPYMARKDOWNSYNTAX00X";
+  const code = Array.from({ length: 32 }, (_, index) => `\`\\section{literal ${index}}\``).join(" ");
+  const source = `${literal}\n${code}\n\\section{Actual heading}`;
+  assert.equal(normalizeLatexDocument(source), `${literal}\n${code}\n# Actual heading`);
+});
+
+test("nested math islands restore inside formatting without expanding authored token-like text", () => {
+  const literal = "SCOPYMATHPLACEHOLDER" + "0".repeat(32) + "0X";
+  const terms = Array.from({ length: 32 }, (_, index) => `$x_{${index}}$`).join(" ");
+  const nested = String.raw`$f=\begin{cases} \text{a_b} \end{cases}$`;
+  const repaired = String.raw`$f=\begin{cases} \text{a\_b} \end{cases}$`;
+  const source = `${literal} ${terms} \\textbf{value ${nested}}`;
+  assert.equal(normalizeLatexInline(source), `${literal} ${terms} **value ${repaired}**`);
 });
 
 test("brace-scan limits count characters (grapheme clusters) like the Swift original, not UTF-16 units", () => {

@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.scopy
   deploymentTarget:
     macOS: "14.0"
-  xcodeVersion: "16.0"
+  xcodeVersion: "26.1.1"
   generateEmptyDirectories: true
   developmentLanguage: en
 
@@ -29,7 +29,7 @@ schemes:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""

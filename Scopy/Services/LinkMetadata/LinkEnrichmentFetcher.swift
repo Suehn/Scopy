@@ -75,8 +75,8 @@ public struct LinkEnrichmentFetcher: Sendable {
                        maxPixel: Self.maximumThumbnailPixel,
                        encodedCap: Self.maximumEncodedThumbnailBytes,
                        type: .jpeg
-                   ), encoded.decodedBytes <= decodedBudget {
-                    decodedBudget -= encoded.decodedBytes
+                   ), encoded.bytes.count <= decodedBudget {
+                    decodedBudget -= encoded.bytes.count
                     entry.image = encoded.dataURI
                 }
                 if let faviconURL = metadata.faviconURL,
@@ -85,8 +85,8 @@ public struct LinkEnrichmentFetcher: Sendable {
                        maxPixel: Self.maximumFaviconPixel,
                        encodedCap: Self.maximumEncodedFaviconBytes,
                        type: .png
-                   ), encoded.decodedBytes <= decodedBudget {
-                    decodedBudget -= encoded.decodedBytes
+                   ), encoded.bytes.count <= decodedBudget {
+                    decodedBudget -= encoded.bytes.count
                     entry.favicon = encoded.dataURI
                 }
                 entries[url] = entry
@@ -125,10 +125,9 @@ public struct LinkEnrichmentFetcher: Sendable {
     private func faviconPNG(_ url: String) async -> Data? {
         guard !Task.isCancelled,
               let image = await fetchDataImage(urlString: url, maxPixel: Self.maximumFaviconPixel,
-                  encodedCap: Self.maximumEncodedFaviconBytes, type: .png),
-              let body = image.dataURI.split(separator: ",", maxSplits: 1).last
+                  encodedCap: Self.maximumEncodedFaviconBytes, type: .png)
         else { return nil }
-        return Data(base64Encoded: String(body))
+        return image.bytes
     }
 
     /// Attribute order, quote style, rel token lists and relative CDN URLs are independent.
@@ -277,8 +276,10 @@ public struct LinkEnrichmentFetcher: Sendable {
     // MARK: - Imagery
 
     private struct EncodedImage {
-        var dataURI: String
-        var decodedBytes: Int
+        let bytes: Data
+        let mime: String
+
+        var dataURI: String { "data:\(mime);base64,\(bytes.base64EncodedString())" }
     }
 
     private func fetchDataImage(
@@ -321,10 +322,7 @@ public struct LinkEnrichmentFetcher: Sendable {
         let bytes = encoded as Data
         guard bytes.count <= encodedCap else { return nil }
         let mime = type == .jpeg ? "image/jpeg" : "image/png"
-        return EncodedImage(
-            dataURI: "data:\(mime);base64,\(bytes.base64EncodedString())",
-            decodedBytes: bytes.count
-        )
+        return EncodedImage(bytes: bytes, mime: mime)
     }
 
     // MARK: - URL safety
@@ -446,7 +444,7 @@ public struct LinkEnrichmentFetcher: Sendable {
                     0,
                     NI_NUMERICHOST
                 ) == 0 {
-                    let address = String(cString: buffer)
+                    let address = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
                     if !addresses.contains(address) { addresses.append(address) }
                 }
             }

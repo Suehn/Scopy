@@ -53,7 +53,6 @@ function reportHeightNow(force) {
     var el = document.getElementById('content');
     if (!el) { return; }
     if (!state.renderComplete) { return; }
-    layoutChatGPTTables(el);
     updateChatGPTPreviewScale(el);
     var box = document.getElementById('content-scale-shell') || el;
     var rect = box.getBoundingClientRect();
@@ -65,7 +64,6 @@ function reportHeightNow(force) {
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
         if (!n) { continue; }
-        if (n.classList && n.classList.contains('scopy-chatgpt-table-container') && n.dataset && n.dataset.scopyTableScaled === 'true') { continue; }
         var cw = n.clientWidth || 0;
         var sw = n.scrollWidth || 0;
         if (cw > 0 && (sw - cw) > 1) {
@@ -110,7 +108,6 @@ function probeLayoutHeight() {
   try {
     var el = document.getElementById('content');
     if (!el || state.renderFailed || state.unifiedRenderSucceeded !== true) { return null; }
-    layoutChatGPTTables(el);
     updateChatGPTPreviewScale(el);
     var box = document.getElementById('content-scale-shell') || el;
     var rect = box.getBoundingClientRect();
@@ -188,25 +185,28 @@ function settleRenderedImages(root, completion) {
     completion();
     return;
   }
-  var remaining = images.length;
-  var completed = false;
-  var settled = [];
-  function finishAll() {
-    if (completed || remaining > 0) { return; }
-    completed = true;
-    completion();
-  }
+  const pending = new Set(images);
   function finishImage(image, succeeded) {
-    var index = images.indexOf(image);
-    if (index < 0 || settled[index]) { return; }
-    settled[index] = true;
-    remaining -= 1;
+    if (!pending.delete(image)) { return; }
     try {
       image.setAttribute('data-scopy-image-state', succeeded ? 'ready' : 'error');
     } catch (e) { }
     if (!succeeded) { replaceFailedImage(image); }
-    finishAll();
+    if (pending.size === 0) {
+      clearTimeout(imageDeadline);
+      clearTimeout(nativeIconDeadline);
+      completion();
+    }
   }
+  const imageDeadline = setTimeout(function () {
+    for (const image of pending) {
+      if (!image.hasAttribute('data-scopy-native-source-icon')) { finishImage(image, false); }
+    }
+  }, 1500);
+  // Native icon discovery is separately bounded; other image readiness is unchanged.
+  const nativeIconDeadline = setTimeout(function () {
+    for (const image of pending) { finishImage(image, false); }
+  }, 10000);
   for (var i = 0; i < images.length; i++) {
     (function (image) {
       try {
@@ -225,17 +225,6 @@ function settleRenderedImages(root, completion) {
       }
     })(images[i]);
   }
-  setTimeout(function () {
-    for (var i = 0; i < images.length; i++) {
-      if (!settled[i] && !images[i].hasAttribute('data-scopy-native-source-icon')) { finishImage(images[i], false); }
-    }
-  }, 1500);
-  // Native icon discovery is separately bounded; other image readiness is unchanged.
-  setTimeout(function () {
-    for (var i = 0; i < images.length; i++) {
-      if (!settled[i]) { finishImage(images[i], false); }
-    }
-  }, 10000);
 }
 function awaitStylesheetReady(completion) {
   var pending = STYLESHEET_IDS.length;
@@ -375,7 +364,7 @@ function awaitTwoPaintFrames(completion) {
     setTimeout(step, 16);
   }
 }
-function awaitTerminalReadiness(root) {
+function awaitTerminalReadiness(root, tables) {
   var terminal = false;
   var pending = 3;
   function fail(reason) {
@@ -390,7 +379,6 @@ function awaitTerminalReadiness(root) {
     if (kind === 'fonts') { state.fontsReady = true; }
     pending -= 1;
     if (pending > 0) { return; }
-    layoutChatGPTTables(root);
     updateChatGPTPreviewScale(root);
     awaitTwoPaintFrames(function (paintError) {
       if (terminal) { return; }
@@ -404,6 +392,11 @@ function awaitTerminalReadiness(root) {
     });
   }
   settleRenderedImages(root, function () {
+    if (terminal) { return; }
+    // Failed images replace their DOM with alt/error text, which can change a column's
+    // bucket. After image settlement table text is final; later height/resize probes
+    // only measure geometry and must not rebuild this content-derived model.
+    for (const table of tables) { sizeChatGPTMarkdownTableColumns(table); }
     ready('images');
     // WebKit's fonts.ready also waits for layout-dependent images. Start its
     // own timeout after native icons settle, so icon discovery is not a font failure.
@@ -493,100 +486,58 @@ function renderUnified() {
     var priorWarning = state.hydrationWarning || '';
     state.hydrationWarning = priorWarning ? priorWarning + '; rich hydration failed' : 'rich hydration failed';
   }
-  layoutChatGPTTables(el);
-  awaitTerminalReadiness(el);
+  const tables = prepareChatGPTTables(el);
+  awaitTerminalReadiness(el, tables);
 }
 
 // MARK: - Pipe-table model
 
-function readChatGPTTableColumnCount(table) {
-  try {
-    var row = table && table.querySelector && table.querySelector('tr');
-    if (!row || !row.children) { return 0; }
-    return row.children.length || 0;
-  } catch (e) {
-    return 0;
-  }
-}
-function readChatGPTTableColumnLengths(table, columns) {
-  var lengths = [];
-  for (var i = 0; i < columns; i++) { lengths.push(0); }
-  try {
-    var rows = table.querySelectorAll('tr');
-    for (var r = 0; r < (rows.length || 0); r++) {
-      var cells = rows[r] && rows[r].children;
-      if (!cells) { continue; }
-      for (var c = 0; c < cells.length && c < columns; c++) {
-        var text = '';
-        try { text = String(cells[c].textContent || '').replace(/\s+/g, ' ').trim(); } catch (e) { text = ''; }
-        lengths[c] = Math.max(lengths[c] || 0, text.length || 0);
-      }
-    }
-  } catch (e) { }
-  return lengths;
-}
 export function tableColumnSize(length) {
   if (length > 160) { return 'xl'; }
   if (length > 100) { return 'lg'; }
   if (length > 40) { return 'md'; }
   return 'sm';
 }
-function sizeChatGPTMarkdownTableColumns(wrapper, table) {
-  try {
-    if (!wrapper || !table || !table.querySelectorAll) { return; }
-    var columns = readChatGPTTableColumnCount(table);
-    var lengths = readChatGPTTableColumnLengths(table, columns);
-    wrapper.classList.add('scopy-chatgpt-sized-table');
-    wrapper.classList.add('scopy-chatgpt-markdown-table');
-    wrapper.setAttribute('data-scopy-table-model', 'markdown-pipe');
-    table.classList.add('scopy-chatgpt-sized-table');
-    table.classList.add('scopy-chatgpt-markdown-table');
-    table.setAttribute('data-scopy-table-model', 'markdown-pipe');
-    var rows = table.querySelectorAll('tr');
-    for (var r = 0; r < (rows.length || 0); r++) {
-      var cells = rows[r] && rows[r].children;
-      if (!cells) { continue; }
-      for (var c = 0; c < cells.length; c++) {
-        var size = c < lengths.length ? tableColumnSize(lengths[c] || 0) : 'sm';
-        cells[c].setAttribute('data-col-size', size);
-        cells[c].setAttribute('data-scopy-col-size', size);
+function sizeChatGPTMarkdownTableColumns(table) {
+  const rows = table.querySelectorAll('tr');
+  const columns = rows[0]?.children.length || 0;
+  const lengths = new Array(columns).fill(0);
+  for (const row of rows) {
+    for (let column = 0; column < row.children.length && column < columns; column += 1) {
+      const text = row.children[column].textContent.replace(/\s+/g, ' ').trim();
+      lengths[column] = Math.max(lengths[column], text.length);
+    }
+  }
+  const sizes = lengths.map(tableColumnSize);
+  for (const row of rows) {
+    for (let column = 0; column < row.children.length; column += 1) {
+      const cell = row.children[column];
+      const size = sizes[column] || 'sm';
+      if (cell.getAttribute('data-col-size') !== size) {
+        cell.setAttribute('data-col-size', size);
+        cell.setAttribute('data-scopy-col-size', size);
       }
     }
-  } catch (e) { }
+  }
 }
-function wrapChatGPTTables(root) {
-  try {
-    if (!root || typeof root.querySelectorAll !== 'function') { return; }
-    var tables = root.querySelectorAll('table');
-    for (var i = 0; i < (tables.length || 0); i++) {
-      var table = tables[i];
-      if (!table || !table.parentNode) { continue; }
-      var parent = table.parentElement;
-      if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-wrapper')) {
-        var existingContainer = parent.parentElement;
-        if (existingContainer && existingContainer.classList && existingContainer.classList.contains('scopy-chatgpt-table-container')) {
-          sizeChatGPTMarkdownTableColumns(existingContainer, table);
-          continue;
-        }
-      }
-      if (parent && parent.classList && parent.classList.contains('scopy-chatgpt-table-container')) {
-        var existingWrapper = document.createElement('div');
-        existingWrapper.className = 'scopy-chatgpt-table-wrapper';
-        parent.insertBefore(existingWrapper, table);
-        existingWrapper.appendChild(table);
-        sizeChatGPTMarkdownTableColumns(parent, table);
-        continue;
-      }
-      var wrapper = document.createElement('div');
-      wrapper.className = 'scopy-chatgpt-table-container';
-      var tableWrapper = document.createElement('div');
-      tableWrapper.className = 'scopy-chatgpt-table-wrapper';
-      table.parentNode.insertBefore(wrapper, table);
-      wrapper.appendChild(tableWrapper);
-      tableWrapper.appendChild(table);
-      sizeChatGPTMarkdownTableColumns(wrapper, table);
-    }
-  } catch (e) { }
+function prepareChatGPTTables(root) {
+  const tables = root.querySelectorAll('table');
+  // This runs once on freshly rendered HTML. The closed Markdown/safe-HTML parser never
+  // supplies a prewrapped table, and geometry updates do not own structural hydration.
+  for (const table of tables) {
+    const container = document.createElement('div');
+    container.className = 'scopy-chatgpt-table-container scopy-chatgpt-sized-table scopy-chatgpt-markdown-table';
+    container.setAttribute('data-scopy-table-model', 'markdown-pipe');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'scopy-chatgpt-table-wrapper';
+    table.parentNode.insertBefore(container, table);
+    container.appendChild(wrapper);
+    wrapper.appendChild(table);
+    table.classList.add('scopy-chatgpt-sized-table', 'scopy-chatgpt-markdown-table');
+    table.setAttribute('data-scopy-table-model', 'markdown-pipe');
+    sizeChatGPTMarkdownTableColumns(table);
+  }
+  return tables;
 }
 function resetChatGPTTableScale(container, table) {
   try {
@@ -680,27 +631,9 @@ function syncChatGPTZoomShell(content) {
 function updateChatGPTPreviewScale(content) {
   return syncChatGPTZoomShell(content);
 }
-function layoutChatGPTTables(root) {
-  try {
-    if (!root || typeof root.querySelectorAll !== 'function') { return; }
-    wrapChatGPTTables(root);
-    var isExportMode = false;
-    try { isExportMode = document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('scopy-export-mode'); } catch (e) { isExportMode = false; }
-    if (isExportMode) { return; }
-    var containers = root.querySelectorAll('.scopy-chatgpt-table-container');
-    for (var i = 0; i < (containers.length || 0); i++) {
-      var container = containers[i];
-      if (!container) { continue; }
-      var table = container.querySelector('table');
-      if (!table) { continue; }
-      resetChatGPTTableScale(container, table);
-    }
-  } catch (e) { }
-}
 function scaleChatGPTTablesForExport(root, explicitTargetWidth) {
   try {
     if (!root || typeof root.querySelectorAll !== 'function') { return; }
-    wrapChatGPTTables(root);
     var targetWidth = Number(explicitTargetWidth || 0);
     if (!targetWidth || !isFinite(targetWidth) || targetWidth <= 0) { return; }
     var containers = root.querySelectorAll('.scopy-chatgpt-table-container');

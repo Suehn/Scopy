@@ -11,7 +11,7 @@ VERSION_ARGS := $(shell bash scripts/version.sh --xcodebuild-args 2>/dev/null)
 LOG_DIR := logs
 
 # Each Swift-flag variant gets its own DerivedData so switching between plain builds,
-# strict concurrency, sanitizers, and perf defines never invalidates another variant's
+# warning policy, sanitizers, and perf defines never invalidates another variant's
 # incremental state. Isolate explicit paths by checkout as well: simultaneous
 # worktrees must never contend for the same build database or test products.
 # Plain builds use Xcode's default, project-path-scoped DerivedData.
@@ -66,17 +66,16 @@ quick-build: markdown-assets-verify
 # =================== 测试命令 ===================
 
 
-# One native correctness gate, including strict concurrency compilation.
+# Swift 6 enforces concurrency safety in every build; native tests also reject warnings.
 test-unit: markdown-assets-verify setup
-	@echo "Running native tests (strict concurrency; any Swift warning fails)..."
+	@echo "Running native tests (Swift 6; any Swift warning fails)..."
 	@mkdir -p $(LOG_DIR)
 	bash -o pipefail -c 'xcodebuild test \
 		-project Scopy.xcodeproj \
 		-scheme Scopy \
 		-destination platform=macOS \
 		-only-testing:ScopyTests \
-		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Strict \
-		SWIFT_STRICT_CONCURRENCY=complete \
+		-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-Tests \
 		SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
 		$(VERSION_ARGS) \
 		2>&1 | tee $(LOG_DIR)/test-unit.log'
@@ -122,9 +121,10 @@ test-tsan:
 		*) \
 		$(MAKE) setup; \
 		echo "Running Thread Sanitizer tests..."; \
-		bash -o pipefail -c 'ENABLE_THREAD_SANITIZER=YES xcodebuild test \
+		bash -o pipefail -c 'xcodebuild test \
 			-project Scopy.xcodeproj \
 			-scheme ScopyTSan \
+			-enableThreadSanitizer YES \
 			-destination platform=macOS \
 			-only-testing:ScopyTSanTests \
 			-derivedDataPath $(DERIVED_DATA_BASE)/Scopy-TSan \

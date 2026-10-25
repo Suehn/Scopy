@@ -9,22 +9,19 @@ import SwiftUI
 /// layout and display-fit scale.
 struct PinnedPreviewWindowView: View {
     let preview: PinnedPreview
-    let markdownWebViewController: MarkdownPreviewWebViewController?
-    let onKeepsOnTopChange: (Bool) -> Void
-    let onDismiss: () -> Void
+    let onKeepsOnTopChange: @MainActor (Bool) -> Void
+    let onDismiss: @MainActor () -> Void
 
     /// Owned here so the floating controls re-render on toggle; the controller applies the window level.
     @State private var keepsOnTop: Bool
 
     init(
         preview: PinnedPreview,
-        markdownWebViewController: MarkdownPreviewWebViewController?,
         initialKeepsOnTop: Bool,
-        onKeepsOnTopChange: @escaping (Bool) -> Void,
-        onDismiss: @escaping () -> Void
+        onKeepsOnTopChange: @escaping @MainActor (Bool) -> Void,
+        onDismiss: @escaping @MainActor () -> Void
     ) {
         self.preview = preview
-        self.markdownWebViewController = markdownWebViewController
         self.onKeepsOnTopChange = onKeepsOnTopChange
         self.onDismiss = onDismiss
         _keepsOnTop = State(initialValue: initialKeepsOnTop)
@@ -61,7 +58,7 @@ struct PinnedPreviewWindowView: View {
         case .text:
             HistoryItemTextPreviewView(
                 model: preview.model,
-                markdownWebViewController: markdownWebViewController
+                markdownWebViewController: preview.markdownWebViewController
             )
         case .file:
             HistoryItemFilePreviewView(
@@ -69,7 +66,7 @@ struct PinnedPreviewWindowView: View {
                 thumbnailPath: preview.item.thumbnailPath,
                 kind: preview.filePreviewKind ?? .other,
                 filePath: preview.filePreviewPath,
-                markdownWebViewController: markdownWebViewController
+                markdownWebViewController: preview.markdownWebViewController
             )
         }
     }

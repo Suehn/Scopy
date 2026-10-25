@@ -461,8 +461,8 @@ public enum SearchMatchContextBuilder {
                 }
 
                 let startUTF16 = cursorUTF16
-                    + SearchMatchContextBuilder.utf16Count(bytes, from: cursorByte, to: token.start)
-                let lengthUTF16 = SearchMatchContextBuilder.utf16Count(bytes, from: token.start, to: token.end)
+                    + UTF8Text.utf16Count(bytes, from: cursorByte, to: token.start)
+                let lengthUTF16 = UTF8Text.utf16Count(bytes, from: token.start, to: token.end)
                 result.append(
                     UnicodeToken(
                         folded: token.folded,
@@ -1430,20 +1430,23 @@ public enum SearchMatchContextBuilder {
             return SearchMatchFragment(source: source, text: "", highlightedRanges: [])
         }
 
-        guard !sourceText.isEmpty,
-              let firstRange = characterRange(firstMatch.range, in: sourceText) else { return nil }
-
+        guard !sourceText.isEmpty else { return nil }
         let lastMatch = matches.last ?? firstMatch
-        let unionNSRange = NSRange(
-            location: firstMatch.range.location,
-            length: max(0, NSMaxRange(lastMatch.range) - firstMatch.range.location)
+        let ranges = characterRanges(
+            start: firstMatch.range.location,
+            firstEnd: NSMaxRange(firstMatch.range),
+            lastEnd: NSMaxRange(lastMatch.range),
+            in: sourceText
         )
-        let unionRange = characterRange(unionNSRange, in: sourceText)
+        guard let firstRange = ranges.first else { return nil }
         let targetRange: Range<String.Index>
-        if let unionRange,
-           sourceText.distance(from: unionRange.lowerBound, to: unionRange.upperBound)
-            <= characterBudget - leadingContextCharacters {
-            targetRange = unionRange
+        if let throughLast = ranges.throughLast,
+           sourceText.index(
+               throughLast.lowerBound,
+               offsetBy: characterBudget - leadingContextCharacters + 1,
+               limitedBy: throughLast.upperBound
+           ) == nil {
+            targetRange = throughLast
         } else {
             targetRange = firstRange
         }
@@ -1455,13 +1458,18 @@ public enum SearchMatchContextBuilder {
             limitedBy: sourceText.startIndex
         ) ?? sourceText.startIndex
         let leadingCount = sourceText.distance(from: sliceStart, to: targetRange.lowerBound)
-        let targetCount = sourceText.distance(from: targetRange.lowerBound, to: targetRange.upperBound)
-        let remainingCount = max(0, characterBudget - leadingCount - min(targetCount, characterBudget))
-        let targetEnd = sourceText.index(
+        // Count only the part that can be displayed, even when a regex matches a very long span.
+        let budgetEnd = sourceText.index(
             targetRange.lowerBound,
-            offsetBy: min(targetCount, characterBudget),
-            limitedBy: sourceText.endIndex
-        ) ?? sourceText.endIndex
+            offsetBy: characterBudget,
+            limitedBy: targetRange.upperBound
+        ) ?? targetRange.upperBound
+        let targetCount = sourceText.distance(
+            from: targetRange.lowerBound,
+            to: budgetEnd
+        )
+        let targetEnd = sourceText.index(targetRange.lowerBound, offsetBy: targetCount)
+        let remainingCount = max(0, characterBudget - leadingCount - targetCount)
         let sliceEnd = sourceText.index(
             targetEnd,
             offsetBy: remainingCount,
@@ -1487,31 +1495,23 @@ public enum SearchMatchContextBuilder {
         return fragment
     }
 
-    /// UTF-16 units of the scalars whose lead bytes lie in `bytes[start..<end]`.
-    static func utf16Count(_ bytes: UnsafeBufferPointer<UInt8>, from start: Int, to end: Int) -> Int {
-        var count = 0
-        for index in start..<end {
-            let byte = bytes[index]
-            count &+= (byte & 0xC0 != 0x80 ? 1 : 0) &+ (byte >= 0xF0 ? 1 : 0)
-        }
-        return count
-    }
-
-    /// `Range(range, in: text)`. Bounds on Character boundaries come from one UTF-8 scan up to
-    /// the range's end, so a match in a large non-ASCII text does not make the String build
-    /// UTF-16 breadcrumbs for all of it. Other bounds, whose handling varies by OS release, go
-    /// to Foundation.
-    private static func characterRange(_ range: NSRange, in text: String) -> Range<String.Index>? {
-        guard range.location != NSNotFound else { return nil }
-        let lowerUTF16 = range.location
-        let upperUTF16 = NSMaxRange(range)
-        let byteBounds = text.utf8.withContiguousStorageIfAvailable { bytes -> (Int, Int)? in
+    /// Resolves the first match and the range through the last match in one forward UTF-8 scan.
+    /// Overlapping matches can put `lastEnd` before `firstEnd`. Non-Character bounds retain Foundation's
+    /// `Range(_:in:)` behaviour, which varies by OS release.
+    private static func characterRanges(
+        start: Int,
+        firstEnd: Int,
+        lastEnd: Int,
+        in text: String
+    ) -> (first: Range<String.Index>?, throughLast: Range<String.Index>?) {
+        guard start != NSNotFound else { return (nil, nil) }
+        let byteBounds = text.utf8.withContiguousStorageIfAvailable { bytes -> (Int, Int, Int)? in
             var units = 0
             var index = 0
             // The UTF-8 offset at `target` UTF-16 units; nil inside a surrogate pair or past the end.
             func advance(toUTF16 target: Int) -> Int? {
                 while index + 64 <= bytes.count {
-                    let blockUnits = utf16Count(bytes, from: index, to: index + 64)
+                    let blockUnits = UTF8Text.utf16Count(bytes, from: index, to: index + 64)
                     guard units + blockUnits < target else { break }
                     units += blockUnits
                     index += 64
@@ -1526,17 +1526,29 @@ public enum SearchMatchContextBuilder {
                 }
                 return units == target ? index : nil
             }
-            guard let lower = advance(toUTF16: lowerUTF16),
-                  let upper = advance(toUTF16: upperUTF16) else { return nil }
-            return (lower, upper)
+            guard let lower = advance(toUTF16: start),
+                  let earlierEnd = advance(toUTF16: min(firstEnd, lastEnd)),
+                  let laterEnd = advance(toUTF16: max(firstEnd, lastEnd)) else { return nil }
+            return firstEnd <= lastEnd
+                ? (lower, earlierEnd, laterEnd)
+                : (lower, laterEnd, earlierEnd)
         }
         let utf8 = text.utf8
-        if let (lower, upper) = byteBounds ?? nil,
-           let lowerBound = String.Index(utf8.index(utf8.startIndex, offsetBy: lower), within: text),
-           let upperBound = String.Index(utf8.index(utf8.startIndex, offsetBy: upper), within: text) {
-            return lowerBound..<upperBound
+        let bounds = byteBounds ?? nil
+        let lowerBound = bounds.flatMap {
+            String.Index(utf8.index(utf8.startIndex, offsetBy: $0.0), within: text)
         }
-        return Range(range, in: text)
+        func range(upperUTF16: Int, upperUTF8: Int?) -> Range<String.Index>? {
+            if let lowerBound, let upperUTF8,
+               let upperBound = String.Index(utf8.index(utf8.startIndex, offsetBy: upperUTF8), within: text) {
+                return lowerBound..<upperBound
+            }
+            return Range(NSRange(location: start, length: upperUTF16 - start), in: text)
+        }
+        return (
+            range(upperUTF16: firstEnd, upperUTF8: bounds?.1),
+            range(upperUTF16: lastEnd, upperUTF8: bounds?.2)
+        )
     }
 
     private static func normalizedFragment(

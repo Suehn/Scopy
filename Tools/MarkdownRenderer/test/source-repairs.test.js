@@ -43,8 +43,8 @@ test("does not promote a flattened hash column into a giant heading and counts g
   assert.match(render(flattenedRow).html, /<p>#实际对象/);
   assert.doesNotMatch(render(flattenedRow).html, /<h1>/);
 
-  // 150 family emoji are 150 grapheme clusters (heading-sized) even though they are 1,650 UTF-16 units.
-  const families = "👩‍👩‍👧‍👦".repeat(150);
+  // 200 family emoji meet the exact grapheme limit despite occupying 2,200 UTF-16 units.
+  const families = "👩‍👩‍👧‍👦".repeat(200);
   assert.match(render(`#${families}`).html, new RegExp(`<h1>${families}</h1>`));
   assert.doesNotMatch(render(`#${"👩‍👩‍👧‍👦".repeat(201)}`).html, /<h1>/);
 });

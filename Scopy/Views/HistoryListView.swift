@@ -395,25 +395,24 @@ struct HistoryListView: View {
             pinnedPreviewController.focus(itemID: item.id)
             return
         }
-        guard model.hasRenderedContent else { return }
-        let snapshot = HoverPreviewModel()
-        snapshot.adoptRenderedContent(from: model)
         let filePreview = kind == .file
             ? FilePreviewSupport.previewSummary(from: item.plainText, requireExists: true) : nil
         let controller = model.isMarkdown ? sharedMarkdownPreview.controller : nil
+        guard let preview = PinnedPreview(
+            item: item,
+            revision: revision,
+            kind: kind,
+            filePreviewKind: filePreview?.kind,
+            filePreviewPath: filePreview?.path,
+            source: model,
+            markdownWebViewController: controller
+        ) else { return }
         detachSharedMarkdownWebViewIfAttached()
         if controller != nil { sharedMarkdownPreview.controller = MarkdownPreviewWebViewController() }
         pendingPopover = nil
         activePopover = nil
-        DispatchQueue.main.async {
-            if pinnedPreviewController.pin(
-                item: item, revision: revision, kind: kind,
-                filePreviewKind: filePreview?.kind, filePreviewPath: filePreview?.path,
-                source: snapshot, settingsViewModel: settingsViewModel,
-                markdownWebViewController: controller
-            ) {
-                historyViewModel.closePanelHandler?()
-            }
+        pinnedPreviewController.pin(preview, settingsViewModel: settingsViewModel) {
+            historyViewModel.closePanelHandler?()
         }
     }
 

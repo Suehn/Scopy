@@ -169,6 +169,27 @@ final class MarkdownExportServiceTests: XCTestCase {
         XCTAssertEqual(cancellationCount, 1)
     }
 
+    func testCancellingQueuedExportRemovesOnlyItsPendingWork() throws {
+        let gate = ExportCoordinator.concurrencyGate
+        let activeIDs = (0..<gate.limit).map { _ in UUID() }
+        for id in activeIDs { XCTAssertEqual(gate.submit(id: id) {}, .started) }
+        defer { for id in activeIDs { gate.finish(id: id) } }
+        var results: [Result<MarkdownExportService.ExportOutcome, Error>] = []
+
+        let handle = MarkdownExportService.exportToPNGData(html: "queued document") { results.append($0) }
+        XCTAssertEqual(gate.pendingCount, 1)
+        handle.cancel()
+        handle.cancel()
+
+        XCTAssertEqual(results.count, 1)
+        guard case .failure(let error) = try XCTUnwrap(results.first) else {
+            return XCTFail("Expected queued cancellation to fail")
+        }
+        XCTAssertTrue(error is CancellationError)
+        XCTAssertEqual(gate.pendingCount, 0)
+        XCTAssertEqual(gate.activeIDs, Set(activeIDs))
+    }
+
     func testWritePNGToPasteboardPreservesPalettedPrimaryPNGBytes() throws {
         let pngData = try loadRealPalettedFixturePNGData()
 

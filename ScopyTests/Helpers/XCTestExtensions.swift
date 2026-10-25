@@ -8,7 +8,7 @@ extension XCTestCase {
         timeout: TimeInterval = 5.0,
         pollInterval: TimeInterval = 0.1,
         _ condition: @MainActor @escaping () -> Bool,
-        file: StaticString = #file,
+        file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         let deadline = Date().addingTimeInterval(timeout)
@@ -28,7 +28,7 @@ extension XCTestCase {
         timeout: TimeInterval = 5.0,
         pollInterval: TimeInterval = 0.1,
         _ getter: @MainActor @escaping () -> T?,
-        file: StaticString = #file,
+        file: StaticString = #filePath,
         line: UInt = #line
     ) async -> T? {
         let deadline = Date().addingTimeInterval(timeout)
@@ -50,7 +50,7 @@ extension XCTestCase {
         pollInterval: TimeInterval = 0.1,
         _ assertion: @escaping () -> Bool,
         message: String = "Assertion did not become true",
-        file: StaticString = #file,
+        file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         let deadline = Date().addingTimeInterval(timeout)
@@ -70,7 +70,7 @@ extension XCTestCase {
         timeout: TimeInterval = 5.0,
         pollInterval: TimeInterval = 0.1,
         _ condition: @MainActor @escaping () async -> Bool,
-        file: StaticString = #file,
+        file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         let deadline = Date().addingTimeInterval(timeout)

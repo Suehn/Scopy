@@ -6,15 +6,16 @@ import XCTest
 
 @MainActor
 final class HistoryRowThumbnailLifecycleSchedulerTests: XCTestCase {
-    func testProductionCachedImageReadsSharedThumbnailCache() {
-        let path = "/tmp/scopy-scheduler-production-cache-\(UUID().uuidString).png"
-        let image = Self.makeImage()
+    func testProductionCachedImageReadsSharedThumbnailCache() async throws {
+        let fixture = try TestFixture.url("history-replay-real-screenshot-paletted.png")
+        let path = fixture.path
         ThumbnailCache.shared.clear()
         defer { ThumbnailCache.shared.clear() }
 
         XCTAssertNil(HistoryRowThumbnailLifecycleScheduler.productionCachedImage(for: path))
-        ThumbnailCache.shared.store(image, forPath: path, costBytes: 0)
+        let image = await ThumbnailCache.shared.loadImage(path: path)
 
+        XCTAssertNotNil(image)
         XCTAssertTrue(HistoryRowThumbnailLifecycleScheduler.productionCachedImage(for: path) === image)
     }
 

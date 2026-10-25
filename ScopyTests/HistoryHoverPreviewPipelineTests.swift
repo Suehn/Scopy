@@ -50,6 +50,65 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         await pool.release()
     }
 
+    func testCancelledPreviewWorkerKeepsItsPermitUntilWorkReturns() async {
+        let pool = AsyncPermitPool(limit: 1, maxPending: 1)
+        let started = expectation(description: "worker started")
+        let cancelled = expectation(description: "worker received cancellation")
+        let gate = PreviewWorkerGate()
+        let task = Task {
+            await HistoryHoverPreviewPipeline.runBudgetedDetached(using: pool, priority: .utility) {
+                await withTaskCancellationHandler {
+                    await gate.wait(started: started)
+                    return 42
+                } onCancel: {
+                    cancelled.fulfill()
+                }
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+        task.cancel()
+        await fulfillment(of: [cancelled], timeout: 1)
+
+        let occupied = await pool.snapshot()
+        XCTAssertEqual(occupied.activeCount, 1, "Cancellation must not release a running decoder's permit")
+        await gate.release()
+        let result = await task.value
+        XCTAssertNil(result, "A cancelled worker must not deliver a late result")
+        let finished = await pool.snapshot()
+        XCTAssertEqual(finished.activeCount, 0)
+    }
+
+    func testCancellingImagePreviewCancelsPreparationWaitingForData() async throws {
+        let item = makeItem(type: .image, contentHash: UUID().uuidString, plainText: "Image")
+        let request = HistoryHoverPreviewPipeline.ImageRequest(
+            revision: ClipboardItemContentRevision(item: item), storageRef: nil,
+            delay: 0, scale: 1, targetWidthPoints: 64, maxLongSidePixels: 1_024
+        )
+        let readStarted = expectation(description: "image data read started")
+        var releaseRead: CheckedContinuation<Data?, Never>?
+        var events: [HistoryHoverPreviewPipeline.Event] = []
+        let task = Task { @MainActor in
+            await HistoryHoverPreviewPipeline.run(
+                request: .image(request),
+                getImageData: {
+                    await withCheckedContinuation { continuation in
+                        releaseRead = continuation
+                        readStarted.fulfill()
+                    }
+                },
+                isCurrent: { true },
+                emit: { events.append($0) }
+            )
+        }
+        await fulfillment(of: [readStarted], timeout: 1)
+        task.cancel()
+        let eventCountAtCancellation = events.count
+        releaseRead?.resume(returning: Data())
+        await task.value
+
+        XCTAssertEqual(events.count, eventCountAtCancellation, "Cancelled preparation cannot publish late image state")
+    }
+
     func testImagePlanUsesContentHashWidthAndDelay() {
         let itemID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let item = makeItem(id: itemID, type: .image, contentHash: "hash-a", plainText: "Image")
@@ -448,7 +507,7 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertEqual(events.compactMap { event -> CGImage? in
             if case .image(let image) = event { return image }
             return nil
-        }.count, 2)
+        }.count, 1, "Each prepared image is published once")
         XCTAssertEqual(presentedKinds(events), [.image])
     }
 
@@ -560,6 +619,22 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         context.setFillColor(CGColor(red: 0.1, green: 0.2, blue: 0.8, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
         return context.makeImage()
+    }
+}
+
+private actor PreviewWorkerGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait(started: XCTestExpectation) async {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            started.fulfill()
+        }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 

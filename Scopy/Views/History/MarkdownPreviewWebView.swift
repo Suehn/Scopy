@@ -424,6 +424,8 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
     }
 
     func detachWebView() {
+        prewarmProbeTask?.cancel()
+        prewarmProbeTask = nil
         pendingContentRefreshTask?.cancel()
         pendingContentRefreshTask = nil
         pendingScrollConfigurationTask?.cancel()
@@ -618,6 +620,7 @@ final class MarkdownPreviewWebViewController: NSObject, ObservableObject, WKNavi
                 let result = try? await self.webView.evaluateJavaScript(
                     "window.ScopyDocument ? window.ScopyDocument.probeLayoutHeight() : null"
                 )
+                guard !Task.isCancelled, self.currentRenderID == renderID, self.currentOwnerID == nil else { return }
                 if let dict = result as? [String: Any], let height = dict["height"] as? Double, height > 0 {
                     let width = HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
                     let metrics = MarkdownContentMetrics(

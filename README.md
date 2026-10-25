@@ -6,7 +6,7 @@
   **A native macOS clipboard manager with fast long-history search and ChatGPT-style Markdown/LaTeX preview.**
 
   [![macOS 14+](https://img.shields.io/badge/macOS-14+-111827)](#requirements)
-  [![Swift 5.9](https://img.shields.io/badge/Swift-5.9-f97316)](#build-from-source)
+  [![Swift 6.2](https://img.shields.io/badge/Swift-6.2-f97316)](#build-from-source)
   [![SwiftUI Native](https://img.shields.io/badge/SwiftUI-native-2563eb)](#feature-matrix)
   [![Homebrew](https://img.shields.io/badge/Homebrew-cask-f59e0b)](#installation)
   [![License MIT](https://img.shields.io/badge/License-MIT-16a34a)](#license)
@@ -41,7 +41,7 @@ brew install --cask scopy && xattr -dr com.apple.quarantine /Applications/Scopy.
 | Search | Exact, Fuzzy, Fuzzy+, Regex, app filters, type filters, grouped rich-text filters, automatic paging | Fast recall without making the panel feel heavy |
 | Markdown preview | ChatGPT-style Markdown/LaTeX preview, 80%-200% scale, shared preview/export renderer, PNG export | Copy a long answer, inspect it locally, export the same rendered surface |
 | Renderer depth | Headings, lists, blockquotes, code, tables, footnotes, definition lists, task lists, safe HTML islands, inline/block math | Long Markdown stays readable and exportable |
-| Operability | `make build`, unit/strict tests, snapshot perf gates, frontend profiles, release metadata validation | Performance and release claims have repeatable evidence |
+| Operability | `make build`, native tests with Swift warnings as errors, snapshot perf gates, frontend profiles, release metadata validation | Performance and release claims have repeatable evidence |
 
 ## Markdown/LaTeX Is The Differentiator
 
@@ -61,7 +61,7 @@ Maccy is excellent when you want a minimal, keyboard-first clipboard list. Scopy
 
 | Common pain point or request | Scopy design answer |
 | --- | --- |
-| Large custom histories can make a popup slow to prepare, especially around 10,000 items ([p0deje/Maccy#1372](https://github.com/p0deje/Maccy/issues/1372)). | Pinned rows load separately, the first recent page is 50 rows, and further 100-row pages load automatically as you scroll. |
+| Large custom histories can make a popup slow to prepare, especially around 10,000 items ([p0deje/Maccy#1372](https://github.com/p0deje/Maccy/issues/1372)). | The first history page includes every pinned row and 50 recent rows; further 300-row recent pages load automatically as you scroll. |
 | Large clippings and long previews can lag ([#1080](https://github.com/p0deje/Maccy/issues/1080), [#1095](https://github.com/p0deje/Maccy/issues/1095)). | Preview preparation, Markdown rendering, thumbnails, and export have bounded paths and focused tests. |
 | Users ask for better image save/draw/share workflows ([#1331](https://github.com/p0deje/Maccy/issues/1331), [#1245](https://github.com/p0deje/Maccy/issues/1245), [#1348](https://github.com/p0deje/Maccy/issues/1348)). | Scopy stores image rows, shows thumbnails, previews images, optimizes/compresses, and sends image/file rows via AirDrop. |
 | Duplicate suppression and direct reuse matter ([#1124](https://github.com/p0deje/Maccy/issues/1124), [#1306](https://github.com/p0deje/Maccy/issues/1306)). | Equivalent content is deduplicated at ingest, and keyboard-first select/copy/paste flows are part of the main panel contract. |
@@ -128,15 +128,15 @@ Download the latest `.dmg` from [GitHub Releases](https://github.com/Suehn/Scopy
 ## Requirements
 
 - macOS 14.0 or later
-- Swift 5.9
-- Xcode 16.0 or later for local development
+- Swift 6.2 compiler, using Swift 6 language mode
+- Xcode 26.1.1 for the supported development and CI toolchain
 - Homebrew if you want `make setup` to install missing developer tools such as `xcodegen`
 
 ## Build From Source
 
 ```bash
 make build
-make test-unit   # native tests under strict concurrency; any Swift warning fails
+make test-unit   # native correctness tests; any Swift warning fails
 ```
 
 Release build:
@@ -164,7 +164,7 @@ ClipboardServiceProtocol
         |
         v
 ScopyKit backend
-  ClipboardMonitor -> ClipboardService -> StorageService -> SearchEngineImpl
+  ClipboardMonitor -> ClipboardBackend -> StorageService / SearchEngineImpl
         |
         v
 SQLite / FTS5 / external payload files / thumbnails

@@ -24,7 +24,25 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
         let coordinator: HistoryListInteractionCoordinator
         let observer: ListLiveScrollObserverView.ObserverView
         /// Pointer-interaction starts and ends, derived from the coordinator's snapshots.
-        private(set) var pointerTransitions: [String] = []
+        var pointerTransitions: [String] { pointerTransitionRecorder.transitions }
+        private let pointerTransitionRecorder: PointerTransitionRecorder
+
+        @MainActor
+        private final class PointerTransitionRecorder {
+            private(set) var transitions: [String] = []
+            private var activePointerCount: Int?
+
+            func startRecording() {
+                activePointerCount = 0
+            }
+
+            func record(_ snapshot: HistoryListInteractionCoordinator.PassivePathSnapshot) {
+                guard let activePointerCount,
+                      snapshot.pointerInteractionCount != activePointerCount else { return }
+                transitions.append(snapshot.pointerInteractionCount > activePointerCount ? "start" : "end")
+                self.activePointerCount = snapshot.pointerInteractionCount
+            }
+        }
 
         init(attachObserver: Bool = false) {
             let frame = NSRect(x: 0, y: 0, width: 240, height: 180)
@@ -72,8 +90,9 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
                 scroller.reportedPart = .knobSlot
             }
 
-            var recordTransition: (HistoryListInteractionCoordinator.PassivePathSnapshot) -> Void = { _ in }
-            coordinator = HistoryListInteractionCoordinator(passivePathSnapshotSink: { recordTransition($0) })
+            let recorder = PointerTransitionRecorder()
+            pointerTransitionRecorder = recorder
+            coordinator = HistoryListInteractionCoordinator(passivePathSnapshotSink: { recorder.record($0) })
             observer = ListLiveScrollObserverView.ObserverView(frame: .zero)
             observer.interactionCoordinator = coordinator
             // Tests move the clip view programmatically; treat that as wheel-driven unless a test
@@ -83,12 +102,8 @@ final class ListLiveScrollObserverViewTests: XCTestCase {
                 scrollView.contentView.addSubview(observer)
                 observer.attachIfNeeded()
             }
-            var active = 0
-            recordTransition = { [unowned self] snapshot in
-                guard snapshot.pointerInteractionCount != active else { return }
-                self.pointerTransitions.append(snapshot.pointerInteractionCount > active ? "start" : "end")
-                active = snapshot.pointerInteractionCount
-            }
+            // Ignore construction and attachment snapshots, matching the fixture's observation window.
+            recorder.startRecording()
         }
 
         func pointInWindow(for view: NSView) -> NSPoint {

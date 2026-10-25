@@ -47,7 +47,7 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "16.0"
+          xcode-version: "26.1.1"
 
       - name: Test Markdown renderer
         run: npm ci --prefix Tools/MarkdownRenderer && npm test --prefix Tools/MarkdownRenderer
@@ -69,7 +69,7 @@ jobs:
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "16.0"
+          xcode-version: "26.1.1"
 
       - name: Native Tests (strict concurrency)
         run: make test-unit

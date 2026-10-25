@@ -55,10 +55,10 @@ struct LoweredTextMatcher: Sendable {
             return
         }
         let composed = needleLower.precomposedStringWithCanonicalMapping.unicodeScalars
-        guard composed.allSatisfy({ Self.isPlainStarter($0.value) && !$0.properties.changesWhenLowercased }),
+        guard composed.allSatisfy({ UTF8Text.isPlainStarter($0.value) && !$0.properties.changesWhenLowercased }),
               let spellings = Self.spellings(of: composed) else { return nil }
         let decomposed = Set(needleLower.decomposedStringWithCanonicalMapping.unicodeScalars.map(\.value))
-        let hazards = Set(decomposed.filter { !Self.isPlainStarter($0) } + ExpansionTable.scalars(madeOf: decomposed))
+        let hazards = Set(decomposed.filter { !UTF8Text.isPlainStarter($0) } + ExpansionTable.scalars(madeOf: decomposed))
         needle = .canonical(
             spellings: spellings,
             hazards: hazards.compactMap { Unicode.Scalar($0).map { Array(String($0).utf8) } }
@@ -100,10 +100,10 @@ struct LoweredTextMatcher: Sendable {
             let prefix = UnsafeBufferPointer(rebasing: text[..<start])
             // The hit must not share a character with its neighbours.
             guard let offset = Self.loweredUTF16Length(of: prefix),
-                  start == 0 || Self.lastScalar(of: prefix).map(Self.isPlainStarter) == true else { return .undecided }
+                  start == 0 || Self.lastScalar(of: prefix).map(UTF8Text.isPlainStarter) == true else { return .undecided }
             let end = start + (spellings.first { Self.matches($0, in: text, at: start) }?.count ?? 0)
             if end < text.count {
-                guard let (next, _) = Self.decode(text, at: end), Self.isPlainStarter(next) else { return .undecided }
+                guard let (next, _) = Self.decode(text, at: end), UTF8Text.isPlainStarter(next) else { return .undecided }
             }
             return .hit(utf16Offset: offset)
         }
@@ -241,7 +241,7 @@ struct LoweredTextMatcher: Sendable {
         // where the scalar starts, or nil for a unit of a special lowercase.
         func isPlainStarter(at byte: Int?) -> Bool {
             guard let byte, let (scalar, _) = decode(text, at: byte) else { return false }
-            return Self.isPlainStarter(scalar)
+            return UTF8Text.isPlainStarter(scalar)
         }
 
         // Advances over one ASCII unit of the lowercased text; non-nil once decided.
@@ -324,25 +324,6 @@ struct LoweredTextMatcher: Sendable {
             failure[index] = length
         }
         return failure
-    }
-
-    // MARK: - Plain starters
-
-    /// Scalars that are composed (NFC-stable, combining class 0), lowercase to such a scalar of the
-    /// same UTF-16 length, and never share a character with a neighbour that is one too, except CR
-    /// LF. Verified against every assigned scalar in these ranges; a scalar the runtime does not
-    /// know behaves the same in String. The commonest ranges, ASCII and CJK, come first.
-    static func isPlainStarter(_ value: UInt32) -> Bool {
-        switch value {
-        case 0...0x7F, 0x3100...0x9FFF, 0xA0...0xAC, 0xAE...0x12F, 0x131...0x17F, 0x370...0x373, 0x375...0x37D,
-             0x37F...0x386, 0x388...0x482, 0x48A...0x52F, 0x2010...0x2027, 0x2030...0x205E, 0x2190...0x2328,
-             0x232B...0x23FF, 0x2500...0x27BF, 0x2B00...0x2BFF, 0x3000...0x3029, 0x3030...0x303F, 0x3041...0x3096,
-             0x309B...0x30FF, 0xAC00...0xD7A3, 0xFF01...0xFF60, 0x1F000...0x1F1E5, 0x1F200...0x1F3FA,
-             0x1F400...0x1FAFF, 0x20000...0x2F7FF, 0x30000...0x3FFFF:
-            return true
-        default:
-            return false
-        }
     }
 
     // MARK: - UTF-8
@@ -428,7 +409,7 @@ struct LoweredTextMatcher: Sendable {
 private enum ExpansionTable {
     private static let expansions: [(scalar: UInt32, expansion: [UInt32])] = {
         var table: [(scalar: UInt32, expansion: [UInt32])] = []
-        for value in UInt32(0x80)...0x2FFFF where !LoweredTextMatcher.isPlainStarter(value) {
+        for value in UInt32(0x80)...0x2FFFF where !UTF8Text.isPlainStarter(value) {
             guard let scalar = Unicode.Scalar(value) else { continue }
             let lowercase = scalar.properties.changesWhenLowercased ? scalar.properties.lowercaseMapping : String(scalar)
             let expansion = lowercase.decomposedStringWithCanonicalMapping.unicodeScalars.map(\.value)

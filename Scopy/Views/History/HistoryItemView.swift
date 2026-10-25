@@ -34,7 +34,7 @@ struct HistoryItemView: View, Equatable {
     let onDelete: () -> Void
     let onUpdateNote: (String?) async -> Bool
     let onOptimizeImage: () async -> ImageOptimizationOutcomeDTO
-    let getImageData: () async -> Data?
+    let getImageData: @MainActor () async -> Data?
     let markdownWebViewController: MarkdownPreviewWebViewController
     let interactionCoordinator: HistoryListInteractionCoordinator
     let interactionSessionStore: HistoryItemInteractionSessionStore
@@ -91,7 +91,7 @@ struct HistoryItemView: View, Equatable {
         onDelete: @escaping () -> Void,
         onUpdateNote: @escaping (String?) async -> Bool,
         onOptimizeImage: @escaping () async -> ImageOptimizationOutcomeDTO,
-        getImageData: @escaping () async -> Data?,
+        getImageData: @escaping @MainActor () async -> Data?,
         markdownWebViewController: MarkdownPreviewWebViewController,
         interactionCoordinator: HistoryListInteractionCoordinator,
         interactionSessionStore: HistoryItemInteractionSessionStore,

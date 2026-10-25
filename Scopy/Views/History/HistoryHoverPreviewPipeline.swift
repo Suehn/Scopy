@@ -21,7 +21,7 @@ enum HistoryHoverPreviewPipeline {
     }
 
     struct ImageRequest {
-        /// The future lazy interaction session can compare this value before committing work.
+        /// Content identity captured before asynchronous preparation starts.
         let revision: ClipboardItemContentRevision
         let storageRef: String?
         let delay: TimeInterval
@@ -31,7 +31,7 @@ enum HistoryHoverPreviewPipeline {
     }
 
     struct FileRequest {
-        /// The future lazy interaction session can compare this value before committing work.
+        /// Content identity captured before asynchronous preparation starts.
         let revision: ClipboardItemContentRevision
         let previewInfo: FilePreviewInfo
         let isMarkdown: Bool
@@ -227,7 +227,7 @@ enum HistoryHoverPreviewPipeline {
     @MainActor
     static func run(
         request: Request,
-        getImageData: @escaping () async -> Data? = { nil },
+        getImageData: @escaping @MainActor () async -> Data? = { nil },
         readTextFile: @escaping (URL, Int) async -> String? = { url, maxBytes in
             await runBudgetedDetached(priority: .utility) {
                 FilePreviewSupport.readTextFile(url: url, maxBytes: maxBytes)
@@ -290,79 +290,84 @@ enum HistoryHoverPreviewPipeline {
     @MainActor
     private static func runImagePreview(
         request: ImageRequest,
-        getImageData: @escaping () async -> Data?,
+        getImageData: @escaping @MainActor () async -> Data?,
         isCurrent: @escaping @MainActor () -> Bool,
         emit: @escaping @MainActor (Event) -> Void
     ) async {
         let plan = imagePlan(for: request)
         let storageRef = request.storageRef
 
-        let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor () -> CGImage? in
-            if plan.prefetchDelayNanos > 0 {
-                try? await Task.sleep(nanoseconds: plan.prefetchDelayNanos)
-            }
-            guard !Task.isCancelled, isCurrent() else { return nil }
-
-            if let cached = HoverPreviewImageCache.shared.image(forKey: plan.cacheKey) {
-                emit(.image(cached))
-                return cached
-            }
-
-            let cgImage: CGImage?
-            if let storageRef, !storageRef.isEmpty {
-                let pixelSize = await Task.detached(priority: .userInitiated) {
-                    HoverPreviewLoader.displayPixelSize(fromFileAtPath: storageRef)
-                }.value
-                guard !Task.isCancelled, isCurrent() else { return nil }
-                if let pixelSize { emit(.imagePixelSize(pixelSize)) }
-                let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                    guard let image = HoverPreviewLoader.makePreviewCGImage(
-                        fromFileAtPath: storageRef,
-                        targetWidthPixels: plan.targetWidthPixels,
-                        maxLongSidePixels: plan.maxLongSidePixels
-                    ) else {
-                        return nil
-                    }
-                    return SendableCGImage(image: image)
-                } ?? nil
-                cgImage = sendable?.image
-            } else {
-                guard let data = await getImageData() else { return nil }
-                let pixelSize = await Task.detached(priority: .userInitiated) {
-                    HoverPreviewLoader.displayPixelSize(from: data)
-                }.value
-                guard !Task.isCancelled, isCurrent() else { return nil }
-                if let pixelSize { emit(.imagePixelSize(pixelSize)) }
-                let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                    guard let image = HoverPreviewLoader.makePreviewCGImage(
-                        from: data,
-                        targetWidthPixels: plan.targetWidthPixels,
-                        maxLongSidePixels: plan.maxLongSidePixels
-                    ) else {
-                        return nil
-                    }
-                    return SendableCGImage(image: image)
-                } ?? nil
-                cgImage = sendable?.image
-            }
-
-            guard !Task.isCancelled, isCurrent() else { return nil }
-            if let cgImage {
-                HoverPreviewImageCache.shared.setImage(cgImage, forKey: plan.cacheKey)
-            }
-            emit(.image(cgImage))
-            return cgImage
-        }
-        defer { preparedPreviewImage.cancel() }
-
+        async let preparation: Void = prepareImagePreview(
+            plan: plan, storageRef: storageRef, getImageData: getImageData,
+            isCurrent: isCurrent, emit: emit
+        )
         try? await Task.sleep(nanoseconds: plan.delayNanos)
         guard !Task.isCancelled, isCurrent() else { return }
         emit(.present(.image))
+        await preparation
+    }
 
-        if let cgImage = await preparedPreviewImage.value {
-            guard !Task.isCancelled, isCurrent() else { return }
-            emit(.image(cgImage))
+    @MainActor
+    private static func prepareImagePreview(
+        plan: ImagePlan,
+        storageRef: String?,
+        getImageData: @escaping @MainActor () async -> Data?,
+        isCurrent: @escaping @MainActor () -> Bool,
+        emit: @escaping @MainActor (Event) -> Void
+    ) async {
+        if plan.prefetchDelayNanos > 0 {
+            try? await Task.sleep(nanoseconds: plan.prefetchDelayNanos)
         }
+        guard !Task.isCancelled, isCurrent() else { return }
+
+        if let cached = HoverPreviewImageCache.shared.image(forKey: plan.cacheKey) {
+            emit(.image(cached))
+            return
+        }
+
+        let cgImage: CGImage?
+        if let storageRef, !storageRef.isEmpty {
+            let pixelSize = await runBudgetedDetached(priority: .userInitiated) {
+                HoverPreviewLoader.displayPixelSize(fromFileAtPath: storageRef)
+            } ?? nil
+            guard !Task.isCancelled, isCurrent() else { return }
+            if let pixelSize { emit(.imagePixelSize(pixelSize)) }
+            let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
+                guard let image = HoverPreviewLoader.makePreviewCGImage(
+                    fromFileAtPath: storageRef,
+                    targetWidthPixels: plan.targetWidthPixels,
+                    maxLongSidePixels: plan.maxLongSidePixels
+                ) else {
+                    return nil
+                }
+                return SendableCGImage(image: image)
+            } ?? nil
+            cgImage = sendable?.image
+        } else {
+            guard let data = await getImageData(), !Task.isCancelled, isCurrent() else { return }
+            let pixelSize = await runBudgetedDetached(priority: .userInitiated) {
+                HoverPreviewLoader.displayPixelSize(from: data)
+            } ?? nil
+            guard !Task.isCancelled, isCurrent() else { return }
+            if let pixelSize { emit(.imagePixelSize(pixelSize)) }
+            let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
+                guard let image = HoverPreviewLoader.makePreviewCGImage(
+                    from: data,
+                    targetWidthPixels: plan.targetWidthPixels,
+                    maxLongSidePixels: plan.maxLongSidePixels
+                ) else {
+                    return nil
+                }
+                return SendableCGImage(image: image)
+            } ?? nil
+            cgImage = sendable?.image
+        }
+
+        guard !Task.isCancelled, isCurrent() else { return }
+        if let cgImage {
+            HoverPreviewImageCache.shared.setImage(cgImage, forKey: plan.cacheKey)
+        }
+        emit(.image(cgImage))
     }
 
     @MainActor
@@ -372,81 +377,82 @@ enum HistoryHoverPreviewPipeline {
         emit: @escaping @MainActor (Event) -> Void
     ) async {
         let plan = filePlan(for: request)
-        let previewInfo = request.previewInfo
-        let scale = request.scale
-
-        // Every kind prefetches a still: `.other` files show a static QuickLook thumbnail in the
-        // hover popover; only a pinned window hosts a live QuickLook view.
-        let preparedPreviewImage: Task<CGImage?, Never> = Task(priority: .userInitiated) { @MainActor () -> CGImage? in
-            if plan.prefetchDelayNanos > 0 {
-                try? await Task.sleep(nanoseconds: plan.prefetchDelayNanos)
-            }
-            guard !Task.isCancelled, isCurrent() else { return nil }
-
-            let path = previewInfo.url.path
-            let exists = await Task.detached(priority: .userInitiated) {
-                FileManager.default.fileExists(atPath: path)
-            }.value
-            guard !Task.isCancelled, isCurrent() else { return nil }
-            emit(.fileAvailability(exists))
-            guard exists else { return nil }
-
-            if let cached = HoverPreviewImageCache.shared.image(forKey: plan.cacheKey) {
-                emit(.image(cached))
-                return cached
-            }
-
-            if previewInfo.kind == .image {
-                let pixelSize = await Task.detached(priority: .userInitiated) {
-                    HoverPreviewLoader.displayPixelSize(fromFileAtPath: path)
-                }.value
-                guard !Task.isCancelled, isCurrent() else { return nil }
-                if let pixelSize { emit(.imagePixelSize(pixelSize)) }
-            }
-
-            let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
-                let cgImage: CGImage?
-                switch previewInfo.kind {
-                case .image:
-                    cgImage = HoverPreviewLoader.makePreviewCGImage(
-                        fromFileAtPath: previewInfo.url.path,
-                        targetWidthPixels: plan.targetWidthPixels,
-                        maxLongSidePixels: plan.maxLongSidePixels
-                    )
-                case .video:
-                    cgImage = FilePreviewSupport.makeVideoPreviewCGImage(
-                        from: previewInfo.url,
-                        maxSidePixels: plan.maxLongSidePixels
-                    )
-                case .other:
-                    cgImage = await FilePreviewSupport.makeQuickLookPreviewCGImage(
-                        from: previewInfo.url,
-                        maxSidePixels: plan.quickLookMaxSidePixels,
-                        scale: scale
-                    )
-                }
-                guard let cgImage else { return nil }
-                return SendableCGImage(image: cgImage)
-            } ?? nil
-
-            let cgImage = sendable?.image
-            guard !Task.isCancelled, isCurrent() else { return nil }
-            if let cgImage {
-                HoverPreviewImageCache.shared.setImage(cgImage, forKey: plan.cacheKey)
-            }
-            emit(.image(cgImage))
-            return cgImage
-        }
-        defer { preparedPreviewImage.cancel() }
-
+        async let preparation: Void = prepareFilePreview(
+            plan: plan, previewInfo: request.previewInfo, scale: request.scale,
+            isCurrent: isCurrent, emit: emit
+        )
         try? await Task.sleep(nanoseconds: plan.delayNanos)
         guard !Task.isCancelled, isCurrent() else { return }
         emit(.present(.file))
+        await preparation
+    }
 
-        if let cgImage = await preparedPreviewImage.value {
-            guard !Task.isCancelled, isCurrent() else { return }
-            emit(.image(cgImage))
+    @MainActor
+    private static func prepareFilePreview(
+        plan: FilePlan,
+        previewInfo: FilePreviewInfo,
+        scale: CGFloat,
+        isCurrent: @escaping @MainActor () -> Bool,
+        emit: @escaping @MainActor (Event) -> Void
+    ) async {
+        if plan.prefetchDelayNanos > 0 {
+            try? await Task.sleep(nanoseconds: plan.prefetchDelayNanos)
         }
+        guard !Task.isCancelled, isCurrent() else { return }
+
+        let path = previewInfo.url.path
+        let exists = await runBudgetedDetached(priority: .userInitiated) {
+            FileManager.default.fileExists(atPath: path)
+        }
+        guard !Task.isCancelled, isCurrent(), let exists else { return }
+        emit(.fileAvailability(exists))
+        guard exists else { return }
+
+        if let cached = HoverPreviewImageCache.shared.image(forKey: plan.cacheKey) {
+            emit(.image(cached))
+            return
+        }
+
+        if previewInfo.kind == .image {
+            let pixelSize = await runBudgetedDetached(priority: .userInitiated) {
+                HoverPreviewLoader.displayPixelSize(fromFileAtPath: path)
+            } ?? nil
+            guard !Task.isCancelled, isCurrent() else { return }
+            if let pixelSize { emit(.imagePixelSize(pixelSize)) }
+        }
+
+        // Hover uses a QuickLook still; the live QuickLook view belongs to a pinned window.
+        let sendable = await runBudgetedDetached(priority: .userInitiated) { () async -> SendableCGImage? in
+            let cgImage: CGImage?
+            switch previewInfo.kind {
+            case .image:
+                cgImage = HoverPreviewLoader.makePreviewCGImage(
+                    fromFileAtPath: previewInfo.url.path,
+                    targetWidthPixels: plan.targetWidthPixels,
+                    maxLongSidePixels: plan.maxLongSidePixels
+                )
+            case .video:
+                cgImage = FilePreviewSupport.makeVideoPreviewCGImage(
+                    from: previewInfo.url,
+                    maxSidePixels: plan.maxLongSidePixels
+                )
+            case .other:
+                cgImage = await FilePreviewSupport.makeQuickLookPreviewCGImage(
+                    from: previewInfo.url,
+                    maxSidePixels: plan.quickLookMaxSidePixels,
+                    scale: scale
+                )
+            }
+            guard let cgImage else { return nil }
+            return SendableCGImage(image: cgImage)
+        } ?? nil
+
+        let cgImage = sendable?.image
+        guard !Task.isCancelled, isCurrent() else { return }
+        if let cgImage {
+            HoverPreviewImageCache.shared.setImage(cgImage, forKey: plan.cacheKey)
+        }
+        emit(.image(cgImage))
     }
 
     @MainActor
@@ -598,7 +604,8 @@ enum HistoryHoverPreviewPipeline {
         isCurrent: @escaping @MainActor () -> Bool,
         emit: @escaping @MainActor (Event) -> Void
     ) async {
-        textHoverStartedAt = ProcessInfo.processInfo.systemUptime
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        textHoverStartedAt = startedAt
         logHoverStage("start text \(request.item.plainText.utf8.count) bytes")
         let delay = delayNanos(for: request.delay)
         try? await Task.sleep(nanoseconds: min(prefetchDelayNanos, delay))
@@ -641,7 +648,7 @@ enum HistoryHoverPreviewPipeline {
             }
         }
 
-        let elapsedNanos = UInt64(max(0, ProcessInfo.processInfo.systemUptime - textHoverStartedAt) * 1_000_000_000)
+        let elapsedNanos = UInt64(max(0, ProcessInfo.processInfo.systemUptime - startedAt) * 1_000_000_000)
         if delay > elapsedNanos {
             try? await Task.sleep(nanoseconds: delay - elapsedNanos)
         }
@@ -767,9 +774,19 @@ enum HistoryHoverPreviewPipeline {
             return nil
         }
 
-        let result = await Task.detached(priority: priority, operation: operation).value
+        let worker = Task<T?, Never>.detached(priority: priority) {
+            guard !Task.isCancelled else { return nil }
+            return await operation()
+        }
+        let result = await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+        // Cancellation requests the worker to stop; the permit remains held until it actually
+        // returns, including synchronous ImageIO work that cannot be interrupted mid-decode.
         await pool.release()
-        return result
+        return Task.isCancelled ? nil : result
     }
 
     private static func markdownRenderEvent(

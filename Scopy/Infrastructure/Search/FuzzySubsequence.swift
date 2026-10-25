@@ -36,7 +36,7 @@ struct FuzzySubsequence: Sendable {
         let scalars = characters.map { character -> UInt32 in
             let composed = String(character).precomposedStringWithCanonicalMapping.unicodeScalars
             guard composed.count == 1, let scalar = composed.first,
-                  LoweredTextMatcher.isPlainStarter(scalar.value),
+                  UTF8Text.isPlainStarter(scalar.value),
                   Character(scalar) == character else { return Self.noScalar }
             return scalar.value
         }
@@ -107,8 +107,8 @@ struct FuzzySubsequence: Sendable {
             from = byte + 1
         }
         let lastByte = from - 1
-        let first = SearchMatchContextBuilder.utf16Count(bytes, from: 0, to: firstByte)
-        let last = first + SearchMatchContextBuilder.utf16Count(bytes, from: firstByte, to: lastByte)
+        let first = UTF8Text.utf16Count(bytes, from: 0, to: firstByte)
+        let last = first + UTF8Text.utf16Count(bytes, from: firstByte, to: lastByte)
         let greedy = greedyScore(count: count, first: first, last: last)
         let bound = contiguousBound(count: count, first: first, last: last)
 
@@ -122,7 +122,7 @@ struct FuzzySubsequence: Sendable {
         while candidate + count <= bytes.count {
             guard let found = memchr(raw + candidate, firstUnit, bytes.count - count + 1 - candidate) else { break }
             let byte = raw.distance(to: UnsafeRawPointer(found))
-            candidateUnits += SearchMatchContextBuilder.utf16Count(bytes, from: candidate, to: byte)
+            candidateUnits += UTF8Text.utf16Count(bytes, from: candidate, to: byte)
             guard candidateUnits < bound else { break }
             if memcmp(raw + byte, units, count) == 0 {
                 return contiguousScore(count: count, start: candidateUnits)
@@ -141,12 +141,12 @@ struct FuzzySubsequence: Sendable {
         text: String
     ) -> Int? {
         let count = pattern.characters.count
-        var cursor = CharacterCursor(bytes: bytes, text: text, offset: 0)
+        var cursor = UTF8Text.CharacterCursor(bytes: bytes, text: text, offset: 0)
         var matched = 0
         var position = 0
         var first = 0
         while !cursor.isAtEnd {
-            if cursor.equals(pattern, at: matched) {
+            if equals(cursor, pattern: pattern, at: matched) {
                 if matched == 0 { first = position }
                 matched += 1
                 if matched == count { break }
@@ -165,13 +165,13 @@ struct FuzzySubsequence: Sendable {
         for _ in 1..<count {
             offset = cursor.characterStart(before: offset)
         }
-        cursor = CharacterCursor(bytes: bytes, text: text, offset: offset)
+        cursor = UTF8Text.CharacterCursor(bytes: bytes, text: text, offset: offset)
         matched = 0
         while !cursor.isAtEnd, position - matched < bound {
-            while matched > 0, !cursor.equals(pattern, at: matched) {
+            while matched > 0, !equals(cursor, pattern: pattern, at: matched) {
                 matched = pattern.failure[matched - 1]
             }
-            if cursor.equals(pattern, at: matched) {
+            if equals(cursor, pattern: pattern, at: matched) {
                 matched += 1
                 if matched == count {
                     return contiguousScore(count: count, start: position - (count - 1))
@@ -183,113 +183,10 @@ struct FuzzySubsequence: Sendable {
         return greedy
     }
 
-    /// Reads a text's characters forward from a character boundary. A character that is a single
-    /// plain starter, the common case, is read as that scalar and compared by value: two such
-    /// scalars break between them (except CR LF) and are NFC-stable, so the scalar is the whole
-    /// character and equal characters are equal scalars. Any other character is read through the
-    /// String and compared with `==`.
-    private struct CharacterCursor {
-        let bytes: UnsafeBufferPointer<UInt8>
-        let text: String
-        /// Where the current character starts.
-        private(set) var offset: Int
-        private var end = 0
-        /// The current character's scalar when it is a single plain starter, else `noScalar`.
-        private var scalar = FuzzySubsequence.noScalar
-        private var character: Character = "\0"
-        /// The scalar after the current one, decoded ahead.
-        private var nextScalar: UInt32 = 0
-        private var nextWidth = 0
-        private var nextIsPlain = false
-
-        init(bytes: UnsafeBufferPointer<UInt8>, text: String, offset: Int) {
-            self.bytes = bytes
-            self.text = text
-            self.offset = offset
-            if offset < bytes.count {
-                decodeNext(at: offset)
-                load()
-            }
-        }
-
-        var isAtEnd: Bool { offset >= bytes.count }
-
-        mutating func advance() {
-            offset = end
-            if offset < bytes.count { load() }
-        }
-
-        func equals(_ pattern: CharacterPattern, at index: Int) -> Bool {
-            guard scalar != FuzzySubsequence.noScalar else { return character == pattern.characters[index] }
-            let key = pattern.scalars[index]
-            if key != FuzzySubsequence.noScalar { return key == scalar }
-            return Unicode.Scalar(scalar).map { Character($0) == pattern.characters[index] } ?? false
-        }
-
-        /// The character boundary before the boundary `boundary > 0`.
-        func characterStart(before boundary: Int) -> Int {
-            let start = Self.scalarStart(endingAt: boundary, in: bytes)
-            if start == 0 { return 0 }
-            let value = Self.decode(bytes, at: start).value
-            if LoweredTextMatcher.isPlainStarter(value) {
-                let previous = Self.decode(bytes, at: Self.scalarStart(endingAt: start, in: bytes)).value
-                if LoweredTextMatcher.isPlainStarter(previous), !(previous == 0x0D && value == 0x0A) {
-                    return start
-                }
-            }
-            let utf8 = text.utf8
-            let index = text.index(before: utf8.index(utf8.startIndex, offsetBy: boundary))
-            return utf8.distance(from: utf8.startIndex, to: index)
-        }
-
-        /// Reads the character at `offset`, whose first scalar is in `next*`.
-        private mutating func load() {
-            let value = nextScalar
-            let scalarEnd = offset + nextWidth
-            if nextIsPlain {
-                if scalarEnd == bytes.count {
-                    scalar = value
-                    end = scalarEnd
-                    return
-                }
-                decodeNext(at: scalarEnd)
-                if nextIsPlain, !(value == 0x0D && nextScalar == 0x0A) {
-                    scalar = value
-                    end = scalarEnd
-                    return
-                }
-            }
-            scalar = FuzzySubsequence.noScalar
-            let utf8 = text.utf8
-            character = text[utf8.index(utf8.startIndex, offsetBy: offset)]
-            end = offset + character.utf8.count
-            if end < bytes.count { decodeNext(at: end) }
-        }
-
-        private mutating func decodeNext(at index: Int) {
-            (nextScalar, nextWidth) = Self.decode(bytes, at: index)
-            nextIsPlain = LoweredTextMatcher.isPlainStarter(nextScalar)
-        }
-
-        /// The scalar at a scalar boundary of well-formed UTF-8, and its width.
-        private static func decode(_ bytes: UnsafeBufferPointer<UInt8>, at index: Int) -> (value: UInt32, width: Int) {
-            let lead = UInt32(bytes[index])
-            if lead < 0x80 { return (lead, 1) }
-            if lead < 0xE0 { return ((lead & 0x1F) << 6 | UInt32(bytes[index + 1] & 0x3F), 2) }
-            if lead < 0xF0 {
-                return ((lead & 0x0F) << 12 | UInt32(bytes[index + 1] & 0x3F) << 6 | UInt32(bytes[index + 2] & 0x3F), 3)
-            }
-            return (
-                (lead & 0x07) << 18 | UInt32(bytes[index + 1] & 0x3F) << 12 | UInt32(bytes[index + 2] & 0x3F) << 6
-                    | UInt32(bytes[index + 3] & 0x3F),
-                4
-            )
-        }
-
-        private static func scalarStart(endingAt boundary: Int, in bytes: UnsafeBufferPointer<UInt8>) -> Int {
-            var start = boundary - 1
-            while bytes[start] & 0xC0 == 0x80 { start -= 1 }
-            return start
-        }
+    private static func equals(_ cursor: UTF8Text.CharacterCursor, pattern: CharacterPattern, at index: Int) -> Bool {
+        guard let scalar = cursor.plainScalar else { return cursor.character == pattern.characters[index] }
+        let key = pattern.scalars[index]
+        if key != noScalar { return key == scalar }
+        return cursor.character == pattern.characters[index]
     }
 }

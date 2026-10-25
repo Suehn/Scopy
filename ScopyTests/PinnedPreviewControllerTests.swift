@@ -66,39 +66,88 @@ final class PinnedPreviewControllerTests: XCTestCase {
 
     // MARK: - Pin / dismiss
 
-    func testPinIsRejectedWhenThereIsNothingRenderedYet() {
-        controller.pin(
+    func testSnapshotIsRejectedWhenThereIsNothingRenderedYet() {
+        let preview = PinnedPreview(
             item: Self.makeItem(),
             revision: Self.makeRevision(),
             kind: .text,
             filePreviewKind: nil,
             filePreviewPath: nil,
             source: HoverPreviewModel(),
-            settingsViewModel: SettingsViewModel(service: MockClipboardService()),
-            markdownWebViewController: MarkdownPreviewWebViewController()
+            markdownWebViewController: nil
         )
 
-        XCTAssertFalse(controller.isPinned, "An empty preview has nothing to pin")
+        XCTAssertNil(preview, "An empty preview has nothing to pin")
     }
 
     func testPinThenDismissClearsTheWindowState() {
         let item = Self.makeItem()
         pin(item: item)
-        XCTAssertTrue(controller.isPinned)
         XCTAssertTrue(controller.isPinned(itemID: item.id))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
 
         controller.dismiss()
-        XCTAssertFalse(controller.isPinned)
         XCTAssertFalse(controller.isPinned(itemID: item.id))
+    }
+
+    func testPinKeepsOneSnapshotAndReleasesItsTransferredWebViewOnClose() throws {
+        let item = Self.makeItem()
+        let source = HoverPreviewModel()
+        source.text = item.plainText
+        let webViewController = MarkdownPreviewWebViewController()
+        let ownerID = UUID()
+        webViewController.beginOwnership(ownerID)
+        let preview = try XCTUnwrap(PinnedPreview(
+            item: item, revision: ClipboardItemContentRevision(item: item), kind: .text,
+            filePreviewKind: nil, filePreviewPath: nil, source: source,
+            markdownWebViewController: webViewController
+        ))
+        source.resetPreviewContent()
+        XCTAssertTrue(controller.pin(preview, settingsViewModel: SettingsViewModel(service: MockClipboardService())))
+        XCTAssertTrue(controller.previewsForTesting[item.id]?.model === preview.model)
+        XCTAssertEqual(preview.model.text, item.plainText)
+
+        controller.dismiss(itemID: item.id)
+        XCTAssertFalse(webViewController.owns(ownerID), "Close releases the bridge before deferred SwiftUI dismantling")
+    }
+
+    func testInvalidationDuringHandoffPreventsTheWindowFromOpening() async throws {
+        let item = Self.makeItem()
+        let source = HoverPreviewModel()
+        source.text = item.plainText
+        let preview = try XCTUnwrap(PinnedPreview(
+            item: item, revision: ClipboardItemContentRevision(item: item), kind: .text,
+            filePreviewKind: nil, filePreviewPath: nil, source: source,
+            markdownWebViewController: nil
+        ))
+        let invalidations = [
+            Self.snapshot(deleted: [item.id]),
+            Self.snapshot(knownRevisions: [item.id: ClipboardItemContentRevision(
+                item: Self.makeItem(id: item.id, contentHash: "replacement")
+            )]),
+            Self.snapshot(clearGeneration: 1, clearSurvivingItemIDs: [])
+        ]
+        for snapshot in invalidations {
+            let presented = expectation(description: "invalidated pin must not present")
+            presented.isInverted = true
+            XCTAssertTrue(controller.pin(
+                preview, settingsViewModel: SettingsViewModel(service: MockClipboardService()),
+                onPresented: { presented.fulfill() }
+            ))
+            controller.reconcile(snapshot: snapshot)
+            XCTAssertFalse(controller.isPinned(itemID: item.id))
+            await fulfillment(of: [presented], timeout: 0.05)
+        }
+        XCTAssertFalse(NSApp.windows.contains { $0 is PinnedPreviewPanel && $0.isVisible })
     }
 
     func testMultipleWindowsHaveIndependentModelsAndCloseIndividually() throws {
         let first = Self.makeItem(), second = Self.makeItem()
         pin(item: first)
         pin(item: second)
-        XCTAssertEqual(controller.previews.count, 2)
-        let firstModel = try XCTUnwrap(controller.previews[first.id]?.model)
-        let secondModel = try XCTUnwrap(controller.previews[second.id]?.model)
+        XCTAssertEqual(controller.previewsForTesting.count, 2)
+        let firstModel = try XCTUnwrap(controller.previewsForTesting[first.id]?.model)
+        let secondModel = try XCTUnwrap(controller.previewsForTesting[second.id]?.model)
         firstModel.previewLayoutScalePercent = 200
         XCTAssertNil(secondModel.previewLayoutScalePercent)
         controller.dismiss(itemID: first.id)
@@ -115,6 +164,20 @@ final class PinnedPreviewControllerTests: XCTestCase {
         XCTAssertTrue(controller.isPinned(itemID: second.id))
     }
 
+    func testLateCloseCallbackCannotCloseAReplacementWindow() throws {
+        let item = Self.makeItem()
+        pin(item: item)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let oldPanel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? PinnedPreviewPanel }.first { $0.isVisible })
+        let oldClose = try XCTUnwrap(oldPanel.onCloseRequested)
+        controller.dismiss(itemID: item.id)
+
+        pin(item: item)
+        oldClose()
+
+        XCTAssertTrue(controller.isPinned(itemID: item.id), "A callback belongs to one window, not every pin of that item")
+    }
+
     func testSavedWindowFrameFitsAfterDisplayChanges() {
         let screen = CGRect(x: -1440, y: 0, width: 1440, height: 900)
         let saved = CGRect(x: 1900, y: -300, width: 2100, height: 1200)
@@ -127,6 +190,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
     func testPinnedWindowChromeFitsNarrowAndWideContent() throws {
         let item = Self.makeItem()
         pin(item: item)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? PinnedPreviewPanel }.first { $0.isVisible })
         let host = try XCTUnwrap(panel.contentView)
         for width in [320, 1000, 320] {
@@ -142,6 +206,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
 
     func testPlainTextBeginsAtTheTopWithoutAToolbarRow() throws {
         pin(item: Self.makeItem())
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? PinnedPreviewPanel }.first { $0.isVisible })
         let host = try XCTUnwrap(panel.contentView)
         panel.setContentSize(CGSize(width: 640, height: 400))
@@ -165,7 +230,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
 
         controller.reconcile(snapshot: Self.snapshot(deleted: [UUID()]))
 
-        XCTAssertTrue(controller.isPinned, "Another row disappearing must not close the pinned preview")
+        XCTAssertTrue(controller.isPinned(itemID: item.id), "Another row disappearing must not close the pinned preview")
     }
 
     func testPinnedPreviewClosesWhenItsItemIsDeleted() {
@@ -174,7 +239,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
 
         controller.reconcile(snapshot: Self.snapshot(deleted: [item.id]))
 
-        XCTAssertFalse(controller.isPinned)
+        XCTAssertFalse(controller.isPinned(itemID: item.id))
     }
 
     func testPinnedPreviewClosesWhenItsPayloadIsReplaced() {
@@ -200,7 +265,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
             snapshot: Self.snapshot(knownRevisions: [item.id: ClipboardItemContentRevision(item: replaced)])
         )
 
-        XCTAssertFalse(controller.isPinned, "The window shows a snapshot; a superseded revision must not stay up")
+        XCTAssertFalse(controller.isPinned(itemID: item.id), "The window shows a snapshot; a superseded revision must not stay up")
     }
 
     func testPinnedPreviewClosesWhenClearRemovesIt() {
@@ -211,7 +276,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
             snapshot: Self.snapshot(clearGeneration: 1, clearSurvivingItemIDs: [], survivorSetIsAuthoritative: true)
         )
 
-        XCTAssertFalse(controller.isPinned)
+        XCTAssertFalse(controller.isPinned(itemID: item.id))
     }
 
     func testPinnedPreviewSurvivesAClearItWasPinnedThrough() {
@@ -226,7 +291,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(controller.isPinned, "A pinned item that survived Clear All keeps its window")
+        XCTAssertTrue(controller.isPinned(itemID: item.id), "A pinned item that survived Clear All keeps its window")
     }
 
     /// With history at its max-items limit every capture deletes a row, so once the tombstone
@@ -270,23 +335,23 @@ final class PinnedPreviewControllerTests: XCTestCase {
             markdownContentSize: nil,
             markdownHasHorizontalOverflow: false
         )
-        controller.pin(
+        let preview = PinnedPreview(
             item: item,
             revision: ClipboardItemContentRevision(item: item),
             kind: .text,
             filePreviewKind: nil,
             filePreviewPath: nil,
             source: source,
-            settingsViewModel: SettingsViewModel(service: MockClipboardService()),
-            markdownWebViewController: MarkdownPreviewWebViewController()
-        )
+            markdownWebViewController: nil
+        )!
+        XCTAssertTrue(controller.pin(preview, settingsViewModel: SettingsViewModel(service: MockClipboardService())))
     }
 
-    private static func makeItem() -> ClipboardItemDTO {
+    private static func makeItem(id: UUID = UUID(), contentHash: String = "pinned-hash") -> ClipboardItemDTO {
         ClipboardItemDTO(
-            id: UUID(),
+            id: id,
             type: .text,
-            contentHash: "pinned-hash",
+            contentHash: contentHash,
             plainText: "pinned content",
             note: nil,
             appBundleID: nil,

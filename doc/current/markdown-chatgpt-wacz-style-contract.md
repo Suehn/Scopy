@@ -300,6 +300,8 @@ KaTeX behavior:
 
 The optional loose-math repair is a Scopy input adaptation for clearly detected OCR/scientific or LaTeX-document profiles. It is disabled for ordinary ChatGPT/authored Markdown, and profile selection may change only bounded source repair—not the renderer, CSS, or output architecture.
 
+Temporary protection within source-repair passes uses `scopySourcePlaceholders`: each pass chooses a prefix absent from its input, resolves previously protected fragments when storing an enclosing fragment, and restores only its own tokens. Literal source resembling an internal token remains source. This mechanism does not extend Markdown syntax or select a different parser.
+
 ## Typography, Fonts, and Rhythm
 
 The completed-style runtime path resolves to the following light-theme geometry at a 16px root. These are code-path values from the capture, not a measured final DOM instance:
@@ -360,7 +362,7 @@ A descriptive ordinary link may additionally reuse the exact URL's existing froz
 
 **Native website icons (2026-09-11).** Ordinary links, source citations and rich source labels share one `scopySourceIcon` identity rule. After sanitization, only renderer-created source glyphs may become `scopy-source-icon://host/https` (or `/http`) images. This resource carries no article path, query, credentials or non-default port. Authored images cannot use the scheme. A document admits at most 24 distinct origins and 256 icon occurrences. The preview WebView and PNG export register the same `SourceIconSchemeHandler`; it delegates to `SourceIconService` in the backend. The independent **网站图标（联网获取并缓存）** setting defaults on and uses normal Save/Cancel transactions; disabling it permits cached icons but no new requests. Ordinary XCTest/UI exports disable icon networking unless explicitly enabled for live verification.
 
-The service reuses `LinkEnrichmentFetcher`'s cookie-less, credential-less, public-DNS/redirect validation and bounded image decoding. It races the origin's `/favicon.ico` against declared homepage icon links (attribute order, relative URLs and rel token lists supported; no page title required), emits only downscaled PNG at most 64 px / 32 KiB, deduplicates in-flight work, and limits work to six origins plus 24 queued. The disk/memory cache holds at most 256 origins, with 30-day positive and one-hour negative expiry; cached successes remain usable offline. The existing DNS-preflight/Fake-IP residual boundary above also applies. No third-party favicon aggregator or issuer-specific mapping is added.
+The service reuses `LinkEnrichmentFetcher`'s cookie-less, credential-less, public-DNS/redirect validation and bounded image decoding. It races the origin's `/favicon.ico` against declared homepage icon links (attribute order, relative URLs and rel token lists supported; no page title required), emits only downscaled PNG at most 64 px / 32 KiB, deduplicates in-flight work, and limits work to six origins plus 24 queued. Each origin flight owns its consumer set; one consumer's cancellation leaves the others intact, and the last consumer's departure cancels the shared fetch. A live flight persists its result once. The disk/memory cache holds at most 256 origins, with 30-day positive and one-hour negative expiry; cached successes remain usable offline. The existing DNS-preflight/Fake-IP residual boundary above also applies. No third-party favicon aggregator or issuer-specific mapping is added.
 
 Native icons settle within the shared 10-second image deadline; ordinary images retain 1.5 seconds. WebKit's `document.fonts.ready` can wait for image-dependent layout, so its independent font deadline starts after images settle. Current-owner/render-ID guards, stylesheet checks, two paint frames and export true-color preservation still apply. A failed or stopped resource cannot publish a late callback; failure replaces only its compact source glyph. Preview and export use the same cache and terminal image path, without an extra Markdown parser or export renderer.
 
@@ -437,11 +439,15 @@ Each preview WebView load receives a new opaque render ID inserted into `data-sc
 
 Metric deduplication compares width, height, horizontal-overflow state, success/failure state, error reason, and render ID. A same-size failure cannot be swallowed as a duplicate success, and a late message from an earlier document cannot resize or mark the new preview ready.
 
+The document runtime coalesces height reports while retaining any forced report requested before delivery. The queued callback carries the render ID from scheduling and is discarded if that load is no longer current. Pinning transfers a captured preview and its Markdown controller to one window owner; closing or reconciling it detaches that controller even if the new host has not mounted yet.
+
 An unowned preview WebView may preload the document a popover is about to show (hover prewarm). It publishes no readiness, changes no visibility, and its probed height (`ScopyDocument.probeLayoutHeight`) is used only for host geometry, cached under the exact render cache key. A hidden document gets no animation frames, so its paint deadline starts only when it becomes visible; it never fails or replaces its rendered DOM while offscreen.
 
 The document remains hidden until the renderer, both stylesheets (`katex.min.css` and `scopy-document.css`), `document.fonts`, every local image load/error outcome, task/table/rich runtime, two paint frames, and a current layout epoch reach a terminal ready state. ResizeObserver and interactive-details/rich-control changes are coalesced through requestAnimationFrame. The reusable WebView becomes opaque only for a current-owner terminal success; a terminal failure leaves the static source/DOM available behind a visible reason instead of producing a blank first hover. Renderer failure is reported as failure; it does not silently switch engines.
 
 PNG export builds the same HTML off the main thread, then owns WebKit work on the main actor. Its PDF, one-shot snapshot, and tiled snapshot paths are reliability strategies for one frozen DOM, not alternate renderers. The export freeze closes transient overlays/tooltips, disables rich controls and links, removes them from the tab order, and cancels activation. Export-only code wrapping or table scaling may run only after preview-equivalent layout is ready and only to fit bitmap constraints; it may not change Markdown parsing, typography, content width, table/card models, or frozen source data.
+
+One `ExportCoordinator` task owns document loading, the matching navigation, capture, encoding, and resource teardown. Completion is delivered at most once. Cancellation may report failure before the task finishes, but the active concurrency slot is released only when that task exits. Native snapshot and PDF operations expose no cancellation handle; bounding their result wait does not prove that WebKit stopped the underlying operation.
 
 ## Edge-case Acceptance Matrix
 
@@ -490,10 +496,11 @@ npm run verify:assets
 cd ../..
 make build
 make test-unit
-scripts/perf-frontend-profile.sh --include-hover
 make docs-validate
 git diff --check
 ```
+
+For interactive preview changes, follow the [development guide's local UI verification path](./development-guide.md#local-ui-verification-path). Run `scripts/perf-frontend-profile.sh --include-hover` only where XCUITest can enter the requested scene; otherwise record that profile as environment-blocked.
 
 Then compare a real-app PNG export against the previous build: launch the Debug app directly with `--uitesting`, `SCOPY_UITEST_AUTO_EXPORT_MARKDOWN=1`, `SCOPY_UITEST_AUTO_EXPORT_MARKDOWN_PATH=<fixture>`, `SCOPY_EXPORT_DUMP_PATH=<png>`, `USE_MOCK_SERVICE=0` and a temporary `SCOPY_SERVICE_DB_PATH`, for at least `user_markdown_stress.md` and `chatgpt_rich_copy_sample.md`, and report a byte comparison (or a pixel diff with the reason for any difference).
 

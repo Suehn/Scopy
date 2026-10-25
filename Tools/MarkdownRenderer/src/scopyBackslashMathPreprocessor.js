@@ -2,6 +2,9 @@ import { createFenceTracker } from "./scopyLineScan.js";
 
 export function preprocessBackslashMath(source) {
   const text = String(source || "");
+  if (!/\\[()[\]]/.test(text)) {
+    return { markdown: text, mathCount: 0 };
+  }
   const lines = text.split("\n");
   const fences = createFenceTracker();
   let inDisplayBlock = false;

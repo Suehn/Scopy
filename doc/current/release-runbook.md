@@ -2,7 +2,7 @@
 doc_type: runbook
 status: active
 owner: maintainers
-last_reviewed: 2026-09-05
+last_reviewed: 2026-10-25
 canonical: true
 related_versions:
   - v0.80.1
@@ -79,20 +79,20 @@ related_versions:
 ## Release Environment
 
 - Release CI currently targets `macos-15`.
-- Hosted TSan CI also targets `macos-15` with Xcode 16.0 via [../../.github/workflows/tsan.yml](../../.github/workflows/tsan.yml).
-- Project baseline remains `macOS 14.0` and `Xcode 16.0` unless intentionally changed in project configuration and workflows.
+- Build, release, and Hosted TSan CI use Xcode 26.1.1 on `macos-15`; the sanitizer workflow is [../../.github/workflows/tsan.yml](../../.github/workflows/tsan.yml).
+- The project uses the Swift 6.2 compiler and Swift 6 language mode. The deployment target remains macOS 14.0. `project.yml`, `Package.swift`, and the workflows must stay aligned.
 - Xcode app/test products use Xcode DerivedData; SwiftPM products and benchmark binaries use repository `.build`. Do not point Xcode `BUILD_DIR` at `.build`: mixing both build systems can retain file-provider/Finder metadata in an app bundle and make CodeSign fail with `resource fork, Finder information, or similar detritus not allowed`.
 - `./deploy.sh release --no-launch` uses an isolated DerivedData root at `~/Library/Developer/Xcode/DerivedData/Scopy-Deploy` by default. Override it only with `SCOPY_XCODE_DERIVED_DATA=<absolute-path>`; a failed build prints the retained log path and its last 80 lines.
-- Every Swift-flag test variant builds into its own DerivedData root (`Scopy-Strict` and `Scopy-TSan` under `~/Library/Developer/Xcode/DerivedData/Scopy-<checkout-path-hash>`). Both checkout and flag variant are isolated, so concurrent worktrees cannot overwrite each other's build database or test products. Plain `build` uses Xcode's default project-path-scoped DerivedData; `test-unit` is the single strict native run. The former "Stage SwiftPM Resource Bundles" pre-build phase was removed outright: the package declares no resources, so the phase only burned a 2.5s retry loop on every build.
+- Native tests and sanitizer tests use separate DerivedData roots (`Scopy-Tests` and `Scopy-TSan` under `~/Library/Developer/Xcode/DerivedData/Scopy-<checkout-path-hash>`). Both checkout and test variant are isolated, so concurrent worktrees cannot overwrite each other's build database or products. Plain `build` uses Xcode's default project-path-scoped DerivedData. Swift 6 checks concurrency in every build; `test-unit` adds Swift warnings as errors. The package declares no resources and needs no SwiftPM resource-staging phase.
 - `make test-tooling` runs the shell/Make regression checks locally and in CI; they are correctness checks, not app runtime performance measurements (the 2026-09-05 run is archived in [../archive/release-runbook-evidence-2026-09-05.md](../archive/release-runbook-evidence-2026-09-05.md)).
-- `scripts/build-release.sh` uses the same isolation and retained-log contract for tagged packaging while keeping the final DMG under `.build/`.
+- `scripts/build-release.sh` defaults to `~/Library/Developer/Xcode/DerivedData/Scopy-<checkout-path-hash>/Scopy-Release`, with `SCOPY_XCODE_DERIVED_DATA` as an explicit override. It retains the build log and keeps the final DMG and checksum under `.build/`.
 - XCTest runtime fixtures belong in the test bundle. Performance DB copies and in-progress JSON belong under `/tmp` or DerivedData; shell wrappers may copy completed evidence into repository `logs/` only after `xcodebuild` succeeds. This avoids file-coordination/TCC stalls in Documents-hosted worktrees.
 
 ## Verification Expectations
 
 - Baseline build/tests: `make build`, `make test-unit`
 - Release workflow policy: `make release-validate`, `make test-release-policy`; ordinary workflows must remain top-level read-only and unable to create or push tags
-- Concurrency-sensitive changes: strict compilation is included in `make test-unit`; add `make test-tsan` when the environment permits; on the known-bad `macOS 26.x + Xcode 26.2 (17C52)` combo the command skips because Apple hosted TSan crashes before test bootstrap, while the supported real-coverage path runs in Hosted TSan CI on `macos-15`
+- Concurrency-sensitive changes: Swift 6 concurrency checks apply to all builds; `make test-unit` also rejects Swift warnings. `make test-tsan` explicitly enables Thread Sanitizer when the environment permits. On the known-bad `macOS 26.x + Xcode 26.2 (17C52)` combo it skips because Apple hosted TSan crashes before test bootstrap; the supported hosted path uses `macos-15 + Xcode 26.1.1`.
 - Perf-sensitive changes:
   - `make test-snapshot-perf-release`
   - `make perf-search-warm-load`

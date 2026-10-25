@@ -69,15 +69,10 @@ enum HoverPreviewLoader {
         maxLongSidePixels: Int
     ) -> Int {
         let fallback = min(maxLongSidePixels, max(targetWidthPixels, 1))
-        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
-            return fallback
-        }
-        let w = props[kCGImagePropertyPixelWidth] as? Int ?? 0
-        let h = props[kCGImagePropertyPixelHeight] as? Int ?? 0
-        guard w > 0, h > 0 else { return fallback }
+        guard let size = displayPixelSize(of: source) else { return fallback }
         let plan = HoverPreviewImageQualityPolicy.plan(
-            sourceWidthPixels: w,
-            sourceHeightPixels: h,
+            sourceWidthPixels: Int(size.width),
+            sourceHeightPixels: Int(size.height),
             idealTargetWidthPixels: targetWidthPixels,
             maxSidePixels: maxLongSidePixels
         )

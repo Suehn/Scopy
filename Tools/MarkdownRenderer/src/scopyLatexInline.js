@@ -7,6 +7,7 @@ import {
   splitCharacterLines,
   trimBlankAndNewlines as trim
 } from "./scopyLineScan.js";
+import { createSourcePlaceholders } from "./scopySourcePlaceholders.js";
 
 // Inline LaTeX repair for the scientific profiles (policy `allowLatexInlineTextNormalize`), run
 // before parsing. Math regions ($..$, $$..$$, \(..\), \[..\], supported environments, including
@@ -35,17 +36,13 @@ const ENVIRONMENT_NAMES = [
 ];
 const ENVIRONMENTS = new Set(ENVIRONMENT_NAMES);
 
-const PLACEHOLDER_MARK = "SCOPYMATHPLACEHOLDER";
-
 export function normalizeLatexInline(source) {
-  const { markdown, placeholders } = protectMath(source);
-  let out = normalizeInlineText(markdown);
-  // Outer segments first, so an inner placeholder an outer original still contains is restored next.
-  for (let index = placeholders.length - 1; index >= 0; index -= 1) {
-    const [placeholder, original] = placeholders[index];
-    out = out.split(placeholder).join(original);
+  if (source.length > MAX_INPUT_LENGTH || (!source.includes("$") && !source.includes("\\"))) {
+    return normalizeInlineText(source);
   }
-  return out;
+  // Keep the established token length: scientific scan limits apply to the protected source.
+  const math = createSourcePlaceholders(source, "SCOPYMATHPLACEHOLDER", 32);
+  return math.restore(normalizeInlineText(protectMath(source, math.protect)));
 }
 
 // MARK: - \textbf, \emph, \textit outside code and math
@@ -92,23 +89,7 @@ function closingBrace(text, from, limit) {
 
 // MARK: - Math protection
 
-function protectMath(markdown) {
-  if (markdown.length > MAX_INPUT_LENGTH || (!markdown.includes("$") && !markdown.includes("\\"))) {
-    return { markdown, placeholders: [] };
-  }
-  // Same length as the Swift UUID-salted prefix, so length limits see identical text.
-  let salt = 0;
-  while (markdown.includes(PLACEHOLDER_MARK + String(salt).padStart(32, "0"))) {
-    salt += 1;
-  }
-  const prefix = PLACEHOLDER_MARK + String(salt).padStart(32, "0");
-  const placeholders = [];
-  const protect = (original) => {
-    const token = `${prefix}${placeholders.length}X`;
-    placeholders.push([token, original]);
-    return token;
-  };
-
+function protectMath(markdown, protect) {
   const output = [];
   const fences = createFenceTracker();
   // One pending block at a time: a multi-line `$$` block or a supported environment.
@@ -174,7 +155,7 @@ function protectMath(markdown) {
   if (environment) {
     output.push(...environment.lines);
   }
-  return { markdown: output.join("\n"), placeholders: resolveNestedPlaceholders(placeholders) };
+  return output.join("\n");
 }
 
 function environmentBeginName(line) {
@@ -185,34 +166,6 @@ function environmentBeginName(line) {
   const close = trimmed.indexOf("}");
   const name = trimmed.slice("\\begin{".length, close);
   return close !== -1 && ENVIRONMENTS.has(name) ? name : null;
-}
-
-// Environment protection runs before `$` protection, so `$..\begin{cases}..\end{cases}..$` stores
-// an outer original that contains an inner placeholder; expand originals to be self-contained.
-function resolveNestedPlaceholders(placeholders) {
-  if (placeholders.length < 2) {
-    return placeholders;
-  }
-  const resolved = [];
-  for (const [placeholder, original] of placeholders) {
-    let expanded = original;
-    if (expanded.includes(PLACEHOLDER_MARK)) {
-      for (const [inner, innerOriginal] of resolved) {
-        expanded = expanded.split(inner).join(innerOriginal);
-      }
-    }
-    resolved.push([placeholder, expanded]);
-  }
-  if (resolved.some(([, original]) => original.includes(PLACEHOLDER_MARK))) {
-    for (const entry of resolved) {
-      for (const [other, otherOriginal] of resolved) {
-        if (other !== entry[0]) {
-          entry[1] = entry[1].split(other).join(otherOriginal);
-        }
-      }
-    }
-  }
-  return resolved;
 }
 
 function protectMathInSegment(text, protect) {

@@ -1,8 +1,35 @@
+import CoreGraphics
+import ImageIO
 import XCTest
 
 @testable import Scopy
 
 final class HoverPreviewImageQualityPolicyTests: XCTestCase {
+    func testImageDecodeBudgetUsesDisplayedWidthAfterEXIFRotation() throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 800, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        for orientation in [1, 6] {
+            let encoded = NSMutableData()
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+                encoded, "public.jpeg" as CFString, 1, nil
+            ))
+            CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+            let data = encoded as Data
+            let displayedSize = orientation == 1 ? CGSize(width: 800, height: 200) : CGSize(width: 200, height: 800)
+            XCTAssertEqual(HoverPreviewLoader.displayPixelSize(from: data), displayedSize)
+            let decoded = try XCTUnwrap(HoverPreviewLoader.makePreviewCGImage(
+                from: data, targetWidthPixels: 100, maxLongSidePixels: 1_000
+            ))
+            XCTAssertEqual(decoded.width, 100, "The width budget applies to the oriented preview")
+            XCTAssertEqual(decoded.height, orientation == 1 ? 25 : 400)
+        }
+    }
+
     func testPlanKeepsFullScaleForNormalImages() {
         let plan = HoverPreviewImageQualityPolicy.plan(
             sourceWidthPixels: 3000,

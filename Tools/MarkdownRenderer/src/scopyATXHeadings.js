@@ -24,36 +24,30 @@ export function repairATXHeadings(source) {
 }
 
 function repairLine(line) {
-  if (line.indexOf("#") === -1) {
+  if (!/^ {0,3}#/.test(line)) {
     return line;
   }
-  const graphemes = Array.from(graphemeSegmenter.segment(line), (segment) => segment.segment);
-  let i = 0;
-  let leadingSpaces = 0;
-  while (i < graphemes.length && graphemes[i] === " ") {
-    leadingSpaces += 1;
-    i += 1;
+  let hashes = 0;
+  let bodyStart = -1;
+  let bodyLength = 0;
+  // Stop as soon as the prefix or length disqualifies the line. Long prose and flattened
+  // tables need no full-line grapheme array, while a combining mark on '#' still belongs
+  // to that character rather than being mistaken for a bare heading delimiter.
+  for (const { segment, index } of graphemeSegmenter.segment(line)) {
+    if (bodyStart === -1) {
+      if (hashes === 0 && segment === " ") continue;
+      if (segment === "#") {
+        hashes += 1;
+        if (hashes > 6) return line;
+        continue;
+      }
+      if (hashes === 0 || segment === " " || segment === "\t" || (hashes === 1 && segment === "!")) {
+        return line;
+      }
+      bodyStart = index;
+    }
+    bodyLength += 1;
+    if (bodyLength > MAX_HEADING_GRAPHEMES) return line;
   }
-  if (leadingSpaces > 3 || graphemes[i] !== "#") {
-    return line;
-  }
-  let j = i;
-  while (j < graphemes.length && graphemes[j] === "#") {
-    j += 1;
-  }
-  const hashCount = j - i;
-  if (hashCount > 6 || j >= graphemes.length) {
-    return line;
-  }
-  const next = graphemes[j];
-  if (next === " " || next === "\t") {
-    return line;
-  }
-  if (hashCount === 1 && next === "!") {
-    return line;
-  }
-  if (graphemes.length - j > MAX_HEADING_GRAPHEMES) {
-    return line;
-  }
-  return `${graphemes.slice(0, j).join("")} ${graphemes.slice(j).join("")}`;
+  return bodyStart === -1 ? line : `${line.slice(0, bodyStart)} ${line.slice(bodyStart)}`;
 }

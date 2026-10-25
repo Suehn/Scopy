@@ -16,7 +16,7 @@ extension XCTestCase {
         on object: Any,
         timeout: TimeInterval = 5.0,
         message: String,
-        file: StaticString = #file,
+        file: StaticString = #filePath,
         line: UInt = #line
     ) {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: object)

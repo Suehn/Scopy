@@ -111,7 +111,7 @@ final class FuzzySubsequenceTests: XCTestCase {
     func testPlainStartersAreNFCStableAndBreakFromEachOther() {
         var failures: [UInt32] = []
         var checked = 0
-        for value in UInt32(0)...0x3FFFF where LoweredTextMatcher.isPlainStarter(value) {
+        for value in UInt32(0)...0x3FFFF where UTF8Text.isPlainStarter(value) {
             guard let scalar = Unicode.Scalar(value) else { continue }
             checked += 1
             let single = String(scalar)

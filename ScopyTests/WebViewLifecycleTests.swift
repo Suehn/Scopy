@@ -220,6 +220,44 @@ final class WebViewLifecycleTests: XCTestCase {
         XCTAssertNil(weakController, "Expected controller to deinit (no retain cycle via script message handler)")
     }
 
+    func testTableColumnModelFinalizesImageFallbackAndStaysStableDuringProbes() throws {
+        let document = try LiveMarkdownDocument()
+        defer { document.close() }
+        let alt = String(repeating: "a", count: 35)
+        let source = "| Image | Note |\n| --- | --- |\n| ![\(alt)](missing-table-image.png) | done |"
+
+        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: source)))
+        XCTAssertTrue(document.isRenderReady)
+        XCTAssertEqual(
+            document.evaluate("document.querySelector('tbody td').textContent") as? String,
+            alt + " · 图片无法显示"
+        )
+        let columnSizes = document.evaluate("""
+        Array.from(document.querySelectorAll('table tr > :first-child'), cell =>
+            [cell.getAttribute('data-col-size'), cell.getAttribute('data-scopy-col-size')])
+        """) as? [[String]]
+        XCTAssertEqual(columnSizes, [["md", "md"], ["md", "md"]], "The final image fallback must participate in column sizing")
+
+        _ = document.evaluate("""
+        window.__tableMutationCount = 0;
+        window.__tableProbeDone = false;
+        window.__tableObserver = new MutationObserver(records => { window.__tableMutationCount += records.length; });
+        window.__tableObserver.observe(document.getElementById('content'), {
+            subtree: true, attributes: true,
+            attributeFilter: ['data-col-size', 'data-scopy-col-size', 'data-scopy-table-model']
+        });
+        window.ScopyDocument.probeLayoutHeight();
+        window.ScopyDocument.probeLayoutHeight();
+        window.ScopyDocument.probeLayoutHeight();
+        window.ScopyDocument.reportHeight(true);
+        setTimeout(() => { window.__tableProbeDone = true; }, 180);
+        true
+        """)
+        XCTAssertTrue(document.wait(until: "window.__tableProbeDone === true", timeout: 3))
+        XCTAssertEqual((document.evaluate("window.__tableMutationCount") as? NSNumber)?.intValue, 0)
+        _ = document.evaluate("window.__tableObserver.disconnect(); true")
+    }
+
     func testImagesAndSourceIconsSettleWithFallbackAndInlineGeometry() throws {
         let png = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
