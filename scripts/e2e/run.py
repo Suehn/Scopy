@@ -195,8 +195,8 @@ class Session:
         def panel():
             assert self.process.poll() is None, f"App exited: {self.process.returncode}"
             return run(TOOLS / "winpos", self.process.pid)
-        wait_for(panel, "real history panel")
-        run(TOOLS / "winpos", self.process.pid, "--activate")
+        position = [float(value) for value in wait_for(panel, "real history panel").split()]
+        run(TOOLS / "click", position[0] + 100, position[1] + 30)
         self.observe(f"launch-{self.launches}")
 
     def observe(self, name):
