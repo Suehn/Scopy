@@ -8,8 +8,7 @@ struct HotKeyRecorderView: View {
     @Binding var keyCode: UInt32
     @Binding var modifiers: UInt32
 
-    let unregisterHotKeyHandler: (() -> Void)?
-    let applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
+    let beginHotKeyRecordingHandler: (@MainActor () -> HotKeyRecordingSession?)?
 
     @StateObject private var recorder = HotKeyRecorder()
     @State private var applyErrorMessage: String?
@@ -30,23 +29,22 @@ struct HotKeyRecorderView: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("Settings.HotKeyRecorder")
+        .disabled(recorder.isApplying)
         .onAppear {
-            recorder.unregisterHotKeyHandler = unregisterHotKeyHandler
-            recorder.applyHotKeyHandler = applyHotKeyHandler
-
-            recorder.onRecorded = { newKeyCode, newModifiers in
-                keyCode = newKeyCode
-                modifiers = newModifiers
-                Task { @MainActor in
-                    await applyHotKeyAndSyncFromPersistedSettings(
-                        expectedKeyCode: newKeyCode,
-                        expectedModifiers: newModifiers
-                    )
+            recorder.beginRecording = beginHotKeyRecordingHandler
+            recorder.onApplied = { applied in
+                await settingsViewModel.loadSettings()
+                keyCode = settingsViewModel.settings.hotkeyKeyCode
+                modifiers = settingsViewModel.settings.hotkeyModifiers
+                if !applied {
+                    applyErrorMessage = String(localized: "This shortcut may already be used by the system or another app. Reverted to \(formatHotKey(keyCode: keyCode, modifiers: modifiers)).")
                 }
             }
         }
         .onDisappear {
-            recorder.stopRecording(restorePrevious: true)
+            recorder.stopRecording()
+            recorder.onApplied = nil
         }
         .alert(
             "Shortcut Unavailable",
@@ -65,64 +63,10 @@ struct HotKeyRecorderView: View {
 
     private func toggleRecording() {
         if recorder.isRecording {
-            recorder.stopRecording(restorePrevious: true)
+            recorder.stopRecording()
         } else {
-            recorder.startRecording(currentKeyCode: keyCode, currentModifiers: modifiers)
+            recorder.startRecording()
         }
-    }
-
-    @MainActor
-    private func applyHotKeyAndSyncFromPersistedSettings(expectedKeyCode: UInt32, expectedModifiers: UInt32) async {
-        let store = SettingsStore.shared
-        let initial = await store.load()
-        let initialKeyCode = initial.hotkeyKeyCode
-        let initialModifiers = initial.hotkeyModifiers
-
-        applyHotKeyHandler?(expectedKeyCode, expectedModifiers)
-
-        if initialKeyCode == expectedKeyCode, initialModifiers == expectedModifiers {
-            return
-        }
-
-        if await waitForPersistedHotkey(
-            store: store,
-            expectedKeyCode: expectedKeyCode,
-            expectedModifiers: expectedModifiers,
-            timeout: 1.5
-        ) {
-            await settingsViewModel.loadSettings()
-            return
-        }
-
-        // Either the requested hotkey was rejected and reverted, or we timed out waiting for persistence.
-        await settingsViewModel.loadSettings()
-        let persisted = settingsViewModel.settings
-
-        guard persisted.hotkeyKeyCode != expectedKeyCode || persisted.hotkeyModifiers != expectedModifiers else {
-            return
-        }
-
-        keyCode = persisted.hotkeyKeyCode
-        modifiers = persisted.hotkeyModifiers
-        applyErrorMessage = String(localized: "This shortcut may already be used by the system or another app. Reverted to \(formatHotKey(keyCode: keyCode, modifiers: modifiers)).")
-    }
-
-    @MainActor
-    private func waitForPersistedHotkey(
-        store: SettingsStore,
-        expectedKeyCode: UInt32,
-        expectedModifiers: UInt32,
-        timeout: TimeInterval
-    ) async -> Bool {
-        let deadline = CFAbsoluteTimeGetCurrent() + max(0, timeout)
-        while CFAbsoluteTimeGetCurrent() < deadline {
-            let current = await store.load()
-            if current.hotkeyKeyCode == expectedKeyCode, current.hotkeyModifiers == expectedModifiers {
-                return true
-            }
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-        return false
     }
 
     private func formatHotKey(keyCode: UInt32, modifiers: UInt32) -> String {

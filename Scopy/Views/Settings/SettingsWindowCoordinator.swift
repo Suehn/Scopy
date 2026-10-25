@@ -45,6 +45,9 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
 
     private func dismissCurrentSession() {
         window?.orderOut(nil)
+        // End the view lifetime now, including a shortcut recorder or stats request. Keeping a
+        // hidden hosting view alive would keep that session's input monitors alive as well.
+        window?.contentView = nil
     }
 
     private func dismiss(session: Int) {
@@ -95,8 +98,7 @@ final class SettingsWindowCoordinator: NSObject, NSWindowDelegate {
         onDismiss: @escaping () -> Void
     ) -> some View {
         SettingsView(
-            unregisterHotKeyHandler: appState.unregisterHotKeyHandler,
-            applyHotKeyHandler: appState.applyHotKeyHandler,
+            beginHotKeyRecordingHandler: appState.beginHotKeyRecordingHandler,
             checkForUpdates: checkForUpdates,
             onDismiss: onDismiss
         )

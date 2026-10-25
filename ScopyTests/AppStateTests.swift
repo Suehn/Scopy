@@ -107,7 +107,10 @@ final class AppStateTests: XCTestCase {
         let pinnedID = try XCTUnwrap(appState.historyViewModel.pinnedItems.first?.id)
         let refreshCountBeforeClear = mockService.historyPageFetchCallCount
         let clearHandled = expectation(description: "Clear event handled before sentinel")
-        appState.applyHotKeyHandler = { _, _ in clearHandled.fulfill() }
+        appState.applyHotKeyHandler = { _, _ in
+            clearHandled.fulfill()
+            return true
+        }
 
         await appState.historyViewModel.clearAll()
         mockService.emitEvent(.settingsChanged)
@@ -141,6 +144,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     var startCallCount = 0
     var stopCallCount = 0
     var startFailuresRemaining = 0
+    var onStart: (@MainActor () async -> Void)?
+    var onStop: (@MainActor () async -> Void)?
 
     // Call tracking
     var searchCallCount = 0
@@ -172,6 +177,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
 
     func start() async throws {
         startCallCount += 1
+        await onStart?()
         if startFailuresRemaining > 0 {
             startFailuresRemaining -= 1
             throw FailingMockService.TestError.simulatedFailure
@@ -184,6 +190,7 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
     }
 
     func stopAndWait() async {
+        await onStop?()
         stop()
     }
 
@@ -468,6 +475,100 @@ final class FailingMockService: ClipboardServiceProtocol {
 @MainActor
 final class AppStateFallbackTests: XCTestCase {
 
+    func testConcurrentStartsWaitForTheSameStartup() async {
+        let service = TestMockClipboardService()
+        let state = AppState.forTesting(service: service)
+        let startupEntered = expectation(description: "Backend startup entered")
+        var startupContinuation: CheckedContinuation<Void, Never>?
+        service.onStart = {
+            await withCheckedContinuation { continuation in
+                startupContinuation = continuation
+                startupEntered.fulfill()
+            }
+        }
+
+        let first = Task { await state.start() }
+        await fulfillment(of: [startupEntered], timeout: 1)
+        let secondEntered = expectation(description: "Second caller starts")
+        var secondReturned = false
+        let second = Task {
+            secondEntered.fulfill()
+            await state.start()
+            secondReturned = true
+        }
+        await fulfillment(of: [secondEntered], timeout: 1)
+
+        XCTAssertEqual(service.startCallCount, 1)
+        XCTAssertFalse(secondReturned, "Every start caller waits until startup has actually settled")
+        startupContinuation?.resume()
+        await first.value
+        await second.value
+        XCTAssertEqual(state.startupPhase, .running)
+        await state.stop()
+    }
+
+    func testStopJoinsStartupAndKeepsEventsAliveUntilBackendShutdownFinishes() async {
+        let service = TestMockClipboardService()
+        let state = AppState.forTesting(service: service)
+        let startupEntered = expectation(description: "Backend startup entered")
+        let shutdownEntered = expectation(description: "Backend shutdown entered")
+        var startupContinuation: CheckedContinuation<Void, Never>?
+        var shutdownContinuations: [CheckedContinuation<Void, Never>] = []
+        service.onStart = {
+            await withCheckedContinuation { continuation in
+                startupContinuation = continuation
+                startupEntered.fulfill()
+            }
+        }
+        service.onStop = {
+            await withCheckedContinuation { continuation in
+                shutdownContinuations.append(continuation)
+                if shutdownContinuations.count == 1 { shutdownEntered.fulfill() }
+            }
+        }
+        let startup = Task { await state.start() }
+        await fulfillment(of: [startupEntered], timeout: 1)
+
+        let stopRequested = expectation(description: "Stop requested during startup")
+        let shutdown = Task {
+            stopRequested.fulfill()
+            await state.stop()
+        }
+        await fulfillment(of: [stopRequested], timeout: 1)
+        XCTAssertEqual(service.stopCallCount, 0)
+        XCTAssertTrue(shutdownContinuations.isEmpty, "Backend shutdown must not overlap its startup")
+
+        startupContinuation?.resume()
+        await startup.value
+        await fulfillment(of: [shutdownEntered], timeout: 1)
+        let eventHandled = expectation(description: "Event handled during backend shutdown")
+        state.applyHotKeyHandler = { _, _ in
+            eventHandled.fulfill()
+            return true
+        }
+        service.emitEvent(.settingsChanged)
+        await fulfillment(of: [eventHandled], timeout: 1)
+
+        let secondStopRequested = expectation(description: "Second stop requested")
+        var secondStopReturned = false
+        let secondShutdown = Task {
+            secondStopRequested.fulfill()
+            await state.stop()
+            secondStopReturned = true
+        }
+        await fulfillment(of: [secondStopRequested], timeout: 1)
+        XCTAssertFalse(secondStopReturned, "Concurrent stop callers join backend shutdown")
+        XCTAssertEqual(shutdownContinuations.count, 1)
+        shutdownContinuations.forEach { $0.resume() }
+        await shutdown.value
+        await secondShutdown.value
+
+        XCTAssertEqual(service.startCallCount, 1)
+        XCTAssertEqual(service.stopCallCount, 1)
+        XCTAssertEqual(service.historyPageFetchCallCount, 0, "Stopping startup skips initial history loads")
+        XCTAssertEqual(state.startupPhase, .idle, "A late startup must not publish running after stop")
+    }
+
     func testStartRecordsStartupFailureWithoutFallback() async {
         let failingService = FailingMockService()
         let state = AppState.forTesting(service: failingService)
@@ -553,6 +654,7 @@ final class AppStateFallbackTests: XCTestCase {
             hotkeyApplied = true
             appliedKeyCode = keyCode
             appliedModifiers = modifiers
+            return true
         }
 
         await state.start()

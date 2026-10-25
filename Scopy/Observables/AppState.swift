@@ -29,21 +29,11 @@ enum StartupPhase: Equatable {
 final class AppState {
     // MARK: - Shared instance
 
-    private static var _shared: AppState?
-    static var shared: AppState {
-        if _shared == nil {
-            _shared = AppState()
-        }
-        return _shared!
-    }
-
-    static func create(service: ClipboardServiceProtocol) -> AppState {
-        AppState(service: service)
-    }
+    static let shared = AppState()
 
     // MARK: - Properties
 
-    @ObservationIgnored var service: ClipboardServiceProtocol
+    @ObservationIgnored let service: ClipboardServiceProtocol
     @ObservationIgnored let settingsViewModel: SettingsViewModel
     @ObservationIgnored let historyViewModel: HistoryViewModel
 
@@ -55,10 +45,12 @@ final class AppState {
     }
     @ObservationIgnored var openSettingsHandler: (() -> Void)?
 
-    @ObservationIgnored var applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
-    @ObservationIgnored var unregisterHotKeyHandler: (() -> Void)?
+    @ObservationIgnored var applyHotKeyHandler: (@MainActor (UInt32, UInt32) async -> Bool)?
+    @ObservationIgnored var beginHotKeyRecordingHandler: (@MainActor () -> HotKeyRecordingSession?)?
 
     @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var startTask: Task<Void, Never>?
+    @ObservationIgnored private var stopTask: Task<Void, Never>?
     @ObservationIgnored private let serviceEnvironmentOptions: ServiceEnvironmentOptions
     @ObservationIgnored private var lastAppliedSettings: SettingsDTO?
 
@@ -175,25 +167,48 @@ final class AppState {
     // MARK: - Lifecycle
 
     func start() async {
-        guard startupPhase != .running && startupPhase != .starting else { return }
+        if let stopTask {
+            await stopTask.value
+            return
+        }
+        if let startTask {
+            await startTask.value
+            return
+        }
+        guard startupPhase != .running else { return }
         startupPhase = .starting
+        let task = Task { @MainActor in
+            defer { startTask = nil }
+            await startService()
+        }
+        startTask = task
+        await task.value
+    }
 
+    private func startService() async {
         do {
             try await service.start()
+            // A service that started while stop was requested still needs its event consumer
+            // while the backend drains; cancellation only skips the initial UI loads.
+            startEventListener()
+            guard !Task.isCancelled else { return }
             ScopyLog.app.info("Clipboard Service started")
         } catch {
+            guard !Task.isCancelled else { return }
             ScopyLog.app.error("Failed to start Clipboard Service: \(error.localizedDescription, privacy: .private)")
             await service.stopAndWait()
+            guard !Task.isCancelled else { return }
             startupPhase = .startupFailed(makeStartupFailure(error: error))
             return
         }
 
-        startEventListener()
-
         await refreshSettings(applyHotKey: false)
+        guard !Task.isCancelled else { return }
 
         await historyViewModel.loadRecentApps()
+        guard !Task.isCancelled else { return }
         await historyViewModel.load()
+        guard !Task.isCancelled else { return }
         startupPhase = .running
     }
 
@@ -205,12 +220,27 @@ final class AppState {
     }
 
     func stop() async {
-        // The bounded backend event queue still needs its consumer until producers finish.
-        await service.stopAndWait()
-        eventTask?.cancel()
-        eventTask = nil
-        historyViewModel.stop()
-        startupPhase = .idle
+        if let stopTask {
+            await stopTask.value
+            return
+        }
+        let startup = startTask
+        startup?.cancel()
+        let task = Task { @MainActor in
+            defer { stopTask = nil }
+            // A startup already inside the backend must settle before shutdown owns the service.
+            await startup?.value
+            // The bounded backend event queue needs its consumer until producers finish.
+            await service.stopAndWait()
+            let events = eventTask
+            events?.cancel()
+            historyViewModel.stop()
+            await events?.value
+            eventTask = nil
+            startupPhase = .idle
+        }
+        stopTask = task
+        await task.value
     }
 
     func stopForTermination() async -> Bool {
@@ -221,8 +251,7 @@ final class AppState {
 
     // MARK: - Events
 
-    func startEventListener() {
-        eventTask?.cancel()
+    private func startEventListener() {
         // Subscribe before returning so events emitted right after start() are not missed.
         let events = service.eventStream
         eventTask = Task { [weak self] in
@@ -255,14 +284,14 @@ final class AppState {
         lastAppliedSettings = settings
         historyViewModel.applySettings(settings)
         if applyHotKey {
-            applyHotKeyIfNeeded(settings: settings)
+            await applyHotKeyIfNeeded(settings: settings)
         }
         return patch
     }
 
-    private func applyHotKeyIfNeeded(settings: SettingsDTO) {
+    private func applyHotKeyIfNeeded(settings: SettingsDTO) async {
         if let handler = applyHotKeyHandler {
-            handler(settings.hotkeyKeyCode, settings.hotkeyModifiers)
+            _ = await handler(settings.hotkeyKeyCode, settings.hotkeyModifiers)
         } else {
             ScopyLog.app.warning("settingsChanged: applyHotKeyHandler not registered, hotkey may be out of sync")
         }
@@ -289,13 +318,15 @@ final class AppState {
 
 // MARK: - Testing Support
 
+#if DEBUG
 extension AppState {
     static func forTesting(
         service: ClipboardServiceProtocol,
         historyTiming: HistoryViewModel.Timing = .tests
     ) -> AppState {
-        let state = create(service: service)
+        let state = AppState(service: service)
         state.historyViewModel.configureTiming(historyTiming)
         return state
     }
 }
+#endif

@@ -104,10 +104,6 @@ public final class HotKeyService {
         set { currentHotKeyIDBox.withValue { $0 = newValue } }
     }
 
-    // Default shortcut: ⇧⌘C
-    private let defaultKeyCode: UInt32 = UInt32(kVK_ANSI_C)  // 8
-    private let defaultModifiers: UInt32 = 0x0300  // shiftKey | cmdKey
-
     // MARK: - Initialization
 
     public init() {
@@ -169,12 +165,6 @@ public final class HotKeyService {
 
     // MARK: - Public API
 
-    /// Registers the default global shortcut.
-    public func register(handler: @escaping HotKeyHandler) {
-        logToFile("🔧 register() called with default hotkey")
-        registerHotKey(keyCode: defaultKeyCode, modifiers: defaultModifiers, handler: handler)
-    }
-
     /// Unregisters the global shortcut.
     public func unregister() {
         guard let hotKeyRef = hotKeyRef else {
@@ -195,19 +185,19 @@ public final class HotKeyService {
     }
 
     /// Replaces the shortcut; used by Settings.
-    public func updateHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
+    public func updateHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) -> Bool {
         logToFile("🔧 updateHotKey() called: keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16))")
 
         // Unregister the old shortcut first.
         unregister()
 
         // Register the new one.
-        registerHotKey(keyCode: keyCode, modifiers: modifiers, handler: handler)
+        return registerHotKey(keyCode: keyCode, modifiers: modifiers, handler: handler)
     }
 
     // MARK: - Private: Registration
 
-    private func registerHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) {
+    private func registerHotKey(keyCode: UInt32, modifiers: UInt32, handler: @escaping HotKeyHandler) -> Bool {
         let newID = Self.getNextHotKeyID()
         currentHotKeyID = newID
         let handlerCount = Self.sharedState.withValue { state -> Int in
@@ -231,12 +221,14 @@ public final class HotKeyService {
 
         if status == noErr {
             logToFile("✅ Hotkey registered: id=\(newID), keyCode=\(keyCode), modifiers=0x\(String(modifiers, radix: 16)), hotKeyRef=\(String(describing: hotKeyRef))")
+            return hotKeyRef != nil
         } else {
             logToFile("❌ Failed to register hotkey: status=\(status)")
             Self.sharedState.withValue { state in
                 _ = state.handlers.removeValue(forKey: newID)
             }
             currentHotKeyID = 0
+            return false
         }
     }
 
@@ -309,9 +301,12 @@ public final class HotKeyService {
             return noErr
         }
 
-        if let handler = result.handler {
+        if result.handler != nil {
             logToFile("✅ Handler found, executing...")
+            let id = hotKeyID.id
             Task { @MainActor in
+                // Registration may have ended while this Carbon event was queued for the main actor.
+                guard let handler = sharedState.withValue({ $0.handlers[id] }) else { return }
                 handler()
             }
             return noErr

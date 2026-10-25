@@ -8,7 +8,7 @@ import ScopyUISupport
 final class SettingsViewModel {
     // MARK: - Properties
 
-    @ObservationIgnored private var service: ClipboardServiceProtocol
+    @ObservationIgnored private let service: ClipboardServiceProtocol
 
     var settings: SettingsDTO = .default
 
@@ -33,13 +33,6 @@ final class SettingsViewModel {
 
     init(service: ClipboardServiceProtocol) {
         self.service = service
-    }
-
-    func updateService(_ service: ClipboardServiceProtocol) {
-        self.service = service
-        externalImageSizeSyncTask?.cancel()
-        externalImageSizeSyncTask = nil
-        lastExternalImageSizeSyncAttemptAt = nil
     }
 
     // MARK: - Settings

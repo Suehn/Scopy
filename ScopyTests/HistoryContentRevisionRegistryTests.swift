@@ -215,7 +215,10 @@ final class HistoryContentRevisionRegistryTests: XCTestCase {
         )
 
         let clearHandled = expectation(description: "Clear event handled before sentinel")
-        appState.applyHotKeyHandler = { _, _ in clearHandled.fulfill() }
+        appState.applyHotKeyHandler = { _, _ in
+            clearHandled.fulfill()
+            return true
+        }
         await appState.historyViewModel.clearAll()
         service.emitEvent(.settingsChanged)
         await fulfillment(of: [clearHandled], timeout: 1.0)

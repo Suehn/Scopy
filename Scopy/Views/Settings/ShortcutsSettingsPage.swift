@@ -3,8 +3,7 @@ import ScopyKit
 
 struct ShortcutsSettingsPage: View {
     @Binding var tempSettings: SettingsDTO
-    let unregisterHotKeyHandler: (() -> Void)?
-    let applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
+    let beginHotKeyRecordingHandler: (@MainActor () -> HotKeyRecordingSession?)?
 
     var body: some View {
         SettingsPageContainer(page: .shortcuts) {
@@ -18,8 +17,7 @@ struct ShortcutsSettingsPage: View {
                         HotKeyRecorderView(
                             keyCode: $tempSettings.hotkeyKeyCode,
                             modifiers: $tempSettings.hotkeyModifiers,
-                            unregisterHotKeyHandler: unregisterHotKeyHandler,
-                            applyHotKeyHandler: applyHotKeyHandler
+                            beginHotKeyRecordingHandler: beginHotKeyRecordingHandler
                         )
                     }
                 }

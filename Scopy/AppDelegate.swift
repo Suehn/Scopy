@@ -44,8 +44,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindowCoordinator = SettingsWindowCoordinator()
     private lazy var appState = AppState.shared
     private var appliedHotKey: (keyCode: UInt32, modifiers: UInt32)?
-    private var isHotKeyRegistered = false
-    private let settingsStore: SettingsStore = .shared
+    private var hotKeyApplicationTask: Task<Bool, Never>?
+    private var hotKeyRecordingSessionID: UUID?
+    private let settingsStore: SettingsStore
+    #if DEBUG
+    private var registerHotKeyForTesting: ((UInt32, UInt32) -> Bool)?
+    #endif
     /// Sparkle auto-update: checks the appcast daily, reminds the user when a new version
     /// exists, and installs + relaunches on confirmation. Disabled in UI-test harnesses.
     private(set) var updaterController: SPUStandardUpdaterController?
@@ -64,6 +68,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         return statusItem
     }()
+
+    override init() {
+        settingsStore = .shared
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if ScrollPerformanceProfile.isEnabled {
@@ -294,11 +303,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Hotkey callbacks let SettingsView apply a recorded hotkey without knowing AppDelegate.
         appState.applyHotKeyHandler = { [weak self] keyCode, modifiers in
-            self?.applyHotKey(keyCode: keyCode, modifiers: modifiers)
+            await self?.applyHotKey(keyCode: keyCode, modifiers: modifiers) ?? false
         }
-        appState.unregisterHotKeyHandler = { [weak self] in
-            self?.hotKeyService?.unregister()
-            self?.isHotKeyRegistered = false
+        appState.beginHotKeyRecordingHandler = { [weak self] in
+            self?.beginHotKeyRecording()
         }
     }
 
@@ -308,7 +316,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let settings = await settingsStore.load()
-            applyHotKey(keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers)
+            _ = await applyHotKey(keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers)
         }
     }
 
@@ -430,7 +438,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotKeyService?.unregister()
-        isHotKeyRegistered = false
         localEventMonitors.forEach(NSEvent.removeMonitor)
         localEventMonitors.removeAll()
         memoryPressureSource?.cancel()
@@ -590,68 +597,108 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Hotkey Settings
 
-    /// Registers and persists the hotkey in one place so a change applies without a restart.
-    @MainActor
-    func applyHotKey(keyCode: UInt32, modifiers: UInt32) {
+    /// Each application finishes registration and persistence before the next begins. Recording
+    /// and settings events share this path; callers receive the registration result directly.
+    func applyHotKey(keyCode: UInt32, modifiers: UInt32, recordingSessionID: UUID? = nil) async -> Bool {
+        let previous = hotKeyApplicationTask
+        let task = Task { @MainActor in
+            _ = await previous?.value
+            if let recordingSessionID {
+                guard hotKeyRecordingSessionID == recordingSessionID else { return false }
+                hotKeyRecordingSessionID = nil
+            } else if hotKeyRecordingSessionID != nil {
+                // Settings can change during recording, but the global key must remain suspended.
+                // Cancellation reads the latest committed settings before restoring registration.
+                return false
+            }
+            return await registerAndPersistHotKey(keyCode: keyCode, modifiers: modifiers)
+        }
+        hotKeyApplicationTask = task
+        return await task.value
+    }
+
+    private func beginHotKeyRecording() -> HotKeyRecordingSession {
+        let sessionID = UUID()
+        hotKeyRecordingSessionID = sessionID
+        hotKeyService?.unregister()
+        return HotKeyRecordingSession(id: sessionID) { [weak self] completion in
+            guard let self else { return false }
+            switch completion {
+            case .cancel:
+                let settings = await settingsStore.load()
+                return await applyHotKey(
+                    keyCode: settings.hotkeyKeyCode,
+                    modifiers: settings.hotkeyModifiers,
+                    recordingSessionID: sessionID
+                )
+            case .shortcut(let keyCode, let modifiers):
+                return await applyHotKey(keyCode: keyCode, modifiers: modifiers, recordingSessionID: sessionID)
+            }
+        }
+    }
+
+    private func registerAndPersistHotKey(keyCode: UInt32, modifiers: UInt32) async -> Bool {
         let requested = (keyCode: keyCode, modifiers: modifiers)
 
         if hotKeyService?.isRegistered == true,
            let applied = appliedHotKey,
            applied.keyCode == requested.keyCode,
            applied.modifiers == requested.modifiers {
-            return
-        }
-
-        if hotKeyService == nil {
-            hotKeyService = HotKeyService()
+            return true
         }
 
         let previousHotKey = appliedHotKey
-
-        hotKeyService?.updateHotKey(
-            keyCode: keyCode,
-            modifiers: modifiers,
-            handler: { [weak self] in
-                self?.togglePanelAtMousePosition()
-            }
-        )
-
-        guard hotKeyService?.isRegistered == true else {
+        guard registerHotKey(keyCode: keyCode, modifiers: modifiers) else {
             ScopyLog.hotkey.error(
                 "Failed to register global hotkey, reverting. keyCode=\(keyCode, privacy: .public), modifiers=0x\(String(modifiers, radix: 16), privacy: .public)"
             )
 
             let fallback = previousHotKey ?? (SettingsDTO.default.hotkeyKeyCode, SettingsDTO.default.hotkeyModifiers)
-            hotKeyService?.updateHotKey(
-                keyCode: fallback.0,
-                modifiers: fallback.1,
-                handler: { [weak self] in
-                    self?.togglePanelAtMousePosition()
-                }
-            )
-
-            if hotKeyService?.isRegistered == true {
+            if registerHotKey(keyCode: fallback.0, modifiers: fallback.1) {
                 appliedHotKey = (fallback.0, fallback.1)
-                isHotKeyRegistered = true
-                persistHotkeySettings(keyCode: fallback.0, modifiers: fallback.1)
+                await settingsStore.updateHotkey(keyCode: fallback.0, modifiers: fallback.1)
             } else {
                 appliedHotKey = nil
-                isHotKeyRegistered = false
             }
-            return
+            return false
         }
 
         appliedHotKey = requested
-        isHotKeyRegistered = true
-        persistHotkeySettings(keyCode: requested.keyCode, modifiers: requested.modifiers)
+        await settingsStore.updateHotkey(keyCode: requested.keyCode, modifiers: requested.modifiers)
+        return true
     }
 
-    private func persistHotkeySettings(keyCode: UInt32, modifiers: UInt32) {
-        let settingsStore = settingsStore
-        Task {
-            await settingsStore.updateHotkey(keyCode: keyCode, modifiers: modifiers)
+    private func registerHotKey(keyCode: UInt32, modifiers: UInt32) -> Bool {
+        #if DEBUG
+        if let registerHotKeyForTesting {
+            return registerHotKeyForTesting(keyCode, modifiers)
+        }
+        #endif
+        let service = hotKeyService ?? HotKeyService()
+        hotKeyService = service
+        return service.updateHotKey(keyCode: keyCode, modifiers: modifiers) { [weak self] in
+            self?.togglePanelAtMousePosition()
         }
     }
+
+    #if DEBUG
+    private init(settingsStore: SettingsStore, registerHotKey: @escaping (UInt32, UInt32) -> Bool) {
+        self.settingsStore = settingsStore
+        registerHotKeyForTesting = registerHotKey
+        super.init()
+    }
+
+    static func forTesting(
+        settingsStore: SettingsStore,
+        registerHotKey: @escaping (UInt32, UInt32) -> Bool
+    ) -> AppDelegate {
+        AppDelegate(settingsStore: settingsStore, registerHotKey: registerHotKey)
+    }
+
+    func beginHotKeyRecordingForTesting() -> HotKeyRecordingSession {
+        beginHotKeyRecording()
+    }
+    #endif
 
     // MARK: - Settings Window
 

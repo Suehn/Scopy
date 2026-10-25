@@ -4,43 +4,43 @@ import AppKit
 
 @MainActor
 final class HotKeyRecorder: ObservableObject {
-    @Published var isRecording = false
+    @Published private var session: HotKeyRecordingSession?
+    @Published private(set) var isApplying = false
 
-    var onRecorded: ((UInt32, UInt32) -> Void)?
-    var unregisterHotKeyHandler: (() -> Void)?
-    var applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
+    var isRecording: Bool { session != nil }
+    var beginRecording: (@MainActor () -> HotKeyRecordingSession?)?
+    var onApplied: (@MainActor (Bool) async -> Void)?
 
     private var eventMonitor: Any?
     private var globalEventMonitor: Any?
-    private var previousHotKey: (keyCode: UInt32, modifiers: UInt32)?
-    private var didRecordNewHotKey = false
 
-    func startRecording(currentKeyCode: UInt32, currentModifiers: UInt32) {
-        guard !isRecording else { return }
-
-        isRecording = true
-        didRecordNewHotKey = false
-        previousHotKey = (currentKeyCode, currentModifiers)
-
-        unregisterHotKeyHandler?()
+    func startRecording() {
+        guard !isRecording, !isApplying, let session = beginRecording?() else { return }
+        self.session = session
+        let sessionID = session.id
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
-            self?.handleKeyEvent(event)
+            self?.handleKeyEvent(event, sessionID: sessionID)
             return nil
         }
 
         globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             Task { @MainActor [weak self] in
-                self?.handleKeyEvent(event)
+                self?.handleKeyEvent(event, sessionID: sessionID)
             }
         }
     }
 
-    func stopRecording(restorePrevious: Bool) {
-        guard isRecording else { return }
+    func stopRecording() {
+        guard let session = endRecording() else { return }
+        Task { @MainActor in
+            _ = await session.finish(.cancel)
+        }
+    }
 
-        isRecording = false
-
+    private func endRecording() -> HotKeyRecordingSession? {
+        guard let session else { return nil }
+        self.session = nil
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
@@ -50,16 +50,14 @@ final class HotKeyRecorder: ObservableObject {
         eventMonitor = nil
         globalEventMonitor = nil
 
-        if restorePrevious, let previousHotKey, !didRecordNewHotKey {
-            applyHotKeyHandler?(previousHotKey.keyCode, previousHotKey.modifiers)
-        }
+        return session
     }
 
-    private func handleKeyEvent(_ event: NSEvent) {
-        guard isRecording else { return }
+    private func handleKeyEvent(_ event: NSEvent, sessionID: UUID) {
+        guard session?.id == sessionID else { return }
 
         if event.type == .keyDown, event.keyCode == 53 { // Esc
-            stopRecording(restorePrevious: true)
+            stopRecording()
             return
         }
 
@@ -71,9 +69,14 @@ final class HotKeyRecorder: ObservableObject {
                 return
             }
 
-            didRecordNewHotKey = true
-            onRecorded?(keyCode, modifiers)
-            stopRecording(restorePrevious: false)
+            guard let session = endRecording() else { return }
+            isApplying = true
+            Task { @MainActor [weak self] in
+                let applied = await session.finish(.shortcut(keyCode: keyCode, modifiers: modifiers))
+                guard let self else { return }
+                await onApplied?(applied)
+                isApplying = false
+            }
         }
     }
 

@@ -19,19 +19,16 @@ struct SettingsView: View {
     @State private var isLoadingStats = false
     @State private var statsTask: Task<Void, Never>?
 
-    let unregisterHotKeyHandler: (() -> Void)?
-    let applyHotKeyHandler: ((UInt32, UInt32) -> Void)?
+    let beginHotKeyRecordingHandler: (@MainActor () -> HotKeyRecordingSession?)?
     let checkForUpdates: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     init(
-        unregisterHotKeyHandler: (() -> Void)? = nil,
-        applyHotKeyHandler: ((UInt32, UInt32) -> Void)? = nil,
+        beginHotKeyRecordingHandler: (@MainActor () -> HotKeyRecordingSession?)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
-        self.unregisterHotKeyHandler = unregisterHotKeyHandler
-        self.applyHotKeyHandler = applyHotKeyHandler
+        self.beginHotKeyRecordingHandler = beginHotKeyRecordingHandler
         self.checkForUpdates = checkForUpdates
         self.onDismiss = onDismiss
     }
@@ -123,8 +120,7 @@ struct SettingsView: View {
                 case .shortcuts:
                     ShortcutsSettingsPage(
                         tempSettings: settings,
-                        unregisterHotKeyHandler: unregisterHotKeyHandler,
-                        applyHotKeyHandler: applyHotKeyHandler
+                        beginHotKeyRecordingHandler: beginHotKeyRecordingHandler
                     )
                 case .clipboard:
                     ClipboardSettingsPage(tempSettings: settings)
