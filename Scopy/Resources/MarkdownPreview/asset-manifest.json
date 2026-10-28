@@ -3,8 +3,8 @@
   "renderer": {
     "path": "contrib/scopy-unified-renderer.iife.js",
     "sidecarPath": "contrib/scopy-unified-renderer.iife.js.sha256",
-    "sha256": "47c16c0e84b505b39025c0cdf3d419887966c2b896c6a72a30f05a9b2188db11",
-    "bytes": 918954,
+    "sha256": "c10a423e7ff2f5590a6bf11bd94e780280ff9d3c0c04590fc97ece9c6f7f0d4c",
+    "bytes": 918717,
     "build": {
       "entrypoint": "Tools/MarkdownRenderer/src/index.js",
       "format": "iife",

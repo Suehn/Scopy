@@ -1,29 +1,7 @@
-// One definition of "fence line" and "indentation" for every source-level rewrite that runs
-// before parsing and must leave code alone (heading repair, table code-span pipes, backslash
-// math). A fence may be indented by at most three columns (a tab counts as four), as in CommonMark:
-// four or more make the line indented code, not a fence.
+// Shared lexical boundaries for source repairs. Container nesting and paragraph ownership
+// remain the Markdown parser's responsibility; these helpers inspect physical source lines.
 
-const LEADING_BLANK = /^[\t\p{Zs}]+/u;
-
-/**
- * `{ marker, count }` when `line` is a fence marker line: at most three columns of leading blank,
- * then three or more of the same "`" or "~" character. `null` otherwise.
- */
-export function fencePrefix(line) {
-  if (leadingIndentSpaces(line) > 3) {
-    return null;
-  }
-  const trimmed = String(line || "").replace(LEADING_BLANK, "");
-  const marker = trimmed[0];
-  if (marker !== "`" && marker !== "~") {
-    return null;
-  }
-  let count = 0;
-  while (count < trimmed.length && trimmed[count] === marker) {
-    count += 1;
-  }
-  return count >= 3 ? { marker, count } : null;
-}
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)(?:\r?\n|\r|$)/;
 
 /** Leading indentation in columns; a tab counts as four columns. */
 export function leadingIndentSpaces(line) {
@@ -45,24 +23,24 @@ export function leadingIndentSpaces(line) {
 /**
  * Tracks fenced-code state across the lines of one document. `skip(line)` returns true when the
  * line must be left untouched: it is a fence marker line, or it lies inside an open fence. A fence
- * closes only on a marker of the same character with at least the opening run length.
+ * closes only on a marker of the same character with at least the opening run length and no
+ * trailing content. A backtick opener cannot contain backticks in its info string.
  */
 export function createFenceTracker() {
   let active = null;
   return {
+    get isOpen() { return active !== null; },
     skip(line) {
-      const fence = fencePrefix(line);
-      if (fence) {
-        if (active) {
-          if (active.marker === fence.marker && fence.count >= active.count) {
-            active = null;
-          }
-        } else {
-          active = fence;
+      const fence = FENCE_LINE.exec(line);
+      if (active) {
+        if (fence && fence[1][0] === active[0] && fence[1].length >= active.length && /^[\t ]*$/.test(fence[2])) {
+          active = null;
         }
         return true;
       }
-      return active !== null;
+      if (!fence || (fence[1][0] === "`" && fence[2].includes("`"))) return false;
+      active = fence[1];
+      return true;
     }
   };
 }
@@ -99,43 +77,57 @@ export function isWhitespaceUnit(unit) {
 }
 
 /**
- * Applies `transform` to the parts of one line outside backtick code spans. A run of N backticks
- * opens a span that only a run of exactly N backticks closes; an unclosed span runs to the end of
- * the line. Backtick runs and code-span bodies are copied unchanged.
+ * Finds paired backtick spans in source order. Only a run of exactly the opening length closes
+ * a span. Escapes affect openers, but have no meaning inside code. Unmatched runs remain text.
+ * Index each run's next equal-length run once, so many unmatched runs never rescan the suffix.
  */
+export function createInlineCodeScanner(line) {
+  const runs = [];
+  for (const match of line.matchAll(/`+/g)) {
+    const start = match.index;
+    let escapes = 0;
+    for (let i = start - 1; i >= 0 && line[i] === "\\"; i -= 1) escapes += 1;
+    runs.push({ start, end: start + match[0].length, escaped: escapes % 2 });
+  }
+  const next = new Map();
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    const run = runs[i];
+    run.close = next.get(run.end - run.start - run.escaped);
+    next.set(run.end - run.start, i);
+  }
+  let index = 0;
+  return {
+    // Callers advance `from` monotonically. A link/URL may own an earlier backtick, so only
+    // the caller decides where the next candidate can start; finding a span does not consume its body.
+    next(from) {
+      while (index < runs.length) {
+        const open = runs[index++];
+        if (open.start + open.escaped < from || open.close === undefined) continue;
+        const close = runs[open.close];
+        return {
+          start: open.start + open.escaped,
+          end: close.end,
+          bodyStart: open.end,
+          bodyEnd: close.start,
+          markerLength: open.end - open.start - open.escaped
+        };
+      }
+      return null;
+    }
+  };
+}
+
+/** Applies `transform` outside paired code spans within one source line. */
 export function processInlineCode(line, transform) {
-  if (line.indexOf("`") === -1) {
-    return transform(line);
-  }
   let result = "";
-  let inCode = false;
-  let openRun = 0;
-  let segmentStart = 0;
-  let i = 0;
-  while (i < line.length) {
-    if (line[i] !== "`") {
-      i += 1;
-      continue;
-    }
-    let j = i;
-    while (j < line.length && line[j] === "`") {
-      j += 1;
-    }
-    const segment = line.slice(segmentStart, i);
-    result += inCode ? segment : transform(segment);
-    result += line.slice(i, j);
-    if (!inCode) {
-      inCode = true;
-      openRun = j - i;
-    } else if (j - i === openRun) {
-      inCode = false;
-      openRun = 0;
-    }
-    i = j;
-    segmentStart = i;
+  let from = 0;
+  const code = createInlineCodeScanner(line);
+  for (let span = code.next(from); span; span = code.next(from)) {
+    result += transform(line.slice(from, span.start));
+    result += line.slice(span.start, span.end);
+    from = span.end;
   }
-  const tail = line.slice(segmentStart);
-  return result + (inCode ? tail : transform(tail));
+  return result + transform(line.slice(from));
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });

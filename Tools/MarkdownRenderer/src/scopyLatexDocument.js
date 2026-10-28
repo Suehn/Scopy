@@ -1,7 +1,7 @@
 import {
   closingBraceScan,
   createFenceTracker,
-  fencePrefix,
+  createInlineCodeScanner,
   isWhitespaceUnit,
   leadingIndentSpaces,
   processInlineCode,
@@ -15,9 +15,8 @@ import { createSourcePlaceholders } from "./scopySourcePlaceholders.js";
 // headings, itemize/enumerate become lists, quote/center/tabular/rule/label are converted or
 // dropped. Markdown syntax islands (code, links, images, reference definitions, autolinks, bare
 // URLs and file paths) are swapped for placeholders first so the line rewrite never touches them.
-// Ported byte-for-byte from the former Swift LaTeXDocumentNormalizer + MarkdownSyntaxProtector, except that a
-// tabular environment closes on its own end tag and an unclosed one stays verbatim (Swift let `tabular*` and an
-// unclosed table swallow the rest of the document); test/fixtures/scientific-repairs.json holds the goldens.
+// A tabular environment closes on its own end tag and an unclosed one stays verbatim.
+// test/fixtures/scientific-repairs.json pins the admitted scientific-text transformations.
 
 export function normalizeLatexDocument(source) {
   if (source === "") {
@@ -31,23 +30,15 @@ export function normalizeLatexDocument(source) {
 
 function protectSyntaxIslands(source, protect) {
   const output = [];
-  let activeFence = null;
+  const fences = createFenceTracker();
+  let codeLines = [];
   for (const line of splitCharacterLines(source)) {
-    const fence = fencePrefix(line);
-    if (fence) {
-      if (activeFence) {
-        activeFence.lines.push(line);
-        if (activeFence.marker === fence.marker && fence.count >= activeFence.count) {
-          output.push(protect(activeFence.lines.join("\n")));
-          activeFence = null;
-        }
-        continue;
+    if (fences.skip(line)) {
+      codeLines.push(line);
+      if (!fences.isOpen) {
+        output.push(protect(codeLines.join("\n")));
+        codeLines = [];
       }
-      activeFence = { marker: fence.marker, count: fence.count, lines: [line] };
-      continue;
-    }
-    if (activeFence) {
-      activeFence.lines.push(line);
       continue;
     }
     if (isReferenceDefinitionLine(line)) {
@@ -56,8 +47,8 @@ function protectSyntaxIslands(source, protect) {
     }
     output.push(protectInlineSyntax(line, protect));
   }
-  if (activeFence) {
-    output.push(protect(activeFence.lines.join("\n")));
+  if (codeLines.length > 0) {
+    output.push(protect(codeLines.join("\n")));
   }
   return output.join("\n");
 }
@@ -65,8 +56,11 @@ function protectSyntaxIslands(source, protect) {
 function protectInlineSyntax(line, protect) {
   let result = "";
   let i = 0;
+  const code = createInlineCodeScanner(line);
+  let span = code.next(0);
   while (i < line.length) {
-    const end = backtickSpanEnd(line, i)
+    if (span && span.start < i) span = code.next(i);
+    const end = (span?.start === i ? span.end : null)
       ?? autolinkSpanEnd(line, i)
       ?? linkOrImageSpanEnd(line, i)
       ?? urlSpanEnd(line, i)
@@ -93,33 +87,6 @@ function isReferenceDefinitionLine(line) {
   }
   const close = matchingClose(trimmed, 0, "[", "]");
   return close !== null && close + 1 < trimmed.length && trimmed[close + 1] === ":";
-}
-
-function backtickSpanEnd(line, index) {
-  if (line[index] !== "`") {
-    return null;
-  }
-  let runEnd = index;
-  while (runEnd < line.length && line[runEnd] === "`") {
-    runEnd += 1;
-  }
-  const runCount = runEnd - index;
-  let i = runEnd;
-  while (i < line.length) {
-    if (line[i] !== "`") {
-      i += 1;
-      continue;
-    }
-    let closeEnd = i;
-    while (closeEnd < line.length && line[closeEnd] === "`") {
-      closeEnd += 1;
-    }
-    if (closeEnd - i === runCount) {
-      return closeEnd;
-    }
-    i = closeEnd;
-  }
-  return null;
 }
 
 function autolinkSpanEnd(line, index) {

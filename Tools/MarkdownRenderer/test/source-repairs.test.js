@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { render } from "../src/render.js";
-import { fencePrefix, leadingIndentSpaces } from "../src/scopyLineScan.js";
 
 // Source-level repairs that used to run in Swift before the renderer saw the document.
 // These tests are the ported MarkdownATXHeadingNormalizer / MarkdownTableCodeSpanPipeNormalizer cases.
@@ -69,12 +68,37 @@ test("a fence indented four columns is indented code and does not hide the rest 
   assert.match(html, /data-math-source="x"/);
 });
 
-test("fence and indentation scanning share one definition", () => {
-  assert.deepEqual(fencePrefix("```swift"), { marker: "`", count: 3 });
-  assert.deepEqual(fencePrefix("   ~~~~"), { marker: "~", count: 4 });
-  assert.equal(fencePrefix("    ```"), null);
-  assert.equal(fencePrefix("\t```"), null);
-  assert.equal(fencePrefix("``"), null);
-  assert.equal(fencePrefix("﻿```"), null);
-  assert.equal(leadingIndentSpaces("\t  x"), 6);
+test("source repairs distinguish fence info from a closing fence across profiles", () => {
+  const body = "```not a closer\n~~~\n\\section{literal}\n#literal\n\\(x\\)\n\\textbf{literal}";
+  const source = `\`\`\`text\n${body}\n\`\`\`\n#after`;
+  for (const policy of [{}, { allowLatexDocumentNormalize: true, allowLatexInlineTextNormalize: true }]) {
+    const result = render(source, policy);
+    assert.equal(result.html, `<pre><code class="language-text">${body}\n</code></pre>\n<h1>after</h1>`);
+    assert.equal(result.metadata.mathCount, 0);
+  }
+});
+
+test("invalid fence openers leave subsequent repairs reachable", () => {
+  for (const opener of ["```lang`invalid", "\u00a0~~~", "\t~~~", "    ```"]) {
+    assert.match(render(`${opener}\n\n#after`).html, /<h1>after<\/h1>/);
+  }
+  assert.match(render("```text\r\n#literal\r\n``` \t\r\n#after").html, /#literal\n<\/code><\/pre>\n<h1>after<\/h1>/);
+});
+
+test("inline repairs share exact paired backtick spans and ignore escaped openers", () => {
+  const policy = { allowLatexDocumentNormalize: true, allowLatexInlineTextNormalize: true };
+  const body = "a ` \\(literal\\) ``` \\textbf{literal} \\label{literal}";
+  assert.equal(render(`\`\`${body}\`\``, policy).html, `<p><code>${body}</code></p>`);
+
+  for (const source of ["`` \\(x\\) ```", "\\` \\(x\\) `"]) {
+    assert.equal(render(source, policy).metadata.mathCount, 1);
+  }
+  assert.equal(render("`orphan \\textbf{actual}", policy).html, "<p>`orphan <strong>actual</strong></p>");
+  const escaped = render("\\``\\(literal\\)` after \\(x\\)", policy);
+  assert.match(escaped.html, /<p>`<code>\\\(literal\\\)<\/code>/);
+  assert.equal(escaped.metadata.mathCount, 1);
+
+  const linked = render("[label \\(literal\\)](https://example.com/`path) `\\(code\\)` then \\(x\\)", policy);
+  assert.match(linked.html, /<code>\\\(code\\\)<\/code>/);
+  assert.equal(linked.metadata.mathCount, 1);
 });

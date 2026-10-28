@@ -15,8 +15,7 @@ import { createSourcePlaceholders } from "./scopySourcePlaceholders.js";
 // outside math become Markdown emphasis; each math region is itself normalized on the way
 // (JSON-style `\\cmd`, `_` inside \text{}, the first \label{}, `={..|..}` set braces, and `&`/`\`
 // inline math upgraded to an aligned block). PDF/Word `$` artifacts are repaired first.
-// Ported byte-for-byte from the former Swift MathProtector + LaTeXInlineTextNormalizer;
-// test/fixtures/scientific-repairs.json holds the Swift goldens.
+// test/fixtures/scientific-repairs.json pins the admitted scientific-text transformations.
 
 const MAX_INPUT_LENGTH = 200_000;
 const MAX_INLINE_MATH_LENGTH = 2_000;

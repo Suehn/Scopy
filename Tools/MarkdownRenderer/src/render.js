@@ -21,7 +21,7 @@ import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { repairATXHeadings } from "./scopyATXHeadings.js";
 import { normalizeLatexDocument } from "./scopyLatexDocument.js";
 import { normalizeLatexInline } from "./scopyLatexInline.js";
-import { createFenceTracker, leadingIndentSpaces } from "./scopyLineScan.js";
+import { createFenceTracker, createInlineCodeScanner, leadingIndentSpaces } from "./scopyLineScan.js";
 import { remarkScopyImageGroups } from "./remarkScopyImageGroups.js";
 import { remarkScopyPublicCards } from "./remarkScopyPublicCards.js";
 import { remarkScopyLinkEnrichment } from "./remarkScopyLinkEnrichment.js";
@@ -559,59 +559,21 @@ function isTableContentLine(line) {
 
 function protectCodeSpansInLine(line) {
   let result = "";
-  let index = 0;
-  while (index < line.length) {
-    if (line[index] !== "`") {
-      result += line[index];
-      index += 1;
+  let from = 0;
+  const code = createInlineCodeScanner(line);
+  for (let span = code.next(0); span; span = code.next(from)) {
+    // Fence-marker examples remain table cell text under the existing source-repair policy.
+    if (span.markerLength > 2) {
+      result += line.slice(from, span.end);
+      from = span.end;
       continue;
     }
-
-    const openEnd = backtickRunEnd(line, index);
-    const runCount = openEnd - index;
-    if (runCount > 2) {
-      result += line.slice(index, openEnd);
-      index = openEnd;
-      continue;
-    }
-    const closeStart = matchingBacktickRunStart(line, openEnd, runCount);
-    if (closeStart === -1) {
-      result += line[index];
-      index += 1;
-      continue;
-    }
-
-    const closeEnd = closeStart + runCount;
-    result += line.slice(index, openEnd);
-    result += escapeUnescapedPipes(line.slice(openEnd, closeStart));
-    result += line.slice(closeStart, closeEnd);
-    index = closeEnd;
+    result += line.slice(from, span.bodyStart);
+    result += escapeUnescapedPipes(line.slice(span.bodyStart, span.bodyEnd));
+    result += line.slice(span.bodyEnd, span.end);
+    from = span.end;
   }
-  return result;
-}
-
-function backtickRunEnd(line, start) {
-  let index = start;
-  while (index < line.length && line[index] === "`") {
-    index += 1;
-  }
-  return index;
-}
-
-function matchingBacktickRunStart(line, start, runCount) {
-  let index = start;
-  while (index < line.length) {
-    if (line[index] !== "`") {
-      index += 1;
-      continue;
-    }
-    const runEnd = backtickRunEnd(line, index);
-    if (runEnd - index === runCount) {
-      return index;
-    }
-    index = runEnd;
-  }
-  return -1;
+  return result + line.slice(from);
 }
 
 function escapeUnescapedPipes(text) {

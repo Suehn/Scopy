@@ -1,4 +1,4 @@
-import { createFenceTracker } from "./scopyLineScan.js";
+import { createFenceTracker, createInlineCodeScanner } from "./scopyLineScan.js";
 
 export function preprocessBackslashMath(source) {
   const text = String(source || "");
@@ -59,21 +59,21 @@ function preprocessInline(line) {
   let i = 0;
   let out = "";
   let mathCount = 0;
+  const code = createInlineCodeScanner(line);
+  let span = code.next(0);
 
   while (i < line.length) {
+    if (span && span.start < i) span = code.next(i);
+    if (span?.start === i) {
+      out += line.slice(i, span.end);
+      i = span.end;
+      continue;
+    }
+
     if (line[i] === "\\" && line[i + 1] === "\\") {
       out += "\\\\";
       i += 2;
       continue;
-    }
-
-    if (line[i] === "`") {
-      const end = findClosingBacktickRun(line, i);
-      if (end !== -1) {
-        out += line.slice(i, end);
-        i = end;
-        continue;
-      }
     }
 
     const linkEnd = findMarkdownLinkEnd(line, i);
@@ -134,16 +134,6 @@ function escapeLiteralDelimiter(line, delimiter) {
     return source;
   }
   return `${source.slice(0, index)}\\\\${delimiter}${source.slice(index + 2)}`;
-}
-
-function findClosingBacktickRun(line, start) {
-  let runLength = 0;
-  while (line[start + runLength] === "`") {
-    runLength += 1;
-  }
-  const needle = "`".repeat(runLength);
-  const close = line.indexOf(needle, start + runLength);
-  return close === -1 ? -1 : close + runLength;
 }
 
 function findMarkdownLinkEnd(line, start) {
