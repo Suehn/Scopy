@@ -216,10 +216,11 @@ final class ClipboardBackendLifecycleTests: XCTestCase {
         XCTAssertEqual(page.mutationSeq, gapSequence)
         let captured = try XCTUnwrap(page.items.first { $0.plainText.hasSuffix(sentinel) })
         XCTAssertEqual(captured.plainText.utf8.count, 8_650_772)
-        let search = try await backend.search(query: SearchRequest(
-            query: "active oversized capture sentinel", mode: .exact, limit: 10
-        ))
-        XCTAssertEqual(search.hits.map(\.item.id), [captured.id])
+        // Verify the search snapshot after a journal gap without timing giant-text match evidence.
+        let searchRequest = SearchRequest(query: "", mode: .exact, typeFilter: .text, limit: 10)
+        let search = try await backend.search(query: searchRequest)
+        XCTAssertEqual(Set(search.hits.map(\.item.id)), [fixture.itemID, captured.id])
+        XCTAssertEqual(search.total, 2)
         XCTAssertEqual(search.mutationSeq, page.mutationSeq)
 
         try await backend.clearAll()
@@ -234,10 +235,9 @@ final class ClipboardBackendLifecycleTests: XCTestCase {
         let emptyPage = try await backend.fetchHistoryPage(limit: 10, after: nil)
         XCTAssertTrue(emptyPage.items.isEmpty)
         XCTAssertEqual(emptyPage.total, 0)
-        let emptySearch = try await backend.search(query: SearchRequest(
-            query: "active oversized capture sentinel", mode: .exact, limit: 10
-        ))
+        let emptySearch = try await backend.search(query: searchRequest)
         XCTAssertTrue(emptySearch.hits.isEmpty)
+        XCTAssertEqual(emptySearch.total, 0)
         XCTAssertEqual(emptySearch.mutationSeq, emptyPage.mutationSeq)
     }
 
