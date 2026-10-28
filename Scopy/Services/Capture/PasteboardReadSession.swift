@@ -30,6 +30,9 @@ final class PasteboardReadSession {
     /// Detection order matters: a copied file carries both a file URL and its path as plain
     /// text, so file URLs are checked first.
     func read() async -> Outcome {
+        // Clearing and filling a pasteboard can share one change count. An empty type
+        // snapshot cannot settle that count before its representations arrive.
+        guard !types.isEmpty else { return .changedDuringRead }
         let appBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         func verified(_ rawData: ClipboardMonitor.RawClipboardData) -> Outcome {
             pasteboard.changeCount == changeCount ? .content(rawData) : .changedDuringRead

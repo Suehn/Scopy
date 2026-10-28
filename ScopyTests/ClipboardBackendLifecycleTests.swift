@@ -93,6 +93,51 @@ final class ClipboardBackendLifecycleTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: spool.path).isEmpty)
     }
 
+    func testCommitPublisherComputesFileSizeFromPayloadFreeCaptureSummary() async throws {
+        let fixture = try await makeHistoryFixture(monitorPollingInterval: 0.1)
+        let fileURL = fixture.directory.appendingPathComponent("captured-file.txt")
+        let fileData = Data("file metadata must survive payload-free publication".utf8)
+        try fileData.write(to: fileURL)
+        let inserted = expectation(description: "file capture published")
+        let metadata = expectation(description: "computed file size published")
+        var capturedID: UUID?
+        let observer = Task {
+            for await event in fixture.backend.eventStream {
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, let kind) = committed.change,
+                      let item = items.first(where: { $0.type == .file && $0.plainText == fileURL.path }) else {
+                    continue
+                }
+                switch kind {
+                case .inserted:
+                    capturedID = item.id
+                    XCTAssertNil(item.fileSizeBytes)
+                    inserted.fulfill()
+                case .metadata:
+                    XCTAssertEqual(item.id, capturedID)
+                    XCTAssertEqual(item.fileSizeBytes, fileData.count)
+                    metadata.fulfill()
+                    return
+                default:
+                    continue
+                }
+            }
+        }
+        defer { observer.cancel() }
+        fixture.pasteboard.clearContents()
+        XCTAssertTrue(fixture.pasteboard.writeObjects([fileURL as NSURL]))
+        await fulfillment(of: [inserted, metadata], timeout: 3, enforceOrder: true)
+        await fixture.backend.stop()
+
+        let verifier = StorageService(databasePath: fixture.directory.appendingPathComponent("clipboard.db").path)
+        addTeardownBlock { await verifier.close() }
+        try await verifier.open()
+        let stored = try await verifier.findByID(XCTUnwrap(capturedID))
+        let item = try XCTUnwrap(stored)
+        XCTAssertNotNil(item.rawData, "The captured file must have inline URL bytes that the journal omits")
+        XCTAssertEqual(item.fileSizeBytes, fileData.count)
+    }
+
     func testCommitPublisherPreservesTransactionValuesAndClearWaitsForPublication() async throws {
         let fixture = try await makeHistoryFixture()
         let gate = BackendLifecycleGate()

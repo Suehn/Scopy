@@ -1261,7 +1261,7 @@ actor SQLiteClipboardRepository {
                     _ = try stmt.step()
                 }
             case .fileSizeBytes(let expected, let fileSizeBytes):
-                guard Self.hasSamePayload(current, as: expected) else { return nil }
+                guard Self.hasSameFileReference(current, as: expected) else { return nil }
                 guard current.fileSizeBytes != fileSizeBytes else { return nil }
                 kind = .metadata
                 do {
@@ -1280,6 +1280,20 @@ actor SQLiteClipboardRepository {
             return updatedItem.map { .upserted($0, kind: kind) }
         }
         return updatedItem
+    }
+
+    /// File-size work reads the referenced paths, not serialized payload bytes omitted by summaries.
+    private static func hasSameFileReference(
+        _ lhs: ClipboardStoredItem,
+        as rhs: ClipboardStoredItem
+    ) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.type == rhs.type &&
+            lhs.contentHash == rhs.contentHash &&
+            lhs.plainText == rhs.plainText &&
+            lhs.sizeBytes == rhs.sizeBytes &&
+            lhs.fileSizeBytes == rhs.fileSizeBytes &&
+            lhs.storageRef == rhs.storageRef
     }
 
     private static func hasSamePayload(
