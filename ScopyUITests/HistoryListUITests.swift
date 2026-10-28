@@ -481,12 +481,12 @@ final class HistoryListUITests: XCTestCase {
            let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
             try updatedData.write(to: URL(fileURLWithPath: profilePath), options: .atomic)
         }
-        let frame = json?["frame_ms"] as? [String: Any]
-        let count = frame?["count"] as? Int ?? 0
-        XCTAssertGreaterThan(count, 0, "Expected frame samples in profile output")
-        let activeFrame = json?["active_frame_ms"] as? [String: Any]
-        let activeCount = activeFrame?["count"] as? Int ?? 0
-        XCTAssertGreaterThan(activeCount, 0, "Expected active scrolling frame samples in profile output")
+        let callbacks = json?["animation_callback_interval_ms"] as? [String: Any]
+        let count = callbacks?["count"] as? Int ?? 0
+        XCTAssertGreaterThan(count, 0, "Expected animation callback samples in profile output")
+        let activeCallbacks = json?["active_animation_callback_interval_ms"] as? [String: Any]
+        let activeCount = activeCallbacks?["count"] as? Int ?? 0
+        XCTAssertGreaterThan(activeCount, 0, "Expected active scrolling callback samples in profile output")
 
         if let searchQuery {
             let workload = json?["fixed_workload"] as? [String: Any]

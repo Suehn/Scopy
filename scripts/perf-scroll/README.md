@@ -1,5 +1,8 @@
 # Real-input scroll profiling
 
+For frozen Release A/A + ABBA comparisons, content-private observers and input
+isolation requirements, see [COMPARISON.md](COMPARISON.md).
+
 `profile_scroll.py` launches a Scopy build with a copy of the real snapshot database (`perf-db/clipboard.db`), opens the
 real history panel (`SCOPY_PROFILE_OPEN_PANEL=1`), and drives the list either with **real scroll-wheel input**
 (`--mode wheel`: pixel scroll-wheel `CGEvent`s posted at the panel; the terminal running it must be trusted under
@@ -76,8 +79,8 @@ list plus an Accessibility probe only resolves to ~17 ms. Note that closing the 
 opening it although it does almost no work, so most of that number is synthetic-event dispatch, not app time.
 
 `build/hoverstall` is the main-thread stall meter: it moves the pointer onto a row (optionally stepping down further
-rows) and issues a cheap Accessibility query every ~3 ms. Those queries are answered on the app's main thread, so a
-slow answer measures exactly how long the main thread was blocked. With thousands of rows loaded, answering the query
+rows) and issues a cheap Accessibility query every ~3 ms. The round trip includes app work, IPC, scheduling and the query itself; it is an
+observed responsiveness cost, not an exact main-thread blocking interval. With thousands of rows loaded, answering the query
 itself costs main-thread time after each List change (about 100 ms at 3,380 rows), so compare its readings like with
 like. It prints p50/p95/max and every stall over 50 ms
 with its offset, which is what attributes hover-preview and search-typing hitches.

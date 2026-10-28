@@ -389,13 +389,16 @@ final class ScrollPerformanceProfileTests: XCTestCase {
             accuracy: 0.0001
         )
 
-        let legacyFrameStats = try XCTUnwrap(payload["frame_ms"] as? [String: Any])
-        let legacyActiveFrameStats = try XCTUnwrap(payload["active_frame_ms"] as? [String: Any])
-        XCTAssertEqual(legacyFrameStats["p95"] as? Double, callbackStats["p95"] as? Double)
-        XCTAssertEqual(payload["expected_frame_ms"] as? Double, 10)
-        XCTAssertEqual(payload["drop_ratio"] as? Double ?? 0, 2.0 / 3.0, accuracy: 0.0001)
-        XCTAssertEqual(legacyActiveFrameStats["count"] as? Int, 2)
-        XCTAssertEqual(payload["active_drop_ratio"] as? Double ?? 0, 1, accuracy: 0.0001)
+        XCTAssertEqual(
+            Set(payload.keys),
+            Set([
+                ScrollPerformanceProfile.MetricName.animationCallbackInterval,
+                ScrollPerformanceProfile.MetricName.expectedAnimationCallbackInterval,
+                ScrollPerformanceProfile.MetricName.animationCallbackOverThresholdRatio,
+                ScrollPerformanceProfile.MetricName.activeAnimationCallbackInterval,
+                ScrollPerformanceProfile.MetricName.activeAnimationCallbackOverThresholdRatio
+            ])
+        )
     }
 
     func testAsynchronouslyQueuedTimingEventKeepsOriginalCompletionWindow() async throws {
@@ -434,45 +437,6 @@ final class ScrollPerformanceProfileTests: XCTestCase {
         XCTAssertEqual(attribution["long_callback_count"] as? Int, 1)
         XCTAssertEqual(attribution["timing_event_count"] as? Int, 1)
         XCTAssertEqual(attribution["attributed_union_ms"] as? Double ?? 0, 10, accuracy: 0.1)
-    }
-
-    func testLegacyLongFrameAliasesPreserveExistingScriptContract() throws {
-        let base = Date().timeIntervalSinceReferenceDate
-        let canonical = ScrollPerformanceProfile.buildLongAnimationCallbackAttribution(
-            callbackSamples: [
-                ScrollPerformanceProfile.AnimationCallbackSample(
-                    index: 4,
-                    start: base,
-                    end: base + 0.040,
-                    intervalMs: 40,
-                    offsetDelta: 20,
-                    scrollSpeed: 500,
-                    isScrolling: true
-                )
-            ],
-            timingEvents: [
-                ScrollPerformanceProfile.TimingEvent(
-                    name: "row.body_ms",
-                    start: base + 0.010,
-                    end: base + 0.020,
-                    durationMs: 10
-                )
-            ],
-            expectedCallbackIntervalMs: 16,
-            thresholdMultiplier: 1.5,
-            maxCallbackDetails: 1,
-            timelineStart: base
-        )
-        let legacy = ScrollPerformanceProfile.legacyLongFrameAttribution(from: canonical)
-
-        XCTAssertEqual(legacy["long_frame_count"] as? Int, 1)
-        XCTAssertEqual(legacy["metric_event_count"] as? Int, 1)
-        XCTAssertEqual(legacy["total_frame_ms"] as? Double ?? 0, 40, accuracy: 0.001)
-
-        let topMetrics = try XCTUnwrap(legacy["top_metrics"] as? [[String: Any]])
-        XCTAssertEqual(topMetrics.first?["frame_count"] as? Int, 1)
-        let frames = try XCTUnwrap(legacy["frames"] as? [[String: Any]])
-        XCTAssertEqual(frames.first?["index"] as? Int, 4)
     }
 
     func testLongCallbackAttributionUsesOverlappingTimingWindows() throws {

@@ -1,5 +1,6 @@
 import AppKit
 import ObjectiveC
+import ScopyKit
 
 /// Skips redundant `NSCursor.set` bursts.
 ///
@@ -42,7 +43,7 @@ enum ScrollCursorSetCoalescer {
         if traceEnabled {
             if redundant { skipped += 1 } else { performed += 1 }
             if (skipped + performed) % 120 == 0 {
-                NSLog("[cursor-set] performed=%d skipped=%d", performed, skipped)
+                ScopyLog.ui.info("[cursor-set] performed=\(performed, privacy: .public) skipped=\(skipped, privacy: .public)")
             }
         }
         return redundant

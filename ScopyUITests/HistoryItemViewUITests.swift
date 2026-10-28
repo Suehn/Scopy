@@ -374,7 +374,7 @@ final class HistoryItemViewUITests: XCTestCase {
 
         let data = try Data(contentsOf: URL(fileURLWithPath: profilePath))
         var json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
-        let buckets = json?["buckets_ms"] as? [String: Any] ?? [:]
+        let buckets = json?["timing_buckets_ms"] as? [String: Any] ?? [:]
         let bucketCounts = Dictionary(uniqueKeysWithValues: requiredBuckets.map { key in
             (key, Self.metricBucketCount(buckets[key]))
         })
@@ -395,9 +395,9 @@ final class HistoryItemViewUITests: XCTestCase {
         }
 
         XCTAssertTrue(missingBuckets.isEmpty, "Missing hover profile buckets: \(missingBuckets)")
-        let frame = json?["frame_ms"] as? [String: Any]
-        let count = frame?["count"] as? Int ?? 0
-        XCTAssertGreaterThan(count, 0, "Expected frame samples in hover profile output")
+        let callbacks = json?["animation_callback_interval_ms"] as? [String: Any]
+        let count = callbacks?["count"] as? Int ?? 0
+        XCTAssertGreaterThan(count, 0, "Expected animation callback samples in hover profile output")
         let scenarioName = json?["profile_scenario"] as? String ?? ""
         XCTAssertEqual(scenarioName, scenario, "Profile scenario mismatch")
     }

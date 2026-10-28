@@ -101,7 +101,7 @@ for i in range(1, a.attempts+1):
         ok=bool(result)
     elif result and os.path.exists(profile_json):
         d=json.load(open(profile_json))
-        ok=(d['active_frame_ms']['count'] > 0) or (a.mode=='fixed' and bool((d.get('fixed_workload') or {}).get('completed')))
+        ok=(d['active_animation_callback_interval_ms']['count'] > 0) or (a.mode=='fixed' and bool((d.get('fixed_workload') or {}).get('completed')))
     if ok: break
     print(f'attempt {i}: the list did not scroll; retrying', flush=True)
 
@@ -110,10 +110,13 @@ if result:
     print(result['cpu'])
     for l in result['applog'][-3:]: print('  app:', l)
 if os.path.exists(profile_json):
-    d=json.load(open(profile_json)); af=d['active_frame_ms']; fm=d['frame_ms']; rl=d['main_runloop_active_ms']
-    print("app profiler: active", {k: round(af.get(k,0),2) for k in ("count","p50","p95","max")}, "| all callbacks", fm.get("count"), "p95", round(fm.get("p95",0),2), "max", round(fm.get("max",0),1), "| active drop", round(d.get("active_drop_ratio") or 0,3), "| runloop busy ms", round(rl.get("total_ms",0)), "p95", round(rl.get("p95",0),2), "max", round(rl.get("max",0),1), "of", round(d.get('duration_seconds') or 0,1))
+    d=json.load(open(profile_json)); af=d['active_animation_callback_interval_ms']; fm=d['animation_callback_interval_ms']; rl=d['main_runloop_active_ms']
+    print("app profiler: active", {k: round(af.get(k,0),2) for k in ("count","p50","p95","max")}, "| all callbacks", fm.get("count"), "p95", round(fm.get("p95",0),2), "max", round(fm.get("max",0),1), "| active callback over-threshold ratio", round(d.get("active_animation_callback_over_threshold_ratio") or 0,3), "| runloop busy ms", round(rl.get("total_ms",0)), "p95", round(rl.get("p95",0),2), "max", round(rl.get("max",0),1), "of", round(d.get('duration_seconds') or 0,1))
     sp=d.get('scroll_speed_px_per_sec') or {}; print(f"scroll speed px/s: avg {sp.get('avg',0):.0f} (n={sp.get('count',0)}) | loaded {(d.get('fixed_workload') or {}).get('loaded_count')}")
     fw=d.get('fixed_workload')
     if fw and fw.get('enabled'): print('fixed workload:', {k:fw.get(k) for k in ('completed','observed_path_px','loaded_count','total_count')})
 else: print('no profile json written')
 print('output dir', out)
+if not ok:
+    print('FAIL: no attempt proved the declared scroll workload')
+    sys.exit(2)

@@ -1,11 +1,11 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
-// Measures main-thread stalls caused by pointing at history rows.
+// Measures AX responsiveness while pointing at history rows.
 // usage: hoverstall <pid> <x> <y> [--seconds 4] [--move N] [--step 40]
 // Moves the pointer onto a row (optionally stepping down N further rows) and, throughout, issues a cheap
-// constant-cost Accessibility query every ~5 ms. Those queries are answered on the app's main thread, so a
-// slow answer means the main thread was blocked that long. Prints every stall over 50 ms with its offset.
+// Accessibility query every ~3 ms. Its round trip includes IPC, scheduling and probe work; it is not an
+// exact main-thread blocking interval. Prints slow round trips over 50 ms with their offsets.
 let args = CommandLine.arguments
 guard args.count >= 4, let pid = Int32(args[1]), let x = Double(args[2]), let y = Double(args[3]) else {
     print("usage: hoverstall <pid> <x> <y>"); exit(64)
@@ -47,6 +47,6 @@ while CFAbsoluteTimeGetCurrent() - t0 < seconds {
 }
 let sorted = samples.sorted()
 func pct(_ q: Double) -> Double { sorted.isEmpty ? .nan : sorted[min(sorted.count - 1, Int(Double(sorted.count) * q))] }
-print(String(format: "probes=%d p50=%.1f p95=%.1f max=%.1f stalls>50ms=%d blocked_ms=%.0f",
+print(String(format: "probes=%d p50=%.1f p95=%.1f max=%.1f roundtrips>50ms=%d slow_roundtrip_ms=%.0f",
              samples.count, pct(0.5), pct(0.95), sorted.last ?? .nan, stalls.count, stalls.reduce(0) { $0 + $1.1 }))
-for (at, ms) in stalls.prefix(12) { print(String(format: "  stall at %.0f ms: %.0f ms", at, ms)) }
+for (at, ms) in stalls.prefix(12) { print(String(format: "  round trip at %.0f ms: %.0f ms", at, ms)) }

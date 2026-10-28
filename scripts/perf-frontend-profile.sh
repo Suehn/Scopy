@@ -43,7 +43,7 @@ Options:
   --repeats <n>          Repeats (default: $REPEATS)
   --compare <file>       Prior frontend-scroll-profile-summary.json used as the Baseline column
   --duration <sec>       Profile duration per scenario (default: $DURATION_SEC)
-  --min-samples <n>      Minimum frame samples (default: $MIN_SAMPLES)
+  --min-samples <n>      Minimum animation callback samples (default: $MIN_SAMPLES)
   --skip-setup           Skip xcodegen regenerate check
   --include-hover        Also run hover-preview profile smoke and require hover buckets
   -h, --help             Show this help
@@ -360,31 +360,35 @@ for variant in variants:
         except Exception:
             continue
         scenario = payload.get("profile_scenario") or os.path.splitext(name)[0]
-        frame = payload.get("frame_ms", {})
-        active_frame = payload.get("active_frame_ms", {})
+        callback = payload.get("animation_callback_interval_ms", {})
+        active_animation_callback = payload.get("active_animation_callback_interval_ms", {})
+        if not isinstance(callback.get("count"), (int, float)) or callback["count"] <= 0:
+            raise ValueError(f"Missing animation callback evidence in {path}")
+        if not isinstance(active_animation_callback.get("count"), (int, float)) or active_animation_callback["count"] <= 0:
+            raise ValueError(f"Missing active animation callback evidence in {path}")
         main_runloop = payload.get("main_runloop_active_ms", {})
         accessibility_tree = payload.get("accessibility_tree") or {}
         accessibility_view_tree = accessibility_tree.get("view_tree") or {}
         xctest_accessibility_query = payload.get("xctest_accessibility_query") or {}
-        buckets = payload.get("buckets_ms", {})
+        buckets = payload.get("timing_buckets_ms", {})
         hover_preview_evidence = payload.get("hover_preview_evidence") or {}
         fixed_workload = payload.get("fixed_workload") or {}
         records[variant][scenario].append({
             "path": path,
-            "frame_p95": frame.get("p95"),
-            "frame_avg": frame.get("avg"),
-            "frame_count": frame.get("count"),
-            "drop_ratio": payload.get("drop_ratio"),
-            "active_frame_p95": active_frame.get("p95"),
-            "active_frame_avg": active_frame.get("avg"),
-            "active_frame_count": active_frame.get("count"),
-            "active_drop_ratio": payload.get("active_drop_ratio"),
+            "animation_callback_p95": callback.get("p95"),
+            "animation_callback_avg": callback.get("avg"),
+            "callback_count": callback.get("count"),
+            "animation_callback_over_threshold_ratio": payload.get("animation_callback_over_threshold_ratio"),
+            "active_animation_callback_p95": active_animation_callback.get("p95"),
+            "active_animation_callback_avg": active_animation_callback.get("avg"),
+            "active_animation_callback_count": active_animation_callback.get("count"),
+            "active_animation_callback_over_threshold_ratio": payload.get("active_animation_callback_over_threshold_ratio"),
             "main_runloop_active_p95": main_runloop.get("p95"),
             "main_runloop_active_avg": main_runloop.get("avg"),
             "main_runloop_active_count": main_runloop.get("count"),
             "scroll_sample_health": payload.get("scroll_sample_health") or {},
-            "long_frame_attribution": payload.get("long_frame_attribution") or {},
-            "main_thread_long_frame_attribution": payload.get("main_thread_long_frame_attribution") or {},
+            "long_animation_callback_attribution": payload.get("long_animation_callback_attribution") or {},
+            "main_thread_long_animation_callback_attribution": payload.get("main_thread_long_animation_callback_attribution") or {},
             "accessibility_snapshot_ms": accessibility_tree.get("snapshot_ms"),
             "accessibility_ax_query_ms": accessibility_tree.get("ax_query_ms"),
             "accessibility_ax_children_count": accessibility_tree.get("ax_children_count"),
@@ -413,18 +417,18 @@ def scalar_summary(entries, key):
         "max": max_v(vals),
     }
 
-def summarize_long_frame_attribution(entries, field="long_frame_attribution"):
+def summarize_long_animation_callback_attribution(entries, field="long_animation_callback_attribution"):
     by_metric = {}
-    long_frame_count = 0
-    metric_event_count = 0
-    total_frame_ms = 0.0
+    long_callback_count = 0
+    timing_event_count = 0
+    total_callback_interval_ms = 0.0
     attributed_union_ms = 0.0
     unattributed_ms = 0.0
     for entry in entries:
         attribution = entry.get(field) or {}
-        long_frame_count += int(attribution.get("long_frame_count") or 0)
-        metric_event_count += int(attribution.get("metric_event_count") or 0)
-        total_frame_ms += float(attribution.get("total_frame_ms") or 0)
+        long_callback_count += int(attribution.get("long_callback_count") or 0)
+        timing_event_count += int(attribution.get("timing_event_count") or 0)
+        total_callback_interval_ms += float(attribution.get("total_callback_interval_ms") or 0)
         attributed_union_ms += float(attribution.get("attributed_union_ms") or 0)
         unattributed_ms += float(attribution.get("unattributed_ms") or 0)
         for metric in attribution.get("top_metrics") or []:
@@ -434,13 +438,13 @@ def summarize_long_frame_attribution(entries, field="long_frame_attribution"):
             aggregate = by_metric.setdefault(name, {
                 "name": name,
                 "count": 0,
-                "frame_count": 0,
+                "callback_count": 0,
                 "total_ms": 0.0,
                 "overlap_ms": 0.0,
                 "max_ms": 0.0,
             })
             aggregate["count"] += int(metric.get("count") or 0)
-            aggregate["frame_count"] += int(metric.get("frame_count") or 0)
+            aggregate["callback_count"] += int(metric.get("callback_count") or 0)
             aggregate["total_ms"] += float(metric.get("total_ms") or 0)
             aggregate["overlap_ms"] += float(metric.get("overlap_ms") or 0)
             aggregate["max_ms"] = max(aggregate["max_ms"], float(metric.get("max_ms") or 0))
@@ -451,12 +455,12 @@ def summarize_long_frame_attribution(entries, field="long_frame_attribution"):
         reverse=True,
     )[:8]
     return {
-        "long_frame_count": long_frame_count,
-        "metric_event_count": metric_event_count,
-        "total_frame_ms": total_frame_ms,
+        "long_callback_count": long_callback_count,
+        "timing_event_count": timing_event_count,
+        "total_callback_interval_ms": total_callback_interval_ms,
         "attributed_union_ms": attributed_union_ms,
         "unattributed_ms": unattributed_ms,
-        "attribution_coverage_ratio": (attributed_union_ms / total_frame_ms) if total_frame_ms else None,
+        "attribution_coverage_ratio": (attributed_union_ms / total_callback_interval_ms) if total_callback_interval_ms else None,
         "top_metrics": top_metrics,
     }
 
@@ -526,14 +530,14 @@ summary = {
 for variant in variants:
     scenario_map = {}
     for scenario, entries in sorted(records[variant].items()):
-        frame_p95 = [e["frame_p95"] for e in entries if isinstance(e["frame_p95"], (int, float))]
-        frame_avg = [e["frame_avg"] for e in entries if isinstance(e["frame_avg"], (int, float))]
-        frame_count = [e["frame_count"] for e in entries if isinstance(e["frame_count"], (int, float))]
-        drop_ratio = [e["drop_ratio"] for e in entries if isinstance(e["drop_ratio"], (int, float))]
-        active_frame_p95 = [e["active_frame_p95"] for e in entries if isinstance(e["active_frame_p95"], (int, float))]
-        active_frame_avg = [e["active_frame_avg"] for e in entries if isinstance(e["active_frame_avg"], (int, float))]
-        active_frame_count = [e["active_frame_count"] for e in entries if isinstance(e["active_frame_count"], (int, float))]
-        active_drop_ratio = [e["active_drop_ratio"] for e in entries if isinstance(e["active_drop_ratio"], (int, float))]
+        animation_callback_p95 = [e["animation_callback_p95"] for e in entries if isinstance(e["animation_callback_p95"], (int, float))]
+        animation_callback_avg = [e["animation_callback_avg"] for e in entries if isinstance(e["animation_callback_avg"], (int, float))]
+        callback_count = [e["callback_count"] for e in entries if isinstance(e["callback_count"], (int, float))]
+        animation_callback_over_threshold_ratio = [e["animation_callback_over_threshold_ratio"] for e in entries if isinstance(e["animation_callback_over_threshold_ratio"], (int, float))]
+        active_animation_callback_p95 = [e["active_animation_callback_p95"] for e in entries if isinstance(e["active_animation_callback_p95"], (int, float))]
+        active_animation_callback_avg = [e["active_animation_callback_avg"] for e in entries if isinstance(e["active_animation_callback_avg"], (int, float))]
+        active_animation_callback_count = [e["active_animation_callback_count"] for e in entries if isinstance(e["active_animation_callback_count"], (int, float))]
+        active_animation_callback_over_threshold_ratio = [e["active_animation_callback_over_threshold_ratio"] for e in entries if isinstance(e["active_animation_callback_over_threshold_ratio"], (int, float))]
         main_runloop_active_p95 = [e["main_runloop_active_p95"] for e in entries if isinstance(e["main_runloop_active_p95"], (int, float))]
         main_runloop_active_avg = [e["main_runloop_active_avg"] for e in entries if isinstance(e["main_runloop_active_avg"], (int, float))]
         main_runloop_active_count = [e["main_runloop_active_count"] for e in entries if isinstance(e["main_runloop_active_count"], (int, float))]
@@ -551,53 +555,53 @@ for variant in variants:
         scenario_map[scenario] = {
             "runs": len(entries),
             "source_files": [e["path"] for e in entries],
-            "frame_p95_ms": {
-                "median": median(frame_p95),
-                "mean": mean(frame_p95),
-                "min": min_v(frame_p95),
-                "max": max_v(frame_p95),
+            "animation_callback_p95_ms": {
+                "median": median(animation_callback_p95),
+                "mean": mean(animation_callback_p95),
+                "min": min_v(animation_callback_p95),
+                "max": max_v(animation_callback_p95),
             },
-            "frame_avg_ms": {
-                "median": median(frame_avg),
-                "mean": mean(frame_avg),
-                "min": min_v(frame_avg),
-                "max": max_v(frame_avg),
+            "animation_callback_avg_ms": {
+                "median": median(animation_callback_avg),
+                "mean": mean(animation_callback_avg),
+                "min": min_v(animation_callback_avg),
+                "max": max_v(animation_callback_avg),
             },
-            "frame_sample_count": {
-                "median": median(frame_count),
-                "mean": mean(frame_count),
-                "min": min_v(frame_count),
-                "max": max_v(frame_count),
+            "animation_callback_sample_count": {
+                "median": median(callback_count),
+                "mean": mean(callback_count),
+                "min": min_v(callback_count),
+                "max": max_v(callback_count),
             },
-            "drop_ratio": {
-                "median": median(drop_ratio),
-                "mean": mean(drop_ratio),
-                "min": min_v(drop_ratio),
-                "max": max_v(drop_ratio),
+            "animation_callback_over_threshold_ratio": {
+                "median": median(animation_callback_over_threshold_ratio),
+                "mean": mean(animation_callback_over_threshold_ratio),
+                "min": min_v(animation_callback_over_threshold_ratio),
+                "max": max_v(animation_callback_over_threshold_ratio),
             },
-            "active_frame_p95_ms": {
-                "median": median(active_frame_p95),
-                "mean": mean(active_frame_p95),
-                "min": min_v(active_frame_p95),
-                "max": max_v(active_frame_p95),
+            "active_animation_callback_p95_ms": {
+                "median": median(active_animation_callback_p95),
+                "mean": mean(active_animation_callback_p95),
+                "min": min_v(active_animation_callback_p95),
+                "max": max_v(active_animation_callback_p95),
             },
-            "active_frame_avg_ms": {
-                "median": median(active_frame_avg),
-                "mean": mean(active_frame_avg),
-                "min": min_v(active_frame_avg),
-                "max": max_v(active_frame_avg),
+            "active_animation_callback_avg_ms": {
+                "median": median(active_animation_callback_avg),
+                "mean": mean(active_animation_callback_avg),
+                "min": min_v(active_animation_callback_avg),
+                "max": max_v(active_animation_callback_avg),
             },
-            "active_frame_sample_count": {
-                "median": median(active_frame_count),
-                "mean": mean(active_frame_count),
-                "min": min_v(active_frame_count),
-                "max": max_v(active_frame_count),
+            "active_animation_callback_sample_count": {
+                "median": median(active_animation_callback_count),
+                "mean": mean(active_animation_callback_count),
+                "min": min_v(active_animation_callback_count),
+                "max": max_v(active_animation_callback_count),
             },
-            "active_drop_ratio": {
-                "median": median(active_drop_ratio),
-                "mean": mean(active_drop_ratio),
-                "min": min_v(active_drop_ratio),
-                "max": max_v(active_drop_ratio),
+            "active_animation_callback_over_threshold_ratio": {
+                "median": median(active_animation_callback_over_threshold_ratio),
+                "mean": mean(active_animation_callback_over_threshold_ratio),
+                "min": min_v(active_animation_callback_over_threshold_ratio),
+                "max": max_v(active_animation_callback_over_threshold_ratio),
             },
             "main_runloop_active_p95_ms": {
                 "median": median(main_runloop_active_p95),
@@ -642,10 +646,10 @@ for variant in variants:
                 "ready_runs": sum(e.get("workload_search_ready") is True for e in entries),
             },
             "bucket_p95_ms": bucket_summary,
-            "long_frame_attribution": summarize_long_frame_attribution(entries),
-            "main_thread_long_frame_attribution": summarize_long_frame_attribution(
+            "long_animation_callback_attribution": summarize_long_animation_callback_attribution(entries),
+            "main_thread_long_animation_callback_attribution": summarize_long_animation_callback_attribution(
                 entries,
-                field="main_thread_long_frame_attribution",
+                field="main_thread_long_animation_callback_attribution",
             ),
             "hover_preview_evidence": summarize_hover_preview_evidence(entries),
         }
@@ -732,6 +736,7 @@ md_lines.append(f"- Repeats requested: {repeats}")
 md_lines.append(f"- Duration per scenario: {duration_sec:.1f}s")
 md_lines.append(f"- Min samples: {min_samples}")
 md_lines.append(f"- Include hover preview smoke: {str(include_hover).lower()}")
+md_lines.append("- Callback cadence and its over-threshold ratio do not measure compositor presentation or dropped frames.")
 md_lines.append("")
 md_lines.append("| Scenario | Metric | Baseline | Current | Delta | Change |")
 md_lines.append("|---|---:|---:|---:|---:|---:|")
@@ -740,6 +745,8 @@ baseline_variants = {}
 if compare_summary_path:
     with open(compare_summary_path, encoding="utf-8") as f:
         baseline_variants = json.load(f).get("variants", {}).get("current", {})
+    if any("animation_callback_p95_ms" not in scenario for scenario in baseline_variants.values()):
+        raise ValueError("Baseline summary lacks canonical callback metrics; regenerate it from its original raw profiles")
     md_lines.append(f"- Baseline column: {compare_summary_path}")
     md_lines.append("")
 all_scenarios = sorted(set(baseline_variants.keys()) | set(summary["variants"].get("current", {}).keys()))
@@ -747,10 +754,10 @@ for scenario in all_scenarios:
     baseline = baseline_variants.get(scenario, {})
     current = summary["variants"].get("current", {}).get(scenario, {})
     pairs = [
-        ("frame_p95_ms", baseline.get("frame_p95_ms", {}).get("median"), current.get("frame_p95_ms", {}).get("median")),
-        ("drop_ratio", baseline.get("drop_ratio", {}).get("median"), current.get("drop_ratio", {}).get("median")),
-        ("active_frame_p95_ms", baseline.get("active_frame_p95_ms", {}).get("median"), current.get("active_frame_p95_ms", {}).get("median")),
-        ("active_drop_ratio", baseline.get("active_drop_ratio", {}).get("median"), current.get("active_drop_ratio", {}).get("median")),
+        ("animation_callback_p95_ms", baseline.get("animation_callback_p95_ms", {}).get("median"), current.get("animation_callback_p95_ms", {}).get("median")),
+        ("animation_callback_over_threshold_ratio", baseline.get("animation_callback_over_threshold_ratio", {}).get("median"), current.get("animation_callback_over_threshold_ratio", {}).get("median")),
+        ("active_animation_callback_p95_ms", baseline.get("active_animation_callback_p95_ms", {}).get("median"), current.get("active_animation_callback_p95_ms", {}).get("median")),
+        ("active_animation_callback_over_threshold_ratio", baseline.get("active_animation_callback_over_threshold_ratio", {}).get("median"), current.get("active_animation_callback_over_threshold_ratio", {}).get("median")),
         ("main_runloop_active_p95_ms", baseline.get("main_runloop_active_p95_ms", {}).get("median"), current.get("main_runloop_active_p95_ms", {}).get("median")),
         ("swiftui.row_host_body_ms.p95", baseline.get("bucket_p95_ms", {}).get("swiftui.row_host_body_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("swiftui.row_host_body_ms", {}).get("median")),
         ("swiftui.row_label_body_ms.p95", baseline.get("bucket_p95_ms", {}).get("swiftui.row_label_body_ms", {}).get("median"), current.get("bucket_p95_ms", {}).get("swiftui.row_label_body_ms", {}).get("median")),
@@ -781,15 +788,15 @@ for scenario in all_scenarios:
         )
 
 md_lines.append("")
-md_lines.append("## Long Frame Attribution")
+md_lines.append("## Long Animation Callback Attribution")
 md_lines.append("")
-md_lines.append("| Scenario | Variant | Long Frames | App Attributed | App Unattributed | App Coverage | Main Thread Coverage | Top Correlated App Metrics |")
+md_lines.append("| Scenario | Variant | Long Callbacks | App Attributed | App Unattributed | App Coverage | Main Thread Coverage | Top Correlated App Metrics |")
 md_lines.append("|---|---:|---:|---:|---:|---:|---:|---|")
 for scenario in all_scenarios:
     for variant in variants:
         scenario_summary = summary["variants"].get(variant, {}).get(scenario, {})
-        attribution = scenario_summary.get("long_frame_attribution", {})
-        main_thread_attribution = scenario_summary.get("main_thread_long_frame_attribution", {})
+        attribution = scenario_summary.get("long_animation_callback_attribution", {})
+        main_thread_attribution = scenario_summary.get("main_thread_long_animation_callback_attribution", {})
         top_metrics = []
         for metric in attribution.get("top_metrics") or []:
             name = metric.get("name") or ""
@@ -807,7 +814,7 @@ for scenario in all_scenarios:
         main_thread_coverage = main_thread_attribution.get("attribution_coverage_ratio")
         main_thread_coverage_text = f"{main_thread_coverage * 100:.1f}%" if isinstance(main_thread_coverage, (int, float)) else "-"
         md_lines.append(
-            f"| {scenario} | {variant} | {int(attribution.get('long_frame_count') or 0)} | {attributed_text} | {unattributed_text} | {coverage_text} | {main_thread_coverage_text} | {top_text} |"
+            f"| {scenario} | {variant} | {int(attribution.get('long_callback_count') or 0)} | {attributed_text} | {unattributed_text} | {coverage_text} | {main_thread_coverage_text} | {top_text} |"
         )
 
 if include_hover:

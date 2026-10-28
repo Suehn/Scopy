@@ -437,11 +437,9 @@ public final class ScrollPerformanceProfile {
             let outputPath = env["SCOPY_PROFILE_OUTPUT"] ?? "/tmp/scopy_scroll_profile.json"
             let animationCallbackThresholdMultiplier =
                 parseDouble(env["SCOPY_PROFILE_CALLBACK_THRESHOLD_MULTIPLIER"])
-                ?? parseDouble(env["SCOPY_PROFILE_DROP_THRESHOLD"])
                 ?? 1.5
             let expectedAnimationCallbackIntervalMs =
                 parseDouble(env["SCOPY_PROFILE_EXPECTED_CALLBACK_INTERVAL_MS"])
-                ?? parseDouble(env["SCOPY_PROFILE_EXPECTED_FRAME_MS"])
             let maxSamples = max(500, parseInt(env["SCOPY_PROFILE_MAX_SAMPLES"]) ?? 2000)
             let fixedCommandCount = parseInt(env["SCOPY_PROFILE_FIXED_COMMAND_COUNT"])
                 .flatMap { $0 > 0 ? $0 : nil }
@@ -585,9 +583,6 @@ public final class ScrollPerformanceProfile {
         let payload: QueuedRecordPayload
     }
 
-    @available(*, deprecated, renamed: "TimingEvent")
-    typealias MetricEvent = TimingEvent
-
     struct AnimationCallbackSample: Sendable {
         let index: Int
         let start: TimeInterval
@@ -615,9 +610,6 @@ public final class ScrollPerformanceProfile {
             self.isScrolling = isScrolling
         }
     }
-
-    @available(*, deprecated, renamed: "AnimationCallbackSample")
-    typealias FrameSample = AnimationCallbackSample
 
     private struct MetricAggregate {
         var count = 0
@@ -1035,11 +1027,6 @@ public final class ScrollPerformanceProfile {
         maybeFinalize(now: now)
     }
 
-    @available(*, deprecated, renamed: "recordAnimationCallback(_:)")
-    public func recordFrameTick(_ date: Date) {
-        recordAnimationCallback(date)
-    }
-
     public func recordTiming(name: String, elapsedMs: Double) {
         let event = TimingEvent(
             name: name,
@@ -1047,11 +1034,6 @@ public final class ScrollPerformanceProfile {
             endedAt: Date().timeIntervalSinceReferenceDate
         )
         recordTiming(event)
-    }
-
-    @available(*, deprecated, renamed: "recordTiming(name:elapsedMs:)")
-    public func recordMetric(name: String, elapsedMs: Double) {
-        recordTiming(name: name, elapsedMs: elapsedMs)
     }
 
     private func recordTiming(_ event: TimingEvent) {
@@ -1091,11 +1073,6 @@ public final class ScrollPerformanceProfile {
             endedAt: Date().timeIntervalSinceReferenceDate
         )
         enqueue(.timing(event))
-    }
-
-    @available(*, deprecated, renamed: "recordTiming(name:elapsedMs:)")
-    public nonisolated static func recordMetric(name: String, elapsedMs: Double) {
-        recordTiming(name: name, elapsedMs: elapsedMs)
     }
 
     public func incrementCounter(name: String, by amount: Int = 1) {
@@ -1285,19 +1262,10 @@ public final class ScrollPerformanceProfile {
             overwrittenCount: animationCallbackIntervalsMs.overwrittenCount,
             totalMs: animationCallbackIntervalTotalMs
         )
-        // Deprecated alias carries the same retention contract as the canonical metric.
-        Self.applyRetentionMetadata(
-            to: &callbackMetrics,
-            metricName: "frame_ms",
-            retainedCount: animationCallbackIntervalsMs.retainedCount,
-            totalCount: animationCallbackIntervalsMs.totalCount,
-            overwrittenCount: animationCallbackIntervalsMs.overwrittenCount,
-            totalMs: animationCallbackIntervalTotalMs
-        )
         if animationCallbackSamples.overwrittenCount > 0 {
             Self.removePercentile95(
                 from: &callbackMetrics,
-                metricNames: [MetricName.activeAnimationCallbackInterval, "active_frame_ms"]
+                metricNames: [MetricName.activeAnimationCallbackInterval]
             )
         }
         let speedStats = Self.computeStats(scrollSpeedSamples.chronologicalValues)
@@ -1339,12 +1307,6 @@ public final class ScrollPerformanceProfile {
             maxCallbackDetails: 12,
             timelineStart: startTimestamp
         )
-        let legacyLongFrameAttribution = Self.legacyLongFrameAttribution(
-            from: longAnimationCallbackAttribution
-        )
-        let legacyMainThreadLongFrameAttribution = Self.legacyLongFrameAttribution(
-            from: mainThreadLongAnimationCallbackAttribution
-        )
         let accessibilityTree = buildAccessibilitySnapshot()
         let activeCallbackCount = callbackSamples.filter(Self.isActiveAnimationCallback).count
         let movingCallbackCount = callbackSamples.filter { ($0.offsetDelta ?? 0) > 0 }.count
@@ -1385,12 +1347,7 @@ public final class ScrollPerformanceProfile {
             "animation_callback_overwritten_count": animationCallbackSamples.overwrittenCount,
             "active_animation_callback_count": activeCallbackCount,
             "moving_animation_callback_count": movingCallbackCount,
-            "live_scroll_animation_callback_count": liveScrollCallbackCount,
-            // Deprecated compatibility aliases retained for existing report consumers.
-            "frame_count": animationCallbackSamples.totalCount,
-            "active_frame_count": activeCallbackCount,
-            "moving_frame_count": movingCallbackCount,
-            "live_scroll_frame_count": liveScrollCallbackCount
+            "live_scroll_animation_callback_count": liveScrollCallbackCount
         ]
         let configPayload: [String: Any] = [
             "mock_dataset_id": env["SCOPY_MOCK_DATASET_ID"] ?? "",
@@ -1446,16 +1403,13 @@ public final class ScrollPerformanceProfile {
         payload["duration_seconds"] = elapsedSeconds
         payload["scroll_speed_px_per_sec"] = speedPayload
         payload["timing_buckets_ms"] = bucketStats
-        payload["buckets_ms"] = bucketStats
         payload["timing_event_count"] = timingEvents.totalCount
-        payload["metric_event_count"] = timingEvents.totalCount
         payload["timing_event_retention"] = [
             "retained_count": timingEvents.retainedCount,
             "total_count": timingEvents.totalCount,
             "overwritten_count": timingEvents.overwrittenCount
         ]
         payload[MetricName.longAnimationCallbackAttribution] = longAnimationCallbackAttribution
-        payload["long_frame_attribution"] = legacyLongFrameAttribution
         payload["main_runloop_active_ms"] = mainRunLoopPayload
         payload["main_runloop_event_count"] = mainRunLoopEvents.totalCount
         payload["main_runloop_event_retention"] = [
@@ -1465,7 +1419,6 @@ public final class ScrollPerformanceProfile {
         ]
         payload[MetricName.mainThreadLongAnimationCallbackAttribution] =
             mainThreadLongAnimationCallbackAttribution
-        payload["main_thread_long_frame_attribution"] = legacyMainThreadLongFrameAttribution
         payload["structural_metrics"] = structuralPayload
         payload["counters"] = structuralMetrics.counters
         payload["gauges"] = structuralMetrics.gauges
@@ -1510,13 +1463,7 @@ public final class ScrollPerformanceProfile {
             MetricName.expectedAnimationCallbackInterval: expectedIntervalMs,
             MetricName.animationCallbackOverThresholdRatio: overThresholdRatio,
             MetricName.activeAnimationCallbackInterval: activeIntervalStats,
-            MetricName.activeAnimationCallbackOverThresholdRatio: activeOverThresholdRatio,
-            // Deprecated compatibility aliases consumed by the existing profile scripts.
-            "frame_ms": intervalStats,
-            "expected_frame_ms": expectedIntervalMs,
-            "drop_ratio": overThresholdRatio,
-            "active_frame_ms": activeIntervalStats,
-            "active_drop_ratio": activeOverThresholdRatio
+            MetricName.activeAnimationCallbackOverThresholdRatio: activeOverThresholdRatio
         ]
     }
 
@@ -1559,18 +1506,7 @@ public final class ScrollPerformanceProfile {
             "main_runloop_active_ms": "Main run-loop pressure proxy with exact whole-run total_count/total_ms; p95 is emitted only when overwritten_count is zero.",
             "timing_buckets_ms": "Each bucket has exact whole-run total_count/total_ms plus bounded retained samples; p95 is emitted only when overwritten_count is zero.",
             "counters": "Monotonic integer structural event totals.",
-            "gauges": "Latest integer structural state values.",
-            "compatibility_aliases": [
-                "frame_ms": MetricName.animationCallbackInterval,
-                "expected_frame_ms": MetricName.expectedAnimationCallbackInterval,
-                "drop_ratio": MetricName.animationCallbackOverThresholdRatio,
-                "active_frame_ms": MetricName.activeAnimationCallbackInterval,
-                "active_drop_ratio": MetricName.activeAnimationCallbackOverThresholdRatio,
-                "buckets_ms": "timing_buckets_ms",
-                "metric_event_count": "timing_event_count",
-                "long_frame_attribution": MetricName.longAnimationCallbackAttribution,
-                "main_thread_long_frame_attribution": MetricName.mainThreadLongAnimationCallbackAttribution
-            ]
+            "gauges": "Latest integer structural state values."
         ]
     }
 
@@ -1667,51 +1603,6 @@ public final class ScrollPerformanceProfile {
             "top_metrics": Array(topMetrics),
             "callbacks": detailCallbacks
         ]
-    }
-
-    @available(*, deprecated, message: "Use buildLongAnimationCallbackAttribution(callbackSamples:timingEvents:expectedCallbackIntervalMs:thresholdMultiplier:maxCallbackDetails:timelineStart:)")
-    static func buildLongFrameAttribution(
-        frameSamples: [FrameSample],
-        metricEvents: [MetricEvent],
-        expectedFrameMs: Double,
-        dropThresholdMultiplier: Double,
-        maxFrameDetails: Int,
-        timelineStart: TimeInterval?
-    ) -> [String: Any] {
-        let canonical = buildLongAnimationCallbackAttribution(
-            callbackSamples: frameSamples,
-            timingEvents: metricEvents,
-            expectedCallbackIntervalMs: expectedFrameMs,
-            thresholdMultiplier: dropThresholdMultiplier,
-            maxCallbackDetails: maxFrameDetails,
-            timelineStart: timelineStart
-        )
-        return legacyLongFrameAttribution(from: canonical)
-    }
-
-    static func legacyLongFrameAttribution(from canonical: [String: Any]) -> [String: Any] {
-        var legacy = canonical
-        legacy["long_frame_count"] = canonical["long_callback_count"] ?? 0
-        legacy["metric_event_count"] = canonical["timing_event_count"] ?? 0
-        legacy["total_frame_ms"] = canonical["total_callback_interval_ms"] ?? 0
-
-        if let metrics = canonical["top_metrics"] as? [[String: Any]] {
-            legacy["top_metrics"] = metrics.map { metric in
-                var legacyMetric = metric
-                legacyMetric["frame_count"] = metric["callback_count"] ?? 0
-                return legacyMetric
-            }
-        }
-        if let callbacks = canonical["callbacks"] as? [[String: Any]] {
-            legacy["frames"] = callbacks.map { callback in
-                var legacyCallback = callback
-                legacyCallback["index"] = callback["callback_index"] ?? 0
-                return legacyCallback
-            }
-        } else {
-            legacy["frames"] = []
-        }
-        return legacy
     }
 
     private static func isActiveAnimationCallback(_ sample: AnimationCallbackSample) -> Bool {
