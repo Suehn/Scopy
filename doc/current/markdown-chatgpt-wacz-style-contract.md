@@ -85,7 +85,8 @@ Authoritative implementation surfaces:
 - `Scopy/Views/History/MarkdownHTMLDocumentBuilder.swift`: the only document entrypoint (`document(source:context:)`) and the thin document shell. It never changes source bytes: the source is embedded verbatim with the policy (`allowLatexDocumentNormalize`, `allowLatexInlineTextNormalize`, `allowLooseMathRepair`, optional `linkEnrichment`) chosen by the Swift profile detector. The shell holds CSP, the two local stylesheets, the nine scale-dependent layout variables on `:root`, the source and policy as an inert `<script type="application/json" id="scopy-render-input">` block, and the deferred renderer bundle. It owns no CSS rules and no script.
 - `Tools/MarkdownRenderer/src/styles/scopy-document.css`: the base document CSS (typography, code, tables, rich surfaces, tasks, footnotes, export-mode rules), copied to `Scopy/Resources/MarkdownPreview/scopy-document.css`.
 - `Tools/MarkdownRenderer/src/documentRuntime.js`: the document runtime bundled into the same IIFE and exposed as `window.ScopyDocument` (`boot`, `isRenderReady`, `probeLayoutHeight`, `reportHeight`, `state`, and `export.{prepare, adjustWideContent, applyScale, watchLayout}`): rendering the embedded input, the pipe-table model and column buckets, task-list markers, terminal readiness, render-ID-scoped metrics, and export-side preparation and the layout watcher.
-- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline and every source repair, in this order: the policy-gated scientific LaTeX document repair (`scopyLatexDocument.js`) and inline/math-segment repair (`scopyLatexInline.js`), ATX heading whitespace, table code-span pipes, backslash math. `scopyLineScan.js` is the one fence/indentation/inline-code scanner those repairs share.
+- `Tools/MarkdownRenderer/src/render.js`: Markdown AST/HTML AST pipeline and the source-level repairs, in this order: the policy-gated scientific LaTeX document repair (`scopyLatexDocument.js`) and inline/math-segment repair (`scopyLatexInline.js`), ATX heading whitespace, then table code-span pipes. `scopyLineScan.js` supplies the shared fence/indentation/inline-code scanning helpers for those repairs.
+- `Tools/MarkdownRenderer/src/remarkScopyMath.js`: explicit math within the existing Markdown parser. It constrains upstream single-dollar acceptance and registers `scopyBackslashMath.js` text/flow constructs, which emit the existing `mathText`/`mathFlow` tokens for `remark-math` AST handling. Backslash delimiters are not rewritten into dollars; code, HTML, table-cell, and list/quote container boundaries remain with the parser. Scientific, heading, and table source repairs still precede parsing.
 - `Tools/MarkdownRenderer/src/remarkScopySafeHTML.js`: the closed user-authored safe-HTML recognizer; unsupported or malformed forms fail to literal text.
 - `Tools/MarkdownRenderer/src/scopyLocalImageAssets.js`: the closed bundled-image allowlist and exact public-URL mappings used by fixtures.
 - `Tools/MarkdownRenderer/src/remarkScopyRich.js`: strict v2 validation and the only trusted rich-surface HAST builders.
@@ -236,7 +237,7 @@ Rich v2 exports remain true-color PNGs. Palette reduction is skipped whenever th
 | Thematic breaks | CommonMark thematic breaks become `<hr>`. |
 | Footnotes | GFM footnotes are supported. Renderer-generated IDs use exactly one namespace: definition `scopy-fn-<normalized-id>`, reference `scopy-fnref-<normalized-id>`, and repeated references append `-2`, `-3`, etc. Heading IDs are not synthesized. |
 
-All source normalization is syntax-aware and runs in `render.js` before parsing, so Node tests see the production input:
+Source repairs run in `render.js` before parsing, and Node tests exercise those production transformations. Code and destination preservation remains required across source repair and parsing:
 
 - fenced code, indented code, inline code, links, images, reference definitions, URLs, and file paths are protected before loose scientific-text repair;
 - `#标题` repair does not rewrite code fences, indented code, or shebangs;
@@ -272,12 +273,13 @@ Supported explicit math forms:
 | --- | --- |
 | `$...$` with the bounded rules below | inline |
 | `\(...\)` | inline |
-| `\[...\]` | display |
+| `\[...\]` on its own line, or a standalone multiline `\[` / body / `\]` block | display |
+| `\[...\]` embedded in an ordinary text line | inline |
 | single-line `$$...$$` | inline |
 | standalone multiline `$$` / body / `$$` block | display |
 | fenced `math` block | display |
 
-As requested on 2026-09-05, Scopy supports single-dollar inline math. This is a **Scopy behavior extension**, not a claim about the archived ChatGPT parser. `remarkScopyMath` reuses upstream `micromark-extension-math` tokenization and `remark-math` AST handling; it only restricts single-dollar acceptance. It does not insert a second parser or rewrite source dollars into another delimiter.
+As requested on 2026-09-05, Scopy supports single-dollar inline math. This is a **Scopy behavior extension**, not a claim about the archived ChatGPT parser. `remarkScopyMath` reuses upstream `micromark-extension-math` dollar tokenization and `remark-math` AST handling, with the single-dollar restrictions below. Its backslash text/flow constructs enter the same math nodes while preserving their source body and parsed containers. Neither delimiter family uses a second parser or source rewriting into another delimiter.
 
 - A pair must enclose nonempty content on one line, with no whitespace immediately inside either delimiter. `$x+1$`, `$NPV$`, and `中文$x$之后` render; `$ x $`, `$x $`, and unclosed `$x` remain literal.
 - The opening delimiter cannot immediately follow an ASCII letter/digit/underscore, slash, backslash, dot, or dollar. The closing delimiter cannot immediately precede an ASCII letter/digit/underscore, slash, backslash, or dollar. This deliberately conservative boundary protects amounts and path/identifier fragments while allowing CJK adjacency. For intentional math at an excluded boundary, use `\(...\)` or `$$...$$`.
