@@ -1,5 +1,6 @@
 """Exercise the actual shell/Make entrypoints without requiring Xcode or a GUI."""
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -109,6 +110,66 @@ class WorktreeIsolationTests(unittest.TestCase):
                 self.assertEqual(len(paths), 1)
                 outputs.append(paths)
             self.assertTrue(set(outputs[0]).isdisjoint(outputs[1]))
+
+
+class BuiltAppTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="scopy-built-app-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "bin").mkdir()
+        (self.root / "scripts").mkdir()
+        shutil.copy(REPO / "Makefile", self.root / "Makefile")
+        shutil.copy(REPO / "scripts/built-app-path.py", self.root / "scripts")
+        self.app = self.root / "Derived Data/Build/Products/Debug/Scopy.app"
+        self.app.mkdir(parents=True)
+        # A stale bundle must not win over the product Xcode just built.
+        (self.root / "build/Debug/Scopy.app").mkdir(parents=True)
+        (self.root / "settings.json").write_text(json.dumps([
+            {"target": "Dependency", "buildSettings": {}},
+            {"target": "Scopy", "buildSettings": {
+                "TARGET_BUILD_DIR": str(self.app.parent),
+                "FULL_PRODUCT_NAME": self.app.name,
+            }},
+        ]))
+        commands = {
+            "xcodebuild": '''#!/bin/sh
+set -eu
+printf '%s\\n' "$@" > xcode-arguments
+if [ "${FAIL_SETTINGS:-0}" = "1" ]; then exit 65; fi
+cat settings.json
+''',
+            "open": '''#!/bin/sh
+printf '%s\\n' "$@" > opened
+''',
+        }
+        for name, source in commands.items():
+            executable = self.root / "bin" / name
+            executable.write_text(source)
+            executable.chmod(0o755)
+        self.env = dict(os.environ, PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"])
+
+    def run_app(self, **env):
+        return subprocess.run(
+            ["make", "run", "-o", "build", "VERSION_ARGS="],
+            cwd=self.root, env=dict(self.env, **env), capture_output=True, text=True,
+        )
+
+    def test_run_launches_exact_debug_product_with_spaces(self):
+        result = self.run_app()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "opened").read_text().splitlines(), [str(self.app)])
+        arguments = (self.root / "xcode-arguments").read_text().splitlines()
+        self.assertEqual(arguments[arguments.index("-configuration") + 1], "Debug")
+
+    def test_failed_resolution_never_launches_a_stale_bundle(self):
+        result = self.run_app(FAIL_SETTINGS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "opened").exists())
+        self.app.rmdir()
+        result = self.run_app()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "opened").exists())
 
 
 if __name__ == "__main__":

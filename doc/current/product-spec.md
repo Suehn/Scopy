@@ -171,7 +171,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 
 ### Operability
 
-- The app must remain buildable and testable on the repo baseline: macOS 14+, Swift 5.9, Xcode 16.
+- The app must remain buildable and testable with the toolchain declared in `project.yml` and `Package.swift`, while supporting macOS 14 and later.
 - Release and documentation flows are tag-driven and metadata-backed. Only the explicit maintainer flow may create a tag; pushing release documents must validate without publishing.
 - Canonical documentation should stay aligned with the active release rather than accumulating historical planning text.
 

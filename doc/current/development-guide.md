@@ -201,6 +201,7 @@ These choices apply the [Astra instruction-following and verification guidance](
 ### Baseline Build/Test
 
 - `make build` / `make release` compile Debug / Release without replacing the installed app.
+- `make run` builds and launches this checkout's Debug app. Run and real-input profile targets resolve the app from the selected configuration's Xcode build settings; an older `build/Debug` bundle is not a launch source. Project generation already skips unchanged inputs, so there is one Debug build entrypoint.
 - `./deploy.sh release --no-launch` builds and installs into `/Applications`; use it when installation is intended. The flag skips launch only. Xcode products stay in isolated DerivedData while SwiftPM continues to own `.build`
 - Xcode 26.1.1 and the Swift 6.2 compiler are the current toolchain. `project.yml` and `Package.swift` select Swift 6 language mode while keeping macOS 14 as the deployment target; full concurrency checking therefore applies to ordinary builds too. Default MainActor isolation and `NonisolatedNonsendingByDefault` are not enabled.
 - `make test-unit` runs native correctness once with Swift warnings as errors.

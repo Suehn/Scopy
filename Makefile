@@ -1,6 +1,6 @@
 # Scopy Makefile: build, test, measurement, and release entry points (see doc/current/development-guide.md).
 
-.PHONY: all setup build release run clean quick-build xcode help stats format lint
+.PHONY: all setup build release run clean xcode help stats format lint
 .PHONY: test-unit test-tsan test-snapshot-perf-release test-tooling
 .PHONY: snapshot-perf-db bench-snapshot-search perf-search-warm-load perf-scroll-tools perf-scroll-wheel perf-search-type perf-capture
 .PHONY: perf-frontend-profile perf-frontend-profile-smoke perf-frontend-profile-standard perf-frontend-profile-full
@@ -47,21 +47,13 @@ release: markdown-assets-gate setup
 # 构建并运行
 run: build
 	@echo "Running Scopy..."
-	@open "build/Debug/Scopy.app" 2>/dev/null || \
-		open "$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -showBuildSettings | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"
+	@APP="$$(python3 scripts/built-app-path.py Debug)" && open "$$APP"
 
 # 清理构建产物
 clean:
 	@echo "Cleaning..."
 	xcodebuild -project Scopy.xcodeproj -scheme Scopy clean 2>/dev/null || true
 	rm -rf .build/ $(DERIVED_DATA_BASE)
-
-# 快速构建（跳过 xcodegen 如果项目已存在）
-quick-build: markdown-assets-verify
-	@if [ ! -f "Scopy.xcodeproj/project.pbxproj" ]; then \
-		$(MAKE) setup; \
-	fi
-	xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Debug build $(VERSION_ARGS)
 
 # =================== 测试命令 ===================
 
@@ -243,17 +235,17 @@ perf-scroll-tools:
 
 # Real-input scroll profile against the Release app: make perf-scroll-wheel LABEL=name [DURATION=12]
 perf-scroll-wheel: perf-scroll-tools
-	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
+	@APP="$$(python3 scripts/built-app-path.py Release)" || exit $$?; \
 	python3 scripts/perf-scroll/profile_scroll.py "$$APP" "$${LABEL:-wheel}" --mode wheel --duration "$${DURATION:-12}" --sample
 
 # Real-input clipboard-capture profile against the Release app: make perf-capture LABEL=name [SCENARIO=text|rich|image] [COUNT=10] [INTERVAL=1] [SIZE=n]
 perf-capture: perf-scroll-tools
-	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
+	@APP="$$(python3 scripts/built-app-path.py Release)" || exit $$?; \
 	python3 scripts/perf-scroll/profile_capture.py "$$APP" "$${LABEL:-capture}" --scenario "$${SCENARIO:-text}" --count "$${COUNT:-10}" --interval "$${INTERVAL:-1}" $${SIZE:+--size "$$SIZE"} --sample
 
 # Real-input search-typing profile against the Release app: make perf-search-type LABEL=name [QUERY=cm] [RATE=8]
 perf-search-type: perf-scroll-tools
-	@APP="$$(xcodebuild -project Scopy.xcodeproj -scheme Scopy -configuration Release -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Scopy.app"; \
+	@APP="$$(python3 scripts/built-app-path.py Release)" || exit $$?; \
 	python3 scripts/perf-scroll/profile_search.py "$$APP" "$${LABEL:-search}" --query "$${QUERY:-cm}" --rate "$${RATE:-8}" --sample
 
 
@@ -269,7 +261,6 @@ help:
 	@echo "  make build        - Build Debug (also verifies the Markdown renderer assets)"
 	@echo "  make release      - Build Release"
 	@echo "  make run          - Build and launch the Debug app"
-	@echo "  make quick-build  - Build without regenerating the project"
 	@echo "  make xcode        - Generate and open the Xcode project"
 	@echo "  make clean        - Remove SwiftPM and DerivedData outputs (keeps the tracked project)"
 	@echo ""
