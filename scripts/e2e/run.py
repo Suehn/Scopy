@@ -139,7 +139,8 @@ class Session:
         original_hash = digest(app / "Contents/MacOS/Scopy")
         info.update(CFBundleIdentifier=domain, SUEnableAutomaticChecks=False, SUAutomaticallyUpdate=False)
         info_path.write_bytes(plistlib.dumps(info))
-        run("/usr/bin/codesign", "--force", "--deep", "--sign", "-", self.app, stderr=subprocess.DEVNULL)
+        # Only the outer Info.plist changes; preserve the source's embedded frameworks.
+        run("/usr/bin/codesign", "--force", "--sign", "-", self.app, stderr=subprocess.DEVNULL)
         self.pb = "ScopyE2E." + domain.removeprefix("com.scopy.e2e.")
         actual = bridge("environment")
         protected = [Path.home() / "Library/Application Support/Scopy",
@@ -181,13 +182,15 @@ class Session:
     def database(self):
         return self.storage / "clipboard.db"
 
-    def start(self, arguments=()):
+    def start(self, arguments=(), on_launch=None):
         self.launches += 1
         run(TOOLS / "warp", 1400, 40)
         self.log = (self.output / f"app-{self.launches}.log").open("w")
         self.process = subprocess.Popen(["/usr/bin/sandbox-exec", "-f", str(self.profile),
             str(self.app / "Contents/MacOS/Scopy"), *arguments, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"],
             env=self.env, stdout=self.log, stderr=subprocess.STDOUT)
+        if on_launch is not None:
+            on_launch(self.process)
         wait_for(lambda: bridge("activate", self.process.pid, stderr=subprocess.DEVNULL)["pid"] == self.process.pid,
                  "test app activation before the automatic panel opens")
         def panel():
