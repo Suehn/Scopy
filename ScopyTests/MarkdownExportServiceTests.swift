@@ -26,6 +26,36 @@ final class MarkdownExportServiceTests: XCTestCase {
         XCTAssertNil(pasteboard.data(forType: .html))
     }
 
+    func testTiledCanvasKeepsFractionalBoundariesAndOverlapOrder() throws {
+        func tile(_ components: [CGFloat]) throws -> CGImage {
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let context = try XCTUnwrap(CGContext(
+                data: nil, width: 4, height: 3, bitsPerComponent: 8, bytesPerRow: 16,
+                space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.setFillColor(try XCTUnwrap(CGColor(colorSpace: colorSpace, components: components)))
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 3))
+            return try XCTUnwrap(context.makeImage())
+        }
+        let canvas = try ExportRaster.makeTiledCanvas(width: 8, height: 12)
+        ExportRaster.drawTile(
+            try tile([1, 0, 0, 1]), on: canvas,
+            contentStartPoints: 0, captureHeightPoints: 3, outputScaleFactor: 1.5
+        )
+        ExportRaster.drawTile(
+            try tile([0, 1, 0, 1]), on: canvas,
+            contentStartPoints: 2, captureHeightPoints: 3, outputScaleFactor: 1.5
+        )
+        let pixels = canvas.pixels.assumingMemoryBound(to: UInt8.self)
+        for row in 0..<12 {
+            let expected: [UInt8] = row < 3 ? [255, 0, 0, 255] : (row < 8 ? [0, 255, 0, 255] : [255, 255, 255, 255])
+            for column in 0..<8 {
+                let offset = row * canvas.bytesPerRow + column * 4
+                XCTAssertEqual(Array(UnsafeBufferPointer(start: pixels.advanced(by: offset), count: 4)), expected, "row \(row), column \(column)")
+            }
+        }
+    }
+
     func testDeniedPasteboardAuthorizationPreservesEveryExistingRepresentation() throws {
         let pngData = try makePNGData()
         let pasteboardName = NSPasteboard.Name("ScopyTests.MarkdownExportServiceTests.\(UUID().uuidString)")
@@ -224,7 +254,8 @@ final class MarkdownExportServiceTests: XCTestCase {
     func testOccludedExportFallsBackToTimeBasedSettle() async throws {
         ExportCoordinator.ordersOutHostWindowForTesting = true
         defer { ExportCoordinator.ordersOutHostWindowForTesting = false }
-        let html = MarkdownHTMLDocumentBuilder.document(source: "# Occluded export\n\nThe host panel leaves the screen after the document is ready.")
+        let source = "# Occluded export\n\nThe host panel leaves the screen after the document is ready."
+        let html = MarkdownHTMLDocumentBuilder.document(source: source, context: MarkdownRenderContextResolver.defaultContext(for: source))
 
         let result = await withCheckedContinuation { continuation in
             MarkdownExportService.exportToPNGData(html: html) { continuation.resume(returning: $0) }
@@ -242,15 +273,16 @@ final class MarkdownExportServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: scratch) }
         let started = scratch.appendingPathComponent("pngquant-started")
         let slowPngquant = scratch.appendingPathComponent("slow-pngquant")
-        try "#!/bin/sh\ntouch '\(started.path)'\nsleep 30\n".write(to: slowPngquant, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\ntouch '\(started.path)'\nexec sleep 30\n".write(to: slowPngquant, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slowPngquant.path)
         let options = PngquantService.Options(binaryPath: slowPngquant.path, qualityMin: 60, qualityMax: 80, speed: 4, colors: 256)
         let gate = ExportCoordinator.concurrencyGate
         let idleCount = gate.activeCount
         var result: Result<MarkdownExportService.ExportOutcome, Error>?
 
+        let source = "# Slow encoder\n\nBody"
         let handle = MarkdownExportService.exportToPNGData(
-            html: MarkdownHTMLDocumentBuilder.document(source: "# Slow encoder\n\nBody"),
+            html: MarkdownHTMLDocumentBuilder.document(source: source, context: MarkdownRenderContextResolver.defaultContext(for: source)),
             pngquantOptions: options
         ) { result = $0 }
         try await waitUntil(timeout: 20) { FileManager.default.fileExists(atPath: started.path) || result != nil }

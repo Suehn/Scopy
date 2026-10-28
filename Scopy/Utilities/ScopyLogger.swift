@@ -11,5 +11,6 @@ public enum ScopyLog {
     public static let search = Logger(subsystem: subsystem, category: "search")
     public static let ui = Logger(subsystem: subsystem, category: "ui")
     public static let hotkey = Logger(subsystem: subsystem, category: "hotkey")
+    public static let export = Logger(subsystem: subsystem, category: "export")
     public static let pngquant = Logger(subsystem: subsystem, category: "pngquant")
 }

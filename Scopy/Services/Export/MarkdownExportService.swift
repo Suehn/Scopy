@@ -8,7 +8,6 @@ import WebKit
 
 /// Service for exporting Markdown preview as PNG image to clipboard
 public enum MarkdownExportService {
-    static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Scopy", category: "export")
     public static let defaultTargetWidthPixels: CGFloat = 1080
 
     public struct ExportStats: Sendable, Equatable {
@@ -131,7 +130,7 @@ public enum MarkdownExportService {
                     errorDumpURL: errorDumpURL
                 )
                 if case .success = committed, outcome.stats.pngquantApplied {
-                    logger.info("Exported PNG with pngquant: \(outcome.stats.finalPNGBytes, privacy: .public) bytes")
+                    ScopyLog.export.info("Exported PNG with pngquant: \(outcome.stats.finalPNGBytes, privacy: .public) bytes")
                 }
                 completion(committed)
             case .failure(let error):
@@ -250,7 +249,7 @@ public enum MarkdownExportService {
     ) throws -> Bool {
         guard authorization() else { return false }
         guard let imagePayload = makeStandardImagePayloadForPasteboardWrite(pngData) else {
-            logger.error("Failed to normalize PNG payload before pasteboard export")
+            ScopyLog.export.error("Failed to normalize PNG payload before pasteboard export")
             throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
         }
         // Normalization can be non-trivial for legacy image encodings. Recheck immediately before
@@ -263,7 +262,7 @@ public enum MarkdownExportService {
     @MainActor
     static func writePNGToPasteboard(pngData: Data, pasteboard: NSPasteboard) throws {
         guard let imagePayload = makeStandardImagePayloadForPasteboardWrite(pngData) else {
-            logger.error("Failed to normalize PNG payload before pasteboard export")
+            ScopyLog.export.error("Failed to normalize PNG payload before pasteboard export")
             throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
         }
 
@@ -279,7 +278,7 @@ public enum MarkdownExportService {
         pasteboard.declareTypes([.png], owner: nil)
 
         guard pasteboard.setData(imagePayload.primaryPNGData, forType: .png) else {
-            logger.error("Failed to set PNG data on pasteboard")
+            ScopyLog.export.error("Failed to set PNG data on pasteboard")
             throw ExportError.stageFailed(stage: .pasteboardWrite, underlying: nil)
         }
     }

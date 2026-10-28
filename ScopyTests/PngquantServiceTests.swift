@@ -1,4 +1,5 @@
 import CoreGraphics
+import Darwin
 import Foundation
 import ImageIO
 import XCTest
@@ -25,19 +26,19 @@ final class PngquantServiceTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testDataModeTimesOutWithoutDeadlock() throws {
+    func testDataModeTimesOutWithoutDeadlock() async throws {
         let binary = try makeExecutable(
             named: "hang-stdin",
             script: Self.hangingScript
         )
         let startedAt = Date()
 
-        XCTAssertThrowsError(
-            try PngquantService.compressPNGData(
+        await expectError({
+            try await PngquantService.compressPNGData(
                 Self.pngData,
                 options: options(binary: binary, timeout: 0.1)
             )
-        ) { error in
+        }) { error in
             guard case PngquantService.PngquantError.timedOut(let timeout) = error else {
                 return XCTFail("Expected typed timeout, got \(error)")
             }
@@ -46,7 +47,7 @@ final class PngquantServiceTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(startedAt), 2)
     }
 
-    func testFileModeTimeoutTerminatesProcessAndRemovesPartialOutput() throws {
+    func testFileModeTimeoutTerminatesProcessAndRemovesPartialOutput() async throws {
         let binary = try makeExecutable(
             named: "hang-file",
             script: """
@@ -67,12 +68,12 @@ final class PngquantServiceTests: XCTestCase {
         let imageURL = directory.appendingPathComponent("source.png")
         try Self.pngData.write(to: imageURL)
 
-        XCTAssertThrowsError(
-            try PngquantService.compressPNGFileInPlace(
+        await expectError({
+            try await PngquantService.compressPNGFileInPlace(
                 imageURL,
                 options: options(binary: binary, timeout: 0.1)
             )
-        ) { error in
+        }) { error in
             guard case PngquantService.PngquantError.timedOut = error else {
                 return XCTFail("Expected typed timeout, got \(error)")
             }
@@ -88,8 +89,15 @@ final class PngquantServiceTests: XCTestCase {
             named: "cancel-stdin",
             script: """
             #!/bin/sh
+            input=""
+            while [ "$#" -gt 0 ]; do
+                if [ "$1" = "--" ]; then shift; input="$1"; fi
+                shift
+            done
+            /usr/bin/printf '%s' "$$" > "$0.pid"
+            /usr/bin/printf '%s' "$input" > "$0.input"
+            trap '[ -f "$input" ] && /usr/bin/touch "$0.input-survived"; exit 0' TERM
             /usr/bin/touch "$0.started"
-            trap 'exit 0' TERM
             while :; do :; done
             """
         )
@@ -110,9 +118,52 @@ final class PngquantServiceTests: XCTestCase {
             }
         }
         XCTAssertLessThan(Date().timeIntervalSince(cancelledAt), 2)
+        let pid = try XCTUnwrap(Int32(String(contentsOfFile: binary.path + ".pid", encoding: .utf8)))
+        XCTAssertEqual(Darwin.kill(pid, 0), -1, "returning cancellation must mean the child has exited")
+        XCTAssertEqual(errno, ESRCH)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: binary.path + ".input-survived"))
+        let input = try String(contentsOfFile: binary.path + ".input", encoding: .utf8)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: input), "scratch input is removed after exit")
     }
 
-    func testLargeStderrDoesNotBlockSuccessfulOutputCollection() throws {
+    func testCancellationKillsProcessThatIgnoresTermination() async throws {
+        let binary = try makeExecutable(named: "ignore-term", script: """
+        #!/bin/sh
+        trap '' TERM
+        /usr/bin/printf '%s' "$$" > "$0.pid"
+        while :; do :; done
+        """)
+        let task = Self.startCompressionTask(options: options(binary: binary, timeout: 60))
+        try await waitForFile(URL(fileURLWithPath: binary.path + ".pid"))
+        let pid = try XCTUnwrap(Int32(String(contentsOfFile: binary.path + ".pid", encoding: .utf8)))
+        task.cancel()
+        await expectError({ try await task.value }) { error in
+            guard case PngquantService.PngquantError.cancelled = error else {
+                return XCTFail("Expected cancellation, got \(error)")
+            }
+        }
+        XCTAssertEqual(Darwin.kill(pid, 0), -1)
+        XCTAssertEqual(errno, ESRCH)
+    }
+
+    func testAlreadyCancelledTaskNeverLaunchesProcess() async throws {
+        let binary = try makeExecutable(named: "must-not-start", script: "#!/bin/sh\n/usr/bin/touch \"$0.started\"\n")
+        let configured = options(binary: binary, timeout: 2)
+        let pngData = Self.pngData
+        let task = Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            return try await PngquantService.compressPNGData(pngData, options: configured)
+        }
+        task.cancel()
+        await expectError({ try await task.value }) { error in
+            guard case PngquantService.PngquantError.cancelled = error else {
+                return XCTFail("Expected cancellation, got \(error)")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: binary.path + ".started"))
+    }
+
+    func testLargeStderrDoesNotBlockSuccessfulOutputCollection() async throws {
         let binary = try makeExecutable(
             named: "large-stderr",
             script: """
@@ -129,14 +180,14 @@ final class PngquantServiceTests: XCTestCase {
             /usr/bin/printf '\\211PNG\\r\\n\\032\\n' > "$output"
             """
         )
-        let output = try PngquantService.compressPNGData(
+        let output = try await PngquantService.compressPNGData(
             Self.pngData,
             options: options(binary: binary, timeout: 2)
         )
         XCTAssertEqual(output, Data(Self.pngData.prefix(8)))
     }
 
-    func testDataModePassesInputFileAndCollectsOutputFile() throws {
+    func testDataModePassesInputFileAndCollectsOutputFile() async throws {
         let binary = try makeExecutable(
             named: "copy-input",
             script: """
@@ -153,7 +204,7 @@ final class PngquantServiceTests: XCTestCase {
             /bin/cp "$input" "$output"
             """
         )
-        let output = try PngquantService.compressPNGData(
+        let output = try await PngquantService.compressPNGData(
             Self.pngData,
             options: options(binary: binary, timeout: 2)
         )
@@ -170,7 +221,7 @@ final class PngquantServiceTests: XCTestCase {
         }
     }
 
-    func testPAMFileRoundTripsThroughBundledPngquant() throws {
+    func testPAMFileRoundTripsThroughBundledPngquant() async throws {
         let bundled = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Scopy/Resources/Tools/pngquant")
@@ -182,7 +233,8 @@ final class PngquantServiceTests: XCTestCase {
         let url = directory.appendingPathComponent("bitmap.pam")
         try pam.write(to: url)
 
-        let png = try XCTUnwrap(PngquantService.compressPAMFile(url, options: options(binary: bundled, timeout: 10)))
+        let result = try await PngquantService.compressPAMFile(url, options: options(binary: bundled, timeout: 10))
+        let png = try XCTUnwrap(result)
         XCTAssertTrue(PngquantService.isLikelyPNG(png))
 
         let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
@@ -192,7 +244,7 @@ final class PngquantServiceTests: XCTestCase {
         XCTAssertEqual(Self.rgba(of: decoded), pixels)
     }
 
-    func testExit98And99PreserveNoChangeSemanticsForStdinAndFileModes() throws {
+    func testExit98And99PreserveNoChangeSemanticsForStdinAndFileModes() async throws {
         for exitCode in [98, 99] {
             let binary = try makeExecutable(
                 named: "exit-\(exitCode)",
@@ -216,22 +268,20 @@ final class PngquantServiceTests: XCTestCase {
             )
             let configured = options(binary: binary, timeout: 2)
 
-            XCTAssertEqual(
-                try PngquantService.compressPNGData(Self.pngData, options: configured),
-                Self.pngData,
-                "Exit \(exitCode) must ignore re-encoded stdout bytes"
-            )
+            let output = try await PngquantService.compressPNGData(Self.pngData, options: configured)
+            XCTAssertEqual(output, Self.pngData, "Exit \(exitCode) must ignore re-encoded stdout bytes")
 
             let imageURL = directory.appendingPathComponent("unchanged-\(exitCode).png")
             try Self.pngData.write(to: imageURL)
-            XCTAssertFalse(try PngquantService.compressPNGFileInPlace(imageURL, options: configured))
+            let replaced = try await PngquantService.compressPNGFileInPlace(imageURL, options: configured)
+            XCTAssertFalse(replaced)
             XCTAssertEqual(try Data(contentsOf: imageURL), Self.pngData)
             let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
             XCTAssertFalse(names.contains(where: { $0.hasPrefix("unchanged-\(exitCode).png.pngquant-") }))
         }
     }
 
-    func testFileModeAtomicallyReplacesOriginalOnSuccess() throws {
+    func testFileModeAtomicallyReplacesOriginalOnSuccess() async throws {
         let replacementData = Data(Self.pngData.prefix(16))
         let binary = try makeFileModeExecutable(
             named: "successful-file-output",
@@ -240,19 +290,46 @@ final class PngquantServiceTests: XCTestCase {
         let imageURL = directory.appendingPathComponent("replace-success.png")
         try Self.pngData.write(to: imageURL)
 
-        XCTAssertTrue(
-            try PngquantService.compressPNGFileInPlace(
-                imageURL,
-                options: options(binary: binary, timeout: 2)
-            )
+        let replaced = try await PngquantService.compressPNGFileInPlace(
+            imageURL,
+            options: options(binary: binary, timeout: 2)
         )
+        XCTAssertTrue(replaced)
 
         XCTAssertEqual(try Data(contentsOf: imageURL), replacementData)
         let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
         XCTAssertFalse(names.contains(where: { $0.contains(".pngquant-") }))
     }
 
-    func testFileModeReplacementFailurePreservesOriginalAndCleansTemporaryOutput() throws {
+    func testSeparateFileOutputPreservesInputAndRejectsEmptyOrNonRegularOutput() async throws {
+        let input = directory.appendingPathComponent("immutable.png")
+        try Self.pngData.write(to: input)
+        let replacement = Data(Self.pngData.prefix(16))
+        let successful = try makeFileModeExecutable(named: "separate-output", replacementData: replacement)
+        let output = directory.appendingPathComponent("compressed.png")
+        let created = try await PngquantService.compressPNGFile(input, to: output, options: options(binary: successful, timeout: 2))
+        XCTAssertTrue(created)
+        XCTAssertEqual(try Data(contentsOf: input), Self.pngData)
+        XCTAssertEqual(try Data(contentsOf: output), replacement)
+
+        for (name, command) in [("empty", ": > \"$output\""), ("directory", "/bin/mkdir \"$output\""), ("symlink", "/bin/ln -s \"$0\" \"$output\"")] {
+            let binary = try makeExecutable(named: name, script: """
+            #!/bin/sh
+            while [ "$#" -gt 0 ]; do
+                if [ "$1" = "--output" ]; then shift; output="$1"; fi
+                shift
+            done
+            \(command)
+            """)
+            let invalidOutput = directory.appendingPathComponent(name + ".png")
+            let created = try await PngquantService.compressPNGFile(input, to: invalidOutput, options: options(binary: binary, timeout: 2))
+            XCTAssertFalse(created, name)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: invalidOutput.path), name)
+            XCTAssertEqual(try Data(contentsOf: input), Self.pngData)
+        }
+    }
+
+    func testFileModeReplacementFailurePreservesOriginalAndCleansTemporaryOutput() async throws {
         let binary = try makeFileModeExecutable(
             named: "failed-file-replacement",
             replacementData: Data(Self.pngData.prefix(16))
@@ -260,15 +337,15 @@ final class PngquantServiceTests: XCTestCase {
         let imageURL = directory.appendingPathComponent("replace-failure.png")
         try Self.pngData.write(to: imageURL)
 
-        XCTAssertThrowsError(
-            try PngquantService.compressPNGFileInPlace(
+        await expectError({
+            try await PngquantService.compressPNGFileInPlace(
                 imageURL,
                 options: options(binary: binary, timeout: 2),
                 replaceOutputAtomically: { _, _ in
                     throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))
                 }
             )
-        ) { error in
+        }) { error in
             guard case PngquantService.PngquantError.failed(let exitCode, _) = error else {
                 return XCTFail("Expected typed replacement failure, got \(error)")
             }
@@ -278,6 +355,15 @@ final class PngquantServiceTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: imageURL), Self.pngData)
         let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
         XCTAssertFalse(names.contains(where: { $0.contains(".pngquant-") }))
+    }
+
+    private func expectError<T>(_ operation: () async throws -> T, verify: (Error) -> Void) async {
+        do {
+            _ = try await operation()
+            XCTFail("Expected operation to fail")
+        } catch {
+            verify(error)
+        }
     }
 
     private func makeExecutable(named name: String, script: String) throws -> URL {
@@ -342,7 +428,7 @@ final class PngquantServiceTests: XCTestCase {
         options: PngquantService.Options
     ) -> Task<Data, Error> {
         Task.detached(priority: .utility) {
-            try PngquantService.compressPNGData(pngData, options: options)
+            try await PngquantService.compressPNGData(pngData, options: options)
         }
     }
 
@@ -386,7 +472,7 @@ final class PngquantServiceTests: XCTestCase {
         return pixels
     }
 
-    private static let pngData = Data(
+    nonisolated private static let pngData = Data(
         [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] +
             Array(repeating: 0xA5, count: 512)
     )

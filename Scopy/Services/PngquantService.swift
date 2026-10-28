@@ -125,16 +125,18 @@ public enum PngquantService {
     }
 
     /// Quantizes PNG bytes. Returns the caller's exact bytes when pngquant leaves the image alone.
-    static func compressPNGData(_ pngData: Data, options: Options) throws -> Data {
+    static func compressPNGData(_ pngData: Data, options: Options) async throws -> Data {
+        guard !Task.isCancelled else { throw PngquantError.cancelled }
         guard isLikelyPNG(pngData) else { return pngData }
 
         let binary = try resolveBinaryPath(preferredPath: options.binaryPath)
         let io = try ScratchDirectory()
+        defer { io.remove() }
         let inputURL = io.url.appendingPathComponent("input.png")
         let outputURL = io.url.appendingPathComponent("output.png")
         try pngData.write(to: inputURL)
 
-        let result = try runProcess(
+        let result = try await runProcess(
             executablePath: binary,
             arguments: options.baseArguments + ["--skip-if-larger", "--output", outputURL.path, options.colorArgument, "--", inputURL.path],
             stderrURL: io.url.appendingPathComponent("stderr"),
@@ -154,12 +156,14 @@ public enum PngquantService {
 
     /// Quantizes a raw RGBA PAM file (see `pamHeader`), which pngquant maps directly instead of decoding a PNG.
     /// Returns `nil` when pngquant cannot reach the quality window, in which case the caller encodes the pixels itself.
-    static func compressPAMFile(_ inputURL: URL, options: Options) throws -> Data? {
+    static func compressPAMFile(_ inputURL: URL, options: Options) async throws -> Data? {
+        guard !Task.isCancelled else { throw PngquantError.cancelled }
         let binary = try resolveBinaryPath(preferredPath: options.binaryPath)
         let io = try ScratchDirectory()
+        defer { io.remove() }
         let outputURL = io.url.appendingPathComponent("output.png")
 
-        let result = try runProcess(
+        let result = try await runProcess(
             executablePath: binary,
             arguments: options.baseArguments + ["--output", outputURL.path, options.colorArgument, "--", inputURL.path],
             stderrURL: io.url.appendingPathComponent("stderr"),
@@ -177,8 +181,8 @@ public enum PngquantService {
         throw PngquantError.failed(exitCode: exit, stderr: stderrText(result.stderr))
     }
 
-    static func compressPNGFileInPlace(_ fileURL: URL, options: Options) throws -> Bool {
-        try compressPNGFileInPlace(
+    static func compressPNGFileInPlace(_ fileURL: URL, options: Options) async throws -> Bool {
+        try await compressPNGFileInPlace(
             fileURL,
             options: options,
             replaceOutputAtomically: replaceFileAtomically
@@ -189,40 +193,49 @@ public enum PngquantService {
         _ fileURL: URL,
         options: Options,
         replaceOutputAtomically: (_ temporaryURL: URL, _ originalURL: URL) throws -> Void
-    ) throws -> Bool {
-        let binary = try resolveBinaryPath(preferredPath: options.binaryPath)
-
-        let originalPath = fileURL.path
-        guard FileManager.default.fileExists(atPath: originalPath) else { return false }
-        guard FileManager.default.isReadableFile(atPath: originalPath) else { return false }
-
-        let tmpPath = originalPath + ".pngquant-\(UUID().uuidString).tmp"
-        let tmpURL = URL(fileURLWithPath: tmpPath)
-        if FileManager.default.fileExists(atPath: tmpPath) {
-            try? FileManager.default.removeItem(at: tmpURL)
-        }
+    ) async throws -> Bool {
+        let tmpURL = URL(fileURLWithPath: fileURL.path + ".pngquant-\(UUID().uuidString).tmp")
         defer {
             try? FileManager.default.removeItem(at: tmpURL)
         }
+        guard try await compressPNGFile(fileURL, to: tmpURL, options: options) else { return false }
+        guard !Task.isCancelled else { throw PngquantError.cancelled }
+        do {
+            try replaceOutputAtomically(tmpURL, fileURL)
+            return true
+        } catch {
+            throw PngquantError.failed(exitCode: -1, stderr: error.localizedDescription)
+        }
+    }
 
+    /// Leaves the input untouched and transfers a successful output to the caller. Partial/no-change output belongs
+    /// to this operation and is removed only after the child has exited, including cancellation and timeout.
+    static func compressPNGFile(_ inputURL: URL, to outputURL: URL, options: Options) async throws -> Bool {
+        guard !Task.isCancelled else { throw PngquantError.cancelled }
+        let binary = try resolveBinaryPath(preferredPath: options.binaryPath)
+        guard FileManager.default.isReadableFile(atPath: inputURL.path) else { return false }
+        guard !FileManager.default.fileExists(atPath: outputURL.path) else {
+            throw PngquantError.failed(exitCode: -1, stderr: "pngquant output already exists")
+        }
+        var keepsOutput = false
+        defer {
+            if !keepsOutput { try? FileManager.default.removeItem(at: outputURL) }
+        }
         let io = try ScratchDirectory()
-        let result = try runProcess(
+        defer { io.remove() }
+        let result = try await runProcess(
             executablePath: binary,
-            arguments: options.baseArguments + ["--skip-if-larger", "--output", tmpPath, options.colorArgument, "--", originalPath],
+            arguments: options.baseArguments + ["--skip-if-larger", "--output", outputURL.path, options.colorArgument, "--", inputURL.path],
             stderrURL: io.url.appendingPathComponent("stderr"),
             timeoutSeconds: options.processTimeoutSeconds
         )
 
         let exit = result.terminationStatus
         if exit == 0 {
-            guard FileManager.default.fileExists(atPath: tmpPath) else { return false }
-            let originalURL = URL(fileURLWithPath: originalPath)
-            do {
-                try replaceOutputAtomically(tmpURL, originalURL)
-                return true
-            } catch {
-                throw PngquantError.failed(exitCode: -1, stderr: error.localizedDescription)
-            }
+            let attributes = try? FileManager.default.attributesOfItem(atPath: outputURL.path)
+            let size = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+            keepsOutput = attributes?[.type] as? FileAttributeType == .typeRegular && size > 0
+            return keepsOutput
         }
 
         if noChangeExitCodes.contains(exit) {
@@ -257,8 +270,8 @@ public enum PngquantService {
         }
     }
 
-    /// A private temporary directory that disappears with the value.
-    private final class ScratchDirectory {
+    /// The calling operation removes this directory in `defer`, after all asynchronous child work has exited.
+    private struct ScratchDirectory {
         let url: URL
 
         init() throws {
@@ -269,7 +282,7 @@ public enum PngquantService {
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
 
-        deinit {
+        func remove() {
             try? FileManager.default.removeItem(at: url)
         }
     }
@@ -279,7 +292,7 @@ public enum PngquantService {
         arguments: [String],
         stderrURL: URL,
         timeoutSeconds requestedTimeoutSeconds: TimeInterval
-    ) throws -> ProcessResult {
+    ) async throws -> ProcessResult {
         guard !Task.isCancelled else { throw PngquantError.cancelled }
 
         let timeoutSeconds = effectiveProcessTimeout(requestedTimeoutSeconds)
@@ -287,40 +300,18 @@ public enum PngquantService {
         let stderrHandle = try FileHandle(forWritingTo: stderrURL)
         defer { try? stderrHandle.close() }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = stderrHandle
-
-        do {
-            try process.run()
-        } catch {
-            throw PngquantError.failed(exitCode: -1, stderr: error.localizedDescription)
-        }
-
-        let timeoutNanoseconds = UInt64(timeoutSeconds * 1_000_000_000)
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        let deadline = startedAt.addingReportingOverflow(timeoutNanoseconds)
-        while process.isRunning {
-            if Task.isCancelled {
-                terminateAndWait(process)
-                throw PngquantError.cancelled
-            }
-            let now = DispatchTime.now().uptimeNanoseconds
-            if deadline.overflow || now >= deadline.partialValue {
-                terminateAndWait(process)
-                throw PngquantError.timedOut(timeoutSeconds: timeoutSeconds)
-            }
-            Thread.sleep(forTimeInterval: 0.002)
-        }
-        process.waitUntilExit()
-
+        let execution = ProcessExecution()
+        let status = try await execution.run(
+            executablePath: executablePath,
+            arguments: arguments,
+            stderr: stderrHandle,
+            timeoutSeconds: timeoutSeconds
+        )
+        guard !Task.isCancelled else { throw PngquantError.cancelled }
         try? stderrHandle.close()
 
         return ProcessResult(
-            terminationStatus: process.terminationStatus,
+            terminationStatus: status,
             stderr: (try? Data(contentsOf: stderrURL)) ?? Data()
         )
     }
@@ -330,21 +321,92 @@ public enum PngquantService {
         return min(600, max(0.01, requested))
     }
 
-    private static func terminateAndWait(_ process: Process) {
-        guard process.isRunning else {
-            process.waitUntilExit()
-            return
+    /// Owns one child through its actual termination. Cancellation requests TERM, then KILL after a grace period;
+    /// only the termination callback releases the caller and its scratch files. No executor thread polls or waits.
+    private actor ProcessExecution {
+        private enum State {
+            case idle
+            case running(Process, CheckedContinuation<Int32, Error>)
+            case finished
         }
 
-        process.terminate()
-        let graceDeadline = DispatchTime.now().uptimeNanoseconds + 250_000_000
-        while process.isRunning, DispatchTime.now().uptimeNanoseconds < graceDeadline {
-            Thread.sleep(forTimeInterval: 0.005)
+        private var state = State.idle
+        private var stopReason: PngquantError?
+        private var deadlineTask: Task<Void, Never>?
+        private var killTask: Task<Void, Never>?
+
+        func run(executablePath: String, arguments: [String], stderr: FileHandle, timeoutSeconds: TimeInterval) async throws -> Int32 {
+            try await withTaskCancellationHandler {
+                guard !Task.isCancelled else { throw PngquantError.cancelled }
+                if let stopReason { throw stopReason }
+                return try await withCheckedThrowingContinuation { continuation in
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: executablePath)
+                    process.arguments = arguments
+                    process.standardInput = FileHandle.nullDevice
+                    process.standardOutput = FileHandle.nullDevice
+                    process.standardError = stderr
+                    process.terminationHandler = { _ in
+                        Task { await self.didExit() }
+                    }
+                    state = .running(process, continuation)
+                    do {
+                        try process.run()
+                    } catch {
+                        finish(.failure(PngquantError.failed(exitCode: -1, stderr: error.localizedDescription)))
+                        return
+                    }
+                    deadlineTask = Task {
+                        do { try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000)) }
+                        catch { return }
+                        self.stop(.timedOut(timeoutSeconds: timeoutSeconds))
+                    }
+                }
+            } onCancel: {
+                Task { await self.stop(.cancelled) }
+            }
         }
-        if process.isRunning {
-            _ = Darwin.kill(process.processIdentifier, SIGKILL)
+
+        private func stop(_ reason: PngquantError) {
+            guard stopReason == nil else { return }
+            switch state {
+            case .idle:
+                stopReason = reason
+            case .running(let process, _):
+                guard process.isRunning else { return }
+                stopReason = reason
+                process.terminate()
+                killTask = Task {
+                    do { try await Task.sleep(nanoseconds: 250_000_000) }
+                    catch { return }
+                    if case .running(let process, _) = self.state, process.isRunning {
+                        _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                    }
+                }
+            case .finished:
+                break
+            }
         }
-        process.waitUntilExit()
+
+        private func didExit() {
+            guard case .running(let process, _) = state else { return }
+            if let stopReason {
+                finish(.failure(stopReason))
+            } else {
+                finish(.success(process.terminationStatus))
+            }
+        }
+
+        private func finish(_ result: Result<Int32, Error>) {
+            guard case .running(let process, let continuation) = state else { return }
+            state = .finished
+            process.terminationHandler = nil
+            deadlineTask?.cancel()
+            deadlineTask = nil
+            killTask?.cancel()
+            killTask = nil
+            continuation.resume(with: result)
+        }
     }
 
     private static func stderrText(_ data: Data) -> String {
@@ -352,41 +414,41 @@ public enum PngquantService {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    public static func compressBestEffort(_ pngData: Data, options: Options) -> Data {
+    public static func compressBestEffort(_ pngData: Data, options: Options) async -> Data {
         do {
-            let output = try compressPNGData(pngData, options: options)
+            let output = try await compressPNGData(pngData, options: options)
             if output.count > 0, output.count != pngData.count {
                 ScopyLog.pngquant.debug("pngquant compressed PNG: \(pngData.count, privacy: .public) -> \(output.count, privacy: .public) bytes")
             }
             return output
         } catch {
-            ScopyLog.pngquant.warning("pngquant skipped: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.pngquant.warning("pngquant skipped: \(error.localizedDescription, privacy: .private)")
             return pngData
         }
     }
 
     /// Quantizes a PAM file, or returns `nil` when pngquant declined or failed so the caller can encode the pixels itself.
     /// Cancellation is not a pngquant failure: it throws `CancellationError` so the caller stops instead of encoding.
-    public static func compressPAMFileBestEffort(_ inputURL: URL, options: Options) throws -> Data? {
+    public static func compressPAMFileBestEffort(_ inputURL: URL, options: Options) async throws -> Data? {
         do {
-            return try compressPAMFile(inputURL, options: options)
+            return try await compressPAMFile(inputURL, options: options)
         } catch PngquantError.cancelled {
             throw CancellationError()
         } catch {
-            ScopyLog.pngquant.warning("pngquant PAM skipped: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.pngquant.warning("pngquant PAM skipped: \(error.localizedDescription, privacy: .private)")
             return nil
         }
     }
 
-    static func compressFileBestEffort(_ fileURL: URL, options: Options) -> Bool {
+    static func compressFileBestEffort(_ fileURL: URL, options: Options) async -> Bool {
         do {
-            let replaced = try compressPNGFileInPlace(fileURL, options: options)
+            let replaced = try await compressPNGFileInPlace(fileURL, options: options)
             if replaced {
                 ScopyLog.pngquant.debug("pngquant compressed PNG file in-place: \(fileURL.path, privacy: .private)")
             }
             return replaced
         } catch {
-            ScopyLog.pngquant.warning("pngquant file skipped: \(error.localizedDescription, privacy: .public)")
+            ScopyLog.pngquant.warning("pngquant file skipped: \(error.localizedDescription, privacy: .private)")
             return false
         }
     }

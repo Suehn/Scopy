@@ -305,7 +305,8 @@ enum ExportRaster {
     static func encodeExportCanvas(
         _ canvas: ExportBitmapCanvas,
         pngquantOptions: PngquantService.Options?
-    ) throws -> MarkdownExportService.ExportOutcome {
+    ) async throws -> MarkdownExportService.ExportOutcome {
+        try Task.checkCancellation()
         canvas.trimBlankLeadingRowsIfNeeded()
         if let pngquantOptions {
             var finalized = true
@@ -313,10 +314,10 @@ enum ExportRaster {
                 try canvas.finalizeFile()
             } catch {
                 finalized = false
-                MarkdownExportService.logger.warning("Export canvas could not be finalized for pngquant: \(error.localizedDescription, privacy: .public)")
+                ScopyLog.export.warning("Export canvas could not be finalized for pngquant: \(error.localizedDescription, privacy: .private)")
             }
             // A cancelled export stops here instead of falling back to ImageIO.
-            if finalized, let quantized = try PngquantService.compressPAMFileBestEffort(canvas.fileURL, options: pngquantOptions) {
+            if finalized, let quantized = try await PngquantService.compressPAMFileBestEffort(canvas.fileURL, options: pngquantOptions) {
                 return MarkdownExportService.ExportOutcome(
                     pngData: quantized,
                     stats: MarkdownExportService.ExportStats(finalPNGBytes: quantized.count, pngquantApplied: true)
@@ -331,6 +332,35 @@ enum ExportRaster {
         return MarkdownExportService.ExportOutcome(
             pngData: png,
             stats: MarkdownExportService.ExportStats(finalPNGBytes: png.count, pngquantApplied: false)
+        )
+    }
+
+    static func makeTiledCanvas(width: Int, height: Int) throws -> ExportBitmapCanvas {
+        let canvas = try ExportBitmapCanvas.make(width: width, height: height, stage: .stitchTiles)
+        canvas.context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        canvas.context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return canvas
+    }
+
+    /// Places a snapshot by its exact content interval so rounding cannot accumulate between tiles.
+    static func drawTile(
+        _ image: CGImage,
+        on canvas: ExportBitmapCanvas,
+        contentStartPoints: CGFloat,
+        captureHeightPoints: CGFloat,
+        outputScaleFactor: CGFloat
+    ) {
+        let normalizedTile = scaleCGImageIfNeeded(image: image, targetWidthPixels: canvas.width)
+        let contentStartPixels = max(0, Int(floor(contentStartPoints * outputScaleFactor)))
+        let contentEndPixels = min(
+            canvas.height,
+            max(contentStartPixels + 1, Int(ceil((contentStartPoints + captureHeightPoints) * outputScaleFactor)))
+        )
+        let destinationHeightPixels = max(1, contentEndPixels - contentStartPixels)
+        let drawY = max(0, canvas.height - contentEndPixels)
+        canvas.context.draw(
+            normalizedTile,
+            in: CGRect(x: 0, y: drawY, width: canvas.width, height: destinationHeightPixels)
         )
     }
 

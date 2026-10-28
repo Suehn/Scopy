@@ -1134,7 +1134,7 @@ actor ClipboardBackend {
         let originalBytes = rawData.count
         do {
             let compressionTask = Task.detached(priority: .utility) {
-                try PngquantService.compressPNGData(rawData, options: options)
+                try await PngquantService.compressPNGData(rawData, options: options)
             }
             let compressed = try await withTaskCancellationHandler(operation: {
                 try await compressionTask.value
@@ -1242,7 +1242,7 @@ actor ClipboardBackend {
             }
 
             let compressionTask = Task.detached(priority: .utility) {
-                try PngquantService.compressPNGFileInPlace(stagedURL, options: options)
+                try await PngquantService.compressPNGFileInPlace(stagedURL, options: options)
             }
             let replaced = try await withTaskCancellationHandler(operation: {
                 try await compressionTask.value
@@ -1664,7 +1664,7 @@ actor ClipboardBackend {
         switch content.payload {
         case .data(let data):
             let compressed = await Task.detached(priority: .utility) {
-                PngquantService.compressBestEffort(data, options: options)
+                await PngquantService.compressBestEffort(data, options: options)
             }.value
 
             guard compressed != data else { return content }
@@ -1692,7 +1692,7 @@ actor ClipboardBackend {
                     return content
                 }
                 let replaced = await Task.detached(priority: .utility) {
-                    PngquantService.compressFileBestEffort(copiedURL, options: options)
+                    await PngquantService.compressFileBestEffort(copiedURL, options: options)
                 }.value
                 guard replaced else {
                     try? FileManager.default.removeItem(at: copiedURL)
@@ -1702,7 +1702,7 @@ actor ClipboardBackend {
                 preparedOwnership = .transient
             } else {
                 let replaced = await Task.detached(priority: .utility) {
-                    PngquantService.compressFileBestEffort(url, options: options)
+                    await PngquantService.compressFileBestEffort(url, options: options)
                 }.value
                 guard replaced else { return content }
                 preparedURL = url

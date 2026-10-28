@@ -33,7 +33,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
     private var navigationContinuation: CheckedContinuation<Void, Error>?
     private var stage: MarkdownExportService.ExportStage = .loadHTML {
         didSet {
-            MarkdownExportService.logger.info("Export stage \(oldValue.rawValue, privacy: .public) -> \(self.stage.rawValue, privacy: .public)")
+            ScopyLog.export.info("Export stage \(oldValue.rawValue, privacy: .public) -> \(self.stage.rawValue, privacy: .public)")
             if let progress = stage.progress { reportProgress(progress) }
         }
     }
@@ -391,7 +391,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         }()
         if shouldBypassPDFForVeryTallContent {
             let pdfBypassReason = shouldBypassPDFFromHeight ? "height" : "rasterBudget"
-            MarkdownExportService.logger.info(
+            ScopyLog.export.info(
                 "Skipping PDF export and falling back to snapshot export. reason=\(pdfBypassReason, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) projectedPixels=\(projectedOutputTotalPixels, privacy: .public)"
             )
         }
@@ -413,7 +413,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 if requiresPDFExport {
                     throw error
                 }
-                MarkdownExportService.logger.error("PDF export failed; falling back to snapshot export. scale=\(appliedScale, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) error=\(String(describing: error), privacy: .public)")
+                ScopyLog.export.error("PDF export failed; falling back to snapshot export. scale=\(appliedScale, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) error=\(String(describing: error), privacy: .private)")
             }
         }
 
@@ -426,7 +426,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 throw CancellationError()
             } catch {
                 // Fall back to tiled snapshots for robustness (long content or intermittent WebKit snapshot failures).
-                MarkdownExportService.logger.error("Single snapshot failed; falling back to tiled export. scale=\(appliedScale, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) error=\(String(describing: error), privacy: .public)")
+                ScopyLog.export.error("Single snapshot failed; falling back to tiled export. scale=\(appliedScale, privacy: .public) heightPt=\(scrollHeightPoints, privacy: .public) error=\(String(describing: error), privacy: .private)")
             }
         }
 
@@ -489,7 +489,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
                     contentScaleCompensation: contentScaleCompensation
                 )
                 try Task.checkCancellation()
-                return try ExportRaster.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
+                return try await ExportRaster.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
             }
         }
 
@@ -535,7 +535,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         return try await runDetached {
             let canvas = try ExportRaster.canvasFromSnapshot(cg, targetWidthPixels: targetWidth)
             try Task.checkCancellation()
-            return try ExportRaster.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
+            return try await ExportRaster.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
         }
     }
 
@@ -563,15 +563,11 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
             )
         }
 
-        let canvas = try ExportBitmapCanvas.make(
-            width: targetWidthPixelsInt,
-            height: totalHeightPixelsInt,
-            stage: .stitchTiles
-        )
-        let ctx = canvas.context
-
-        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(targetWidthPixelsInt), height: CGFloat(totalHeightPixelsInt)))
+        // The lifetime task owns this canvas. Every mutation is a joined background step, so WebKit stays on the
+        // main actor while allocation, scaling and drawing never run there or overlap access to the same pixels.
+        let canvas = try await runDetached {
+            try ExportRaster.makeTiledCanvas(width: targetWidthPixelsInt, height: totalHeightPixelsInt)
+        }
 
         let overlapPoints = max(0, MarkdownExportRenderConstants.snapshotTileOverlapPoints)
         var scrollYPoints: CGFloat = 0
@@ -609,29 +605,16 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
 
             let tileCG = try await takeSnapshot(webView: webView, config: config)
 
-            let normalizedTile = ExportRaster.scaleCGImageIfNeeded(image: tileCG, targetWidthPixels: targetWidthPixelsInt)
-
-            // Place each tile using the exact content interval it represents in the final image.
-            // This avoids cumulative rounding drift between tiles, which can otherwise show up as
-            // 1-2px seams or missing rows in very tall exports.
-            let contentStartPixels = max(0, Int(floor(capturedContentStartPoints * outputScaleFactor)))
-            let contentEndPixels = min(
-                totalHeightPixelsInt,
-                max(contentStartPixels + 1, Int(ceil((capturedContentStartPoints + captureHeightPoints) * outputScaleFactor)))
-            )
-            let destinationHeightPixels = max(1, contentEndPixels - contentStartPixels)
-            let drawY = max(0, totalHeightPixelsInt - contentEndPixels)
-
             try advance(to: .stitchTiles)
-            ctx.draw(
-                normalizedTile,
-                in: CGRect(
-                    x: 0,
-                    y: CGFloat(drawY),
-                    width: CGFloat(targetWidthPixelsInt),
-                    height: CGFloat(destinationHeightPixels)
+            try await runDetached {
+                ExportRaster.drawTile(
+                    tileCG,
+                    on: canvas,
+                    contentStartPoints: capturedContentStartPoints,
+                    captureHeightPoints: captureHeightPoints,
+                    outputScaleFactor: outputScaleFactor
                 )
-            )
+            }
 
             if remaining <= tileViewportHeightPoints { break }
             scrollYPoints += tileStepPoints
@@ -640,7 +623,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         try advance(to: .pngEncoding)
         let pngquantOptions = preservesArtworkColors ? nil : self.pngquantOptions
         return try await runDetached {
-            try ExportRaster.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
+            try await ExportRaster.encodeExportCanvas(canvas, pngquantOptions: pngquantOptions)
         }
     }
 
@@ -807,15 +790,21 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
         stage = next
     }
 
-    /// Runs CPU-bound capture and encoding off the main actor. Cancelling the export cancels this work (pngquant is
-    /// terminated), and the export does not finish until the work has exited.
-    private func runDetached<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
-        let task = Task.detached(priority: .userInitiated, operation: work)
-        return try await withTaskCancellationHandler {
+    /// Joins each background step before releasing its resources or starting the next one. Core Graphics/ImageIO
+    /// calls finish cooperatively at the next boundary; pngquant cancellation waits for its process to exit.
+    private func runDetached<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        try Task.checkCancellation()
+        let task = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try await work()
+        }
+        let result = try await withTaskCancellationHandler {
             try await task.value
         } onCancel: {
             task.cancel()
         }
+        try Task.checkCancellation()
+        return result
     }
 
     // MARK: - Layout preparation and settle
@@ -866,7 +855,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
                 }
                 adjustAttempts += 1
                 if adjustAttempts < 3 { continue }
-                MarkdownExportService.logger.warning("Wide-content adjustment did not run after \(adjustAttempts, privacy: .public) attempts; exporting the measured layout")
+                ScopyLog.export.warning("Wide-content adjustment did not run after \(adjustAttempts, privacy: .public) attempts; exporting the measured layout")
                 didAdjustWideContent = true
                 continue
             }
@@ -988,7 +977,7 @@ final class ExportCoordinator: NSObject, WKNavigationDelegate {
             }
             let ready = !requireRenderReady || sample.renderReady
             if ready, sample.height > 0, now - framesChangedAt > 0.3, now - heightStableSince >= 0.45 {
-                MarkdownExportService.logger.info("Layout watcher frames stalled; accepting time-based stability")
+                ScopyLog.export.info("Layout watcher frames stalled; accepting time-based stability")
                 return (sample, true)
             }
         }
