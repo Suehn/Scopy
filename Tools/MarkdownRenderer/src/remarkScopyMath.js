@@ -1,9 +1,10 @@
 import remarkMath from "remark-math";
 import { math } from "micromark-extension-math";
+import { backslashMath } from "./scopyBackslashMath.js";
 
-// Keep upstream math tokenization/AST handling. Only single-dollar acceptance differs:
-// Pandoc-style inner whitespace rules plus boundaries for currency, identifiers and paths.
-export function remarkScopyMath() {
+// Keep upstream dollar tokenization/AST handling, with single-dollar boundaries for currency,
+// identifiers and paths. Backslash delimiters enter the same math nodes through native constructs.
+export function remarkScopyMath(options = {}) {
   remarkMath.call(this, { singleDollarTextMath: false });
   const upstream = math({ singleDollarTextMath: true }).text[36];
   this.data().micromarkExtensions.push({
@@ -31,4 +32,5 @@ export function remarkScopyMath() {
       }
     }
   });
+  this.data().micromarkExtensions.push(backslashMath(options.source || ""));
 }

@@ -17,7 +17,6 @@ import {
 } from "./remarkScopySafeHTML.js";
 import { codexFileIcon, codexPluginIcon, localFileKind } from "./scopyCodexIcons.js";
 import { scopySourceIcon, rehypeScopyNativeSourceIcons } from "./scopySourceIcon.js";
-import { preprocessBackslashMath } from "./scopyBackslashMathPreprocessor.js";
 import { repairATXHeadings } from "./scopyATXHeadings.js";
 import { normalizeLatexDocument } from "./scopyLatexDocument.js";
 import { normalizeLatexInline } from "./scopyLatexInline.js";
@@ -48,7 +47,7 @@ function renderInternal(source, policy = {}) {
   const normalizedPolicy = normalizePolicy(policy);
   // Source-level repairs run in this order: the scientific-profile LaTeX document and inline
   // repairs (policy-gated); heading whitespace, so a flat `#`-led row is classified before table
-  // detection; table code-span pipes; then backslash math.
+  // detection; then table code-span pipes. Explicit math belongs to the parser.
   const originalSource = String(source || "");
   let scientificRepaired = originalSource;
   if (normalizedPolicy.allowLatexDocumentNormalize) {
@@ -59,14 +58,13 @@ function renderInternal(source, policy = {}) {
   }
   const headingRepaired = repairATXHeadings(scientificRepaired);
   const tableCodeSpanGuarded = protectTableCodeSpanPipes(headingRepaired);
-  const preprocessed = preprocessBackslashMath(tableCodeSpanGuarded);
   const repairMetadata = { repairedMathCount: 0 };
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm, { singleTilde: false })
     .use(remarkCjkFriendly)
     .use(remarkBreaks)
-    .use(remarkScopyMath)
+    .use(remarkScopyMath, { source: tableCodeSpanGuarded })
     .use(remarkScopyLooseMathRepair, {
       policy: normalizedPolicy,
       metadata: repairMetadata
@@ -99,7 +97,7 @@ function renderInternal(source, policy = {}) {
     .use(rehypeHighlight, scopyHighlightOptions)
     .use(rehypeStringify);
 
-  const file = processor.processSync(preprocessed.markdown);
+  const file = processor.processSync(tableCodeSpanGuarded);
   const html = String(file);
   for (const message of file.messages) {
     warnings.push(String(message.reason || message));

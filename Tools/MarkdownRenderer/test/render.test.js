@@ -383,6 +383,50 @@ test("does not rewrite backslash math inside code or links", () => {
   assert.match(result.html, /katex/);
 });
 
+test("the parser owns backslash-math boundaries in code, multiline spans, and raw HTML", () => {
+  const codeSources = [
+    "    \\(literal\\)",
+    "\t\\(literal\\)",
+    "- ```text\n  \\(literal\\)\n  ```",
+    "> ```text\n> \\(literal\\)\n> ```",
+    "`start\n\\(literal\\)\nend`",
+    "``start\r\n\\(literal\\)\r\nend``",
+    "<script>\n\\(literal\\)\n</script>"
+  ];
+  for (const source of codeSources) {
+    const result = render(`${source}\n\nOutside \\(x\\)`);
+    assert.equal(result.metadata.mathCount, 1, source);
+    assert.ok(result.html.includes("\\(literal\\)"), source);
+    assert.match(result.html, /data-math-source="x"/);
+  }
+  // Four columns continue an existing paragraph; indentation alone cannot classify code.
+  assert.equal(render("paragraph\n    \\(x\\)").metadata.mathCount, 1);
+  const table = render("| H | B |\n| --- | --- |\n| \\(a|b\\) | z |");
+  assert.equal(table.metadata.mathCount, 0);
+  assert.match(table.html, /<td>\\\(a<\/td>\n<td>b\\\)<\/td>/);
+});
+
+test("backslash link labels retain ordinary inline syntax and rejected links retain math", () => {
+  for (const destination of ["(https://example.com)", "[missing]"]) {
+    const result = render(`[\\(x *em*\\)]${destination}`);
+    assert.equal(result.metadata.mathCount, 0);
+    assert.match(result.html, /\(x <em>em<\/em>\)/);
+  }
+  assert.equal(render("[\\(x\\)](unclosed").metadata.mathCount, 1);
+});
+
+test("backslash display math retains its container and the complete delimited source", () => {
+  const quoted = render("> \\[\n> x+1\n> \\]");
+  assert.equal(quoted.metadata.mathCount, 1);
+  assert.match(quoted.html, /^<blockquote>\n<span class="scopy-math-host scopy-math-display-host"/);
+  assert.match(quoted.html, /data-math-source="x\+1"/);
+
+  const nestedDollars = render("\\(a $$ b\\)");
+  assert.equal(nestedDollars.metadata.mathCount, 1);
+  assert.match(nestedDollars.html, /data-math-source="a \$\$ b"/);
+  assert.match(render("  \\[ x \\]").html, /data-math-source=" x "/);
+});
+
 test("renders the closed inline safe-tag extension without parsing code fences", () => {
   const result = render("Text <kbd>Cmd</kbd> and <mark>hot</mark>\n\n```\n<kbd>code</kbd>\n```");
 
