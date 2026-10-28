@@ -88,9 +88,9 @@ test-snapshot-perf-release: setup
 		{ \
 			echo "Snapshot release bench env: DB=$$DB_PATH cmdTarget=$$CMD_TARGET cmTarget=$$CM_TARGET"; \
 			swift build -c release --product ScopyBench > $(LOG_DIR)/scopybench.release.build.log 2>&1; \
-			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cmd --iters 30 --warmup 20 --json > $(LOG_DIR)/snapshot-release-cmd.jsonl; \
+			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --no-thumbnails --mode fuzzyPlus --sort relevance --query cmd --iters 30 --warmup 20 --json > $(LOG_DIR)/snapshot-release-cmd.jsonl; \
 			./.build/release/ScopyBench --layer engine --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cm --reset-query md --prepare-short-index --iters 30 --warmup 3 --json > $(LOG_DIR)/snapshot-release-cm.jsonl; \
-			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --mode fuzzyPlus --sort relevance --query cm --iters 1 --warmup 0 --json > $(LOG_DIR)/snapshot-release-cm-cold.jsonl; \
+			./.build/release/ScopyBench --layer service --db "$$DB_PATH" --no-thumbnails --mode fuzzyPlus --sort relevance --query cm --iters 1 --warmup 0 --json > $(LOG_DIR)/snapshot-release-cm-cold.jsonl; \
 			CMD_P95=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cmd.jsonl) || (echo "Failed to parse cmd p95 from $(LOG_DIR)/snapshot-release-cmd.jsonl" && exit 1); \
 			CM_P95=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cm.jsonl) || (echo "Failed to parse cm p95 from $(LOG_DIR)/snapshot-release-cm.jsonl" && exit 1); \
 			CM_COLD=$$(python3 scripts/extract_p95.py $(LOG_DIR)/snapshot-release-cm-cold.jsonl) || (echo "Failed to parse cold cm latency from $(LOG_DIR)/snapshot-release-cm-cold.jsonl" && exit 1); \

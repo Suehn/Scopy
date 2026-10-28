@@ -215,7 +215,7 @@ These choices apply the [Astra instruction-following and verification guidance](
 
 ### Performance Validation
 
-- `make test-snapshot-perf-release` is the backend search gate on a `make snapshot-perf-db` copy; record the copy's SHA-256 so both sides of a comparison use the same data. Its prepared `cm` run searches `md` untimed before each sample, so every sample ranks afresh instead of reusing the cached relevance scores.
+- `make test-snapshot-perf-release` is the backend search gate on a `make snapshot-perf-db` copy; record the copy's SHA-256 so both sides of a comparison use the same data. Service-layer runs disable thumbnail scheduling because a database-only snapshot does not include its external media. Its prepared `cm` run searches `md` untimed before each sample, so every sample ranks afresh instead of reusing the cached relevance scores. Media and real-app comparisons require a complete isolated seed.
 - `make perf-search-warm-load` reports full-index warm-load latency and peak RSS.
 - ScopyBench `--reset-query <text>` searches another query untimed before every run, so each timed search misses the per-query ranking cache as a new keystroke does; `--pages <n>` times n consecutive pages, as scrolling loads them. Both are engine-layer options.
 - `make perf-scroll-wheel`, `make perf-search-type`, and `make perf-capture` drive the Release app with real input (`scripts/perf-scroll/`); they need `perf-db`, Accessibility trust for the terminal, and a quiet desktop. They fail closed: a run whose workload did not reach the app exits non-zero.
