@@ -43,6 +43,12 @@ public struct LinkEnrichmentFetcher: Sendable {
         self.sessionBox = LinkEnrichmentSessionBox(configuration: configuration, delegate: delegate)
     }
 
+    #if DEBUG
+    func setNextTaskCompletionGateForTesting(_ gate: @escaping @Sendable () -> Void) {
+        sessionBox.delegate.setNextTaskCompletionGateForTesting(gate)
+    }
+    #endif
+
     public func enrich(urls: [String]) async -> [String: LinkEnrichmentEntry] {
         var entries: [String: LinkEnrichmentEntry] = [:]
         var decodedBudget = Self.totalDecodedImageBudget
@@ -472,6 +478,13 @@ private final class LinkEnrichmentSessionDelegate: NSObject, URLSessionDataDeleg
     private let lock = NSLock()
     private var requests: [Int: LinkEnrichmentBoundedRequest] = [:]
     private let isAllowedRedirect: @Sendable (URL) -> Bool
+    #if DEBUG
+    private var nextTaskCompletionGateForTesting: (@Sendable () -> Void)?
+
+    func setNextTaskCompletionGateForTesting(_ gate: @escaping @Sendable () -> Void) {
+        lock.withLock { nextTaskCompletionGateForTesting = gate }
+    }
+    #endif
 
     init(isAllowedRedirect: @escaping @Sendable (URL) -> Bool) {
         self.isAllowedRedirect = isAllowedRedirect
@@ -530,6 +543,14 @@ private final class LinkEnrichmentSessionDelegate: NSObject, URLSessionDataDeleg
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        #if DEBUG
+        let gate = lock.withLock {
+            let gate = nextTaskCompletionGateForTesting
+            nextTaskCompletionGateForTesting = nil
+            return gate
+        }
+        gate?()
+        #endif
         let request = lock.withLock { requests.removeValue(forKey: task.taskIdentifier) }
         request?.complete(error: error)
     }
@@ -552,8 +573,7 @@ private final class LinkEnrichmentBoundedRequest: @unchecked Sendable {
     private var response: URLResponse?
     private var data = Data()
     private var isCancelled = false
-    private var isComplete = false
-    private var pendingResult: Result<(Data, URLResponse), Error>?
+    private var failure: Failure?
 
     init(maximumBytes: Int) {
         self.maximumBytes = maximumBytes
@@ -563,19 +583,14 @@ private final class LinkEnrichmentBoundedRequest: @unchecked Sendable {
         task: URLSessionTask,
         continuation: CheckedContinuation<(Data, URLResponse), Error>
     ) {
-        let pendingResult: Result<(Data, URLResponse), Error>? = lock.withLock {
+        let shouldCancel = lock.withLock {
             self.task = task
-            if let pendingResult = self.pendingResult {
-                self.pendingResult = nil
-                return pendingResult
-            }
             self.continuation = continuation
-            return nil
+            return isCancelled
         }
-        if let pendingResult {
-            task.cancel()
-            continuation.resume(with: pendingResult)
-        }
+        // URLSession acknowledges cancellation through didCompleteWithError, including
+        // cancellation of a suspended task. Install the continuation before requesting it.
+        if shouldCancel { task.cancel() }
     }
 
     func cancel() {
@@ -584,69 +599,53 @@ private final class LinkEnrichmentBoundedRequest: @unchecked Sendable {
             return self.task
         }
         task?.cancel()
-        finish(.failure(CancellationError()))
     }
 
     func receive(response: URLResponse) -> Bool {
-        let exceedsDeclaredSize = response.expectedContentLength > Int64(maximumBytes)
-        if exceedsDeclaredSize {
-            finish(.failure(Failure.responseTooLarge))
-            return false
-        }
-        return lock.withLock {
-            guard !isComplete else { return false }
+        lock.withLock {
+            guard continuation != nil, !isCancelled, failure == nil else { return false }
+            guard response.expectedContentLength <= Int64(maximumBytes) else {
+                failure = .responseTooLarge
+                return false
+            }
             self.response = response
             return true
         }
     }
 
     func receive(data newData: Data) -> Bool {
-        let result: Result<(Data, URLResponse), Error>? = lock.withLock {
-            guard !isComplete else { return .failure(CancellationError()) }
+        lock.withLock {
+            guard continuation != nil, !isCancelled, failure == nil else { return false }
             guard newData.count <= maximumBytes - data.count else {
-                isComplete = true
-                return .failure(Failure.responseTooLarge)
+                failure = .responseTooLarge
+                return false
             }
             data.append(newData)
-            return nil
+            return true
         }
-        guard let result else { return true }
-        resume(result)
-        return false
     }
 
+    /// Only URLSession's terminal callback completes the wait. Cancellation and byte-limit
+    /// failures stop buffering immediately, but the caller retains its permit until this point.
     func complete(error: Error?) {
-        let result: Result<(Data, URLResponse), Error>? = lock.withLock {
-            guard !isComplete else { return nil }
-            isComplete = true
-            if isCancelled { return .failure(CancellationError()) }
-            if let error { return .failure(error) }
-            guard let response else { return .failure(Failure.missingResponse) }
-            return .success((data, response))
-        }
-        if let result { resume(result) }
-    }
-
-    private func finish(_ result: Result<(Data, URLResponse), Error>) {
-        let continuation: CheckedContinuation<(Data, URLResponse), Error>? = lock.withLock {
-            guard !isComplete else { return nil }
-            isComplete = true
-            guard let continuation = self.continuation else {
-                pendingResult = result
-                return nil
+        let completion: (CheckedContinuation<(Data, URLResponse), Error>, Result<(Data, URLResponse), Error>)? = lock.withLock {
+            guard let continuation else { return nil }
+            self.continuation = nil
+            task = nil
+            let result: Result<(Data, URLResponse), Error>
+            if isCancelled {
+                result = .failure(CancellationError())
+            } else if let failure {
+                result = .failure(failure)
+            } else if let error {
+                result = .failure(error)
+            } else if let response {
+                result = .success((data, response))
+            } else {
+                result = .failure(Failure.missingResponse)
             }
-            self.continuation = nil
-            return continuation
+            return (continuation, result)
         }
-        continuation?.resume(with: result)
-    }
-
-    private func resume(_ result: Result<(Data, URLResponse), Error>) {
-        let continuation = lock.withLock {
-            let continuation = self.continuation
-            self.continuation = nil
-            return continuation
-        }
-        continuation?.resume(with: result)
+        if let (continuation, result) = completion { continuation.resume(with: result) }
     }
 }

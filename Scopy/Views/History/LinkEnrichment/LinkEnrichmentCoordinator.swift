@@ -1,15 +1,19 @@
 import Foundation
 import ScopyKit
 
-/// Orchestrates opt-in link enrichment: one idempotent ensure per markdown content key,
-/// with in-flight de-duplication. On completion the frozen payload is persisted (even when
+/// Orchestrates opt-in link enrichment: visible previews share one task per content key.
+/// The last consumer cancels the task. On completion the frozen payload is persisted (even when
 /// empty, so ineligible or unreachable content is not re-fetched on every hover) and a
 /// notification lets the visible preview re-render with the enriched context.
 actor LinkEnrichmentCoordinator {
     static let shared = LinkEnrichmentCoordinator()
     private static let globalWorkPool = AsyncPermitPool(limit: 2, maxPending: 4)
 
-    private var inFlight: Set<String> = []
+    private struct Flight {
+        let task: Task<Void, Never>
+        var consumers: Set<UUID>
+    }
+    private var flights: [String: Flight] = [:]
     private let store: LinkEnrichmentStore
     private let fetcher: LinkEnrichmentFetcher
     private let workPool: AsyncPermitPool
@@ -26,9 +30,36 @@ actor LinkEnrichmentCoordinator {
 
     /// Called from the preview path whenever the user has enabled link enrichment.
     func ensureEnrichment(markdown: String) async {
+        guard !Task.isCancelled else { return }
         let contentKey = LinkEnrichmentContentKey.make(for: markdown)
-        guard inFlight.insert(contentKey).inserted else { return }
-        defer { inFlight.remove(contentKey) }
+        let consumer = UUID()
+        let task: Task<Void, Never>
+        if let flight = flights[contentKey] {
+            task = flight.task
+            flights[contentKey]?.consumers.insert(consumer)
+        } else {
+            task = Task { await self.fetchAndPersist(markdown: markdown, contentKey: contentKey) }
+            flights[contentKey] = Flight(task: task, consumers: [consumer])
+        }
+
+        await withTaskCancellationHandler {
+            await task.value
+            release(contentKey: contentKey, consumer: consumer)
+        } onCancel: {
+            Task { await self.release(contentKey: contentKey, consumer: consumer) }
+        }
+    }
+
+    private func release(contentKey: String, consumer: UUID) {
+        // A cancelled flight may still be draining after its replacement is admitted.
+        // Its consumer IDs cannot release or cancel that new same-key flight.
+        guard flights[contentKey]?.consumers.remove(consumer) != nil else { return }
+        if flights[contentKey]?.consumers.isEmpty == true {
+            flights.removeValue(forKey: contentKey)?.task.cancel()
+        }
+    }
+
+    private func fetchAndPersist(markdown: String, contentKey: String) async {
         guard await store.payload(forContentKey: contentKey) == nil, !Task.isCancelled else { return }
         let urls = LinkEnrichmentEligibility.candidateURLs(in: markdown)
 
@@ -56,4 +87,10 @@ actor LinkEnrichmentCoordinator {
             )
         }
     }
+
+    #if DEBUG
+    func consumerCountForTesting(contentKey: String) -> Int {
+        flights[contentKey]?.consumers.count ?? 0
+    }
+    #endif
 }

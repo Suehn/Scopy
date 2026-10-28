@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 import XCTest
 @testable import Scopy
@@ -227,6 +228,104 @@ final class LinkEnrichmentTests: XCTestCase {
         )
     }
 
+    func testCancellingHoverKeepsThePinnedConsumerOnTheSameFetch() async throws {
+        let started = expectation(description: "shared enrichment request started")
+        LinkEnrichmentURLProtocolStub.state.configure(.deferredHTML, started: started)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-enrichment-handoff-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LinkEnrichmentStore(directory: directory)
+        let coordinator = LinkEnrichmentCoordinator(
+            store: store,
+            fetcher: makeFetcher { _ in ["93.184.216.34"] },
+            workPool: AsyncPermitPool(limit: 1, maxPending: 1)
+        )
+        let url = "https://public.example/shared?utm_source=chatgpt.com"
+        let markdown = "# News\n\n- [One](\(url))"
+        let contentKey = LinkEnrichmentContentKey.make(for: markdown)
+        let hover = Task { await coordinator.ensureEnrichment(markdown: markdown) }
+        await fulfillment(of: [started], timeout: 2)
+        let pinned = Task { await coordinator.ensureEnrichment(markdown: markdown) }
+        await waitForConsumers(2, coordinator: coordinator, contentKey: contentKey)
+
+        hover.cancel()
+        await waitForConsumers(1, coordinator: coordinator, contentKey: contentKey)
+        LinkEnrichmentURLProtocolStub.state.completeDeferredHTML()
+        await hover.value
+        await pinned.value
+
+        let payload = await store.payload(forContentKey: contentKey)
+        XCTAssertEqual(try XCTUnwrap(payload).entries[url]?.title, "Shared article")
+        XCTAssertEqual(LinkEnrichmentURLProtocolStub.state.requestedURLs.filter { $0 == url }.count, 1)
+        let consumers = await coordinator.consumerCountForTesting(contentKey: contentKey)
+        XCTAssertEqual(consumers, 0)
+    }
+
+    func testNewPreviewCanFetchAfterTheLastConsumerCancels() async throws {
+        let started = expectation(description: "first enrichment request started")
+        let completing = expectation(description: "URLSession delivered its terminal callback")
+        let completionGate = DispatchSemaphore(value: 0)
+        defer { completionGate.signal() }
+        LinkEnrichmentURLProtocolStub.state.configure(.neverCompletes, started: started)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-enrichment-reopen-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LinkEnrichmentStore(directory: directory)
+        let pool = AsyncPermitPool(limit: 1, maxPending: 1)
+        let fetcher = makeFetcher { _ in ["93.184.216.34"] }
+        fetcher.setNextTaskCompletionGateForTesting {
+            completing.fulfill()
+            _ = completionGate.wait(timeout: .now() + 5)
+        }
+        let coordinator = LinkEnrichmentCoordinator(store: store, fetcher: fetcher, workPool: pool)
+        let url = "https://public.example/reopen?utm_source=chatgpt.com"
+        let markdown = "# News\n\n- [One](\(url))"
+        let contentKey = LinkEnrichmentContentKey.make(for: markdown)
+        let hover = Task { await coordinator.ensureEnrichment(markdown: markdown) }
+        await fulfillment(of: [started], timeout: 2)
+        hover.cancel()
+        await fulfillment(of: [completing], timeout: 2)
+        await waitForConsumers(0, coordinator: coordinator, contentKey: contentKey)
+        let cancelledPayload = await store.payload(forContentKey: contentKey)
+        XCTAssertNil(cancelledPayload)
+
+        let restarted = expectation(description: "new preview starts its own enrichment request")
+        LinkEnrichmentURLProtocolStub.state.configure(.deferredHTML, started: restarted)
+        let pinned = Task { await coordinator.ensureEnrichment(markdown: markdown) }
+        await waitForConsumers(1, coordinator: coordinator, contentKey: contentKey)
+        let deadline = Date().addingTimeInterval(2)
+        while await pool.queuedWaiterCount() == 0, Date() < deadline { await Task.yield() }
+        let draining = await pool.snapshot()
+        XCTAssertEqual(draining.activeCount, 1, "Cancellation retains the old permit until URLSession ends")
+        XCTAssertEqual(draining.queuedCount, 1, "The new same-key flight waits for actual termination")
+
+        completionGate.signal()
+        await hover.value
+        await fulfillment(of: [restarted], timeout: 2)
+        await waitForConsumers(1, coordinator: coordinator, contentKey: contentKey)
+        LinkEnrichmentURLProtocolStub.state.completeDeferredHTML()
+        await pinned.value
+
+        let payload = await store.payload(forContentKey: contentKey)
+        XCTAssertEqual(try XCTUnwrap(payload).entries[url]?.title, "Shared article")
+        let finished = await pool.snapshot()
+        XCTAssertEqual(finished.activeCount, 0)
+    }
+
+    private func waitForConsumers(
+        _ expected: Int,
+        coordinator: LinkEnrichmentCoordinator,
+        contentKey: String
+    ) async {
+        let deadline = Date().addingTimeInterval(2)
+        while await coordinator.consumerCountForTesting(contentKey: contentKey) != expected,
+              Date() < deadline {
+            await Task.yield()
+        }
+        let actual = await coordinator.consumerCountForTesting(contentKey: contentKey)
+        XCTAssertEqual(actual, expected)
+    }
+
     private func makeFetcher(
         resolver: @escaping LinkEnrichmentFetcher.HostResolver
     ) -> LinkEnrichmentFetcher {
@@ -242,18 +341,26 @@ private final class LinkEnrichmentURLProtocolStub: URLProtocol, @unchecked Senda
     enum Behavior {
         case oversized(totalChunks: Int, chunkSize: Int)
         case neverCompletes
+        case deferredHTML
     }
 
     final class State: @unchecked Sendable {
         private let lock = NSLock()
         private var behavior: Behavior = .neverCompletes
         private var hosts: [String] = []
+        private var urls: [String] = []
         private var sentChunks = 0
         private var stoppedExpectation: XCTestExpectation?
         private var startedExpectation: XCTestExpectation?
+        private var deferredCompletion: (@Sendable () -> Void)?
+        private var isResponseReleased = false
 
         var requestedHosts: [String] {
             lock.withLock { hosts }
+        }
+
+        var requestedURLs: [String] {
+            lock.withLock { urls }
         }
 
         var chunksSent: Int {
@@ -268,15 +375,19 @@ private final class LinkEnrichmentURLProtocolStub: URLProtocol, @unchecked Senda
             lock.withLock {
                 self.behavior = behavior
                 hosts = []
+                urls = []
                 sentChunks = 0
                 stoppedExpectation = stopped
                 startedExpectation = started
+                deferredCompletion = nil
+                isResponseReleased = false
             }
         }
 
         func begin(request: URLRequest) -> Behavior {
             let started = lock.withLock {
                 if let host = request.url?.host { hosts.append(host) }
+                if let url = request.url?.absoluteString { urls.append(url) }
                 let expectation = startedExpectation
                 startedExpectation = nil
                 return expectation
@@ -297,6 +408,25 @@ private final class LinkEnrichmentURLProtocolStub: URLProtocol, @unchecked Senda
             }
             stopped?.fulfill()
         }
+
+        func registerDeferredHTML(_ completion: @escaping @Sendable () -> Void) {
+            let shouldComplete = lock.withLock {
+                if isResponseReleased { return true }
+                deferredCompletion = completion
+                return false
+            }
+            if shouldComplete { completion() }
+        }
+
+        func completeDeferredHTML() {
+            let completion = lock.withLock {
+                isResponseReleased = true
+                let pending = deferredCompletion
+                deferredCompletion = nil
+                return pending
+            }
+            completion?()
+        }
     }
 
     static let state = State()
@@ -313,7 +443,14 @@ private final class LinkEnrichmentURLProtocolStub: URLProtocol, @unchecked Senda
     }
 
     override func startLoading() {
-        switch Self.state.begin(request: request) {
+        let behavior = Self.state.begin(request: request)
+        if let url = request.url, url.path == "/favicon.ico",
+           let response = HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1", headerFields: nil) {
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        switch behavior {
         case .oversized(let totalChunks, let chunkSize):
             guard let url = request.url,
                   let response = HTTPURLResponse(
@@ -325,7 +462,7 @@ private final class LinkEnrichmentURLProtocolStub: URLProtocol, @unchecked Senda
             else { return }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             sendChunk(index: 0, totalChunks: totalChunks, chunkSize: chunkSize)
-        case .neverCompletes:
+        case .neverCompletes, .deferredHTML:
             guard let url = request.url,
                   let response = HTTPURLResponse(
                     url: url,
@@ -335,6 +472,13 @@ private final class LinkEnrichmentURLProtocolStub: URLProtocol, @unchecked Senda
                   )
             else { return }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            if case .deferredHTML = behavior {
+                Self.state.registerDeferredHTML { [weak self] in
+                    guard let self, !self.stopLock.withLock({ self.isStopped }) else { return }
+                    self.client?.urlProtocol(self, didLoad: Data("<title>Shared article</title>".utf8))
+                    self.client?.urlProtocolDidFinishLoading(self)
+                }
+            }
         }
     }
 
