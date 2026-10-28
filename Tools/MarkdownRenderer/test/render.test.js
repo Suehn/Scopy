@@ -427,6 +427,21 @@ test("backslash display math retains its container and the complete delimited so
   assert.match(render("  \\[ x \\]").html, /data-math-source=" x "/);
 });
 
+test("backslash lookahead shares the parser's coordinates after an initial BOM", () => {
+  for (const source of [
+    "\\(x\\)",
+    "\\[x\\]",
+    "\\[\r\nx\r\n\\]",
+    "[\\(label *em*\\)](https://example.com)\r\n\r\n\\(x\\)",
+    "\t\\(literal\\)\n\n\\(x\\)"
+  ]) {
+    assert.deepEqual(render(`\uFEFF${source}`), render(source), source);
+  }
+  const repeated = render("\uFEFF\uFEFF\\(x\\)");
+  assert.equal(repeated.metadata.mathCount, 1);
+  assert.ok(repeated.html.startsWith("<p>\uFEFF"));
+});
+
 test("renders the closed inline safe-tag extension without parsing code fences", () => {
   const result = render("Text <kbd>Cmd</kbd> and <mark>hot</mark>\n\n```\n<kbd>code</kbd>\n```");
 

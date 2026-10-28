@@ -4,6 +4,9 @@ import { math } from "micromark-extension-math";
 // Source lookahead admits a complete delimiter pair; token consumption stays with micromark
 // so container prefixes, code ownership, and source positions keep their native meaning.
 export function backslashMath(source) {
+  // micromark removes exactly one initial BOM before assigning token offsets. Keep every
+  // lookahead, line boundary, and label lookup in that coordinate space without changing input.
+  if (source.charCodeAt(0) === 0xfeff) source = source.slice(1);
   if (!source.includes("\\")) return {};
   const mathText = math({ singleDollarTextMath: false }).text[36];
   const hasLinkLabels = /\](?:\(|\[)/.test(source);
