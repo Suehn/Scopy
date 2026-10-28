@@ -24,7 +24,7 @@ def export_side(app, output, domain, fixtures, resolutions):
                     SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT="0",
                     SCOPY_EXPORT_DUMP_PATH=str(png), SCOPY_EXPORT_ERROR_DUMP_PATH=str(error),
                     SCOPY_EXPORT_PASTEBOARD_NAME=pasteboard)
-                session.start(arguments=("--uitesting",))
+                session.start(arguments=("--uitesting",), focus_window=False)
                 def finished():
                     assert session.process.poll() is None, "Export app exited before producing PNG"
                     assert not error.exists(), error.read_text() if error.exists() else ""

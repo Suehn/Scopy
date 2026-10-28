@@ -94,7 +94,7 @@ def observe_export(harness, app, fixture, output, idle_seconds):
             SCOPY_UITEST_MARKDOWN_EXPORT_RESOLUTION="100", SCOPY_UITEST_FORCE_PNGQUANT_MARKDOWN_EXPORT="0",
             SCOPY_EXPORT_DUMP_PATH=str(png), SCOPY_EXPORT_ERROR_DUMP_PATH=str(error),
             SCOPY_EXPORT_PASTEBOARD_NAME=session.pb + ".export")
-        session.start(arguments=("--uitesting",), on_launch=on_launch)
+        session.start(arguments=("--uitesting",), on_launch=on_launch, focus_window=False)
         completion.wait(timeout=150)
         if error.exists():
             raise RuntimeError("Export failed; the synthetic-fixture error is retained")

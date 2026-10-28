@@ -182,7 +182,7 @@ class Session:
     def database(self):
         return self.storage / "clipboard.db"
 
-    def start(self, arguments=(), on_launch=None):
+    def start(self, arguments=(), on_launch=None, *, focus_window=True):
         self.launches += 1
         run(TOOLS / "warp", 1400, 40)
         self.log = (self.output / f"app-{self.launches}.log").open("w")
@@ -193,6 +193,8 @@ class Session:
             on_launch(self.process)
         wait_for(lambda: bridge("activate", self.process.pid, stderr=subprocess.DEVNULL)["pid"] == self.process.pid,
                  "test app activation before the automatic panel opens")
+        if not focus_window:
+            return
         def panel():
             assert self.process.poll() is None, f"App exited: {self.process.returncode}"
             return run(TOOLS / "winpos", self.process.pid)
