@@ -279,7 +279,7 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 - Route new cleanup variants through `StorageService.applyDeletePlan`; extend `DeleteCandidate` when a new policy predicate affects eligibility so commit-time revalidation remains complete.
 - Test post-plan pin and payload replacement, shared storage refs, caller cancellation after commit, bulk queue delivery, and history pagination/total convergence.
 - Preserve the lossless Swift-`Int` SQLite adapter. For byte-count changes, test values above `Int32.max`, disk reopen, cleanup stopping, and checked filesystem aggregation.
-- For release-grade storage changes run `make build`, `make test-unit`, `make test-tsan`, `make test-snapshot-perf-release`, the applicable heavy cleanup tests, and frontend/unified profiling when event or projection code changes.
+- For release-grade storage changes run `make build`, `make test-unit`, `make test-snapshot-perf-release`, the applicable cleanup tests, and TSan where the hosted environment supports it. When events or projections change, also use the [local UI verification path](#local-ui-verification-path); performance claims follow the [performance evidence protocol](#performance-evidence-protocol).
 
 ### Settings Or Hotkey Changes
 
@@ -292,9 +292,9 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 
 - Trace the affected behavior through preview UI, the shared rendering pipeline, and `MarkdownExportService`.
 - Keep hover preview planning in `HistoryHoverPreviewPipeline`; row views should apply typed events rather than own decode/cache/metric policy.
-- For hover-preview work, run a focused test plus `scripts/perf-frontend-profile.sh --include-hover` so Markdown and image hover buckets are present.
-- For hover-transfer changes, cover pure geometry/session behavior, controller cancellation and generation replacement, list-level transfer ownership, stale popover-token geometry, and XCUI trajectories both through and outside the real corridor.
-- Run strict-concurrency coverage because the controller lifecycle is task-based. Treat the include-hover frontend profile as a broad rendering regression smoke; do not claim it measures safe-triangle travel unless its automation explicitly crosses row-to-popover geometry.
+- For hover-preview work, run focused native coverage and exercise the affected Markdown, image, or file preview through the [local UI verification path](#local-ui-verification-path).
+- For hover-transfer changes, cover geometry/session behavior, controller cancellation and generation replacement, list-level transfer ownership, stale popover-token geometry, and real pointer trajectories both through and outside the row-to-popover corridor.
+- The task-based controller lifecycle remains subject to the strict native gate. Where XCUITest can enter the requested scene, `scripts/perf-frontend-profile.sh --include-hover` provides a broad rendering smoke; it proves corridor traversal only when its automation actually follows that geometry. A host that never enters the scene is environment-blocked.
 - For Markdown renderer fixes, add a minimal reproduction at the failing boundary and run the renderer gates in `AGENTS.md`. Existing Node tests under `Tools/MarkdownRenderer/test/` and Swift `ChatGPTMarkdownRendererTests` cover different boundaries; update assertions and shared fixtures when their contract changes. Add isolated export UI coverage when the PNG output contract changes.
 - Re-check pngquant settings interactions, preview latency, and output pasteboard behavior.
 
@@ -358,7 +358,7 @@ The paths below identify flows to trace and contracts to verify. Edit only affec
 
 ## Logging And Privacy
 
-- Log only through the `ScopyLog` categories (`app`, `monitor`, `storage`, `persistence`, `search`, `ui`, `hotkey`, `export`); do not create ad hoc `Logger` instances or call `print` / `NSLog` in production paths. SQLite failures log the extended result code and category publicly and the message privately.
+- Use the categories defined by [`ScopyLog`](../../Scopy/Utilities/ScopyLogger.swift) for production logs; add a category there when a new subsystem needs one. Do not create ad hoc `Logger` instances or call `print` / `NSLog` in production paths. SQLite failures log the extended result code and category publicly and the message privately.
 - Treat clipboard text, query strings, file paths, bundle identifiers, note contents, raw payloads, and unfiltered error descriptions as private by default. Never log clipboard bodies, image bytes, note contents, or file contents.
 - Counts, durations, thresholds, and feature-state values may be public only when they cannot reveal user content.
 - Avoid per-item logging in clipboard polling, list rendering, search candidates, or other hot loops unless it is sampled or guarded by an explicit diagnostic/profile flag.

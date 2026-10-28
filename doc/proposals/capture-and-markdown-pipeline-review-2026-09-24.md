@@ -133,12 +133,12 @@ audience: maintainer decision + implementing agent
 - **K4**：契约 :424 "Both preview WebView implementations"——其中一个在生产不可达（W1）。
 - **K5**：契约 :443 "Each WebView load receives a new opaque render ID"——导出 WebView 不注入 render ID（占位符原样保留，`MarkdownExportService.swift:952-954`），它也不走消息通道。应限定为 preview load。
 - **K6**：契约 :451 的 "canonical stylesheet"——代码只等待 `katex.min.css`（builder 2556-2584），基础 CSS 是内联的。
-- **K7**：`product-spec.md:80` 写 "Hidden premeasurement is forbidden"，`development-guide.md:94` 写 "Hidden premeasurement must not share this controller"，`renderer-hardening-gate-plan.md` 不变式 4 也禁止；而 `development-guide.md:153` 与代码（`MarkdownPreviewWebView.swift:760-768` 的 prewarm、873-896 的 probe）恰恰在共享 controller 上做离屏预测量。两边必须统一，需要 hh 决定（我建议保留代码行为，把规格改为"只允许把 popover 即将显示的同一文档预加载到无 owner 的 WebView；它不对外发布就绪状态，也不改变可见性；探测高度只按精确的 render cache key 写入缓存"）。
+- **K7**：`product-spec.md:80` 写 "Hidden premeasurement is forbidden"，`development-guide.md:94` 写 "Hidden premeasurement must not share this controller"，[renderer-hardening-gate-plan.md](../archive/proposals/renderer-hardening-gate-plan.md) 不变式 4 也禁止；而 `development-guide.md:153` 与代码（`MarkdownPreviewWebView.swift:760-768` 的 prewarm、873-896 的 probe）恰恰在共享 controller 上做离屏预测量。两边必须统一，需要 hh 决定（我建议保留代码行为，把规格改为"只允许把 popover 即将显示的同一文档预加载到无 owner 的 WebView；它不对外发布就绪状态，也不改变可见性；探测高度只按精确的 render cache key 写入缓存"）。
 - **K8**：契约 :309 说渲染器"reports" `mathStrictCount` 等——App 从不读取 `result.metadata`（builder 2780-2789 只用 `result.html`），唯一的消费者是 Node 测试。
 - **K9**：契约 :370 "only the first 48 frozen entries are considered"——"first" 的顺序没有定义（Swift 字典未排序编码）；而生产侧候选本来就不超过 13 个。
 - **K10**：契约 :226/:366 与代码：真正生效的是 DOM 判断；`HistoryItemMarkdownExportController.swift:168-170` 的注释描述的是一个永远不会命中的判断。
 - **K11**：契约 Required Verification（:489-506）与 AGENTS.md Renderer 行各写一份且不一致：契约有 `perf-frontend-profile --include-hover` 没有 PNG 目视，AGENTS 正好相反。AGENTS 自己声明契约"alone owns … rendering evidence requirements"。
-- **K12**：导出样式在 `:root` 重复定义 7 个布局变量（`MarkdownExportService.swift:960-973`），与 builder 386-411 逐字相同。这违背硬化计划的"token 唯一定义点"（`renderer-hardening-gate-plan.md:232`），也为契约 :453 禁止的"导出改变内容宽度"留了口子（E1）。
+- **K12**：导出样式在 `:root` 重复定义 7 个布局变量（`MarkdownExportService.swift:960-973`），与 builder 386-411 逐字相同。这违背硬化计划的"token 唯一定义点"（[renderer-hardening-gate-plan.md:232](../archive/proposals/renderer-hardening-gate-plan.md)），也为契约 :453 禁止的"导出改变内容宽度"留了口子（E1）。
 - **K13**：契约 :5-20 证据范围里写着维护者本机的绝对路径（`/Users/hh/Downloads/…`、`/tmp/…`）；正文可读性差（卫生审计 §4.2 已建议归档提取脚本）。
 
 ### 1.7 回归防护现状
@@ -530,7 +530,7 @@ struct MarkdownDocument: Sendable, Equatable {   // 预览与导出共用的唯�
 跨语言契约的缺口：
 
 - `MarkdownRenderingCorpus/cases.json` 给每个样本写了 `expectedProfile`/`allowLooseMathRepair`，但只有 Node 把它们当**输入**传给 `render`（`corpus.test.js:14-18`）。Swift 的 `MarkdownSourceProfileDetector` 从没被这份 corpus 校验过（全仓没有 Swift 引用它）。
-- policy 载荷：Swift 发送 `profile/nativeSourceIcons/allowLooseMathRepair/policyVersion/linkEnrichment` 五个键（builder 2849-2859）；JS 只用其中的 `allowLooseMathRepair/nativeSourceIcons/linkEnrichment`（`render.js:453-463`；`profile`、`policyVersion` 读进来就丢，见卫生审计 §4.1）；`nativeSourceIcons` 在生产中恒为 true。编码没用 `.sortedKeys`（2297-2300），同一输入生成的文档字节会随进程的字典哈希种子变化，违反硬化计划"同源同 context ⇒ 字节相同"的约束（`renderer-hardening-gate-plan.md:236`）。
+- policy 载荷：Swift 发送 `profile/nativeSourceIcons/allowLooseMathRepair/policyVersion/linkEnrichment` 五个键（builder 2849-2859）；JS 只用其中的 `allowLooseMathRepair/nativeSourceIcons/linkEnrichment`（`render.js:453-463`；`profile`、`policyVersion` 读进来就丢，见卫生审计 §4.1）；`nativeSourceIcons` 在生产中恒为 true。编码没用 `.sortedKeys`（2297-2300），同一输入生成的文档字节会随进程的字典哈希种子变化，违反硬化计划"同源同 context ⇒ 字节相同"的约束（[renderer-hardening-gate-plan.md:236](../archive/proposals/renderer-hardening-gate-plan.md)）。
 
 **设计（终态）**：`MarkdownHTMLRenderer`（或者并入 builder 后的 `document(source:context:)`）只做 `source + context → 文档`。所有源改写都在 `render.js` 里完成，发生在 parse 之前或 AST 上。这样 Node 测试看到的输入就是生产输入。
 

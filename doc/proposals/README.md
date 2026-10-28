@@ -2,7 +2,7 @@
 doc_type: portal
 status: active
 owner: maintainers
-last_reviewed: 2026-09-03
+last_reviewed: 2026-10-28
 canonical: true
 ---
 
@@ -25,10 +25,15 @@ Once a proposal is implemented, move its lasting contracts into the appropriate 
 - [Regression safety net, 2026-09-24 (gate map, guard tests per change class, performance evidence protocol, local UI verification)](./regression-safety-net-2026-09-24.md)
 - [Code hygiene audit, 2026-09-19 (redundant tests, assumed behaviour, research-time residue; cleanup plan and decisions)](./code-hygiene-audit-2026-09-19.md)
 - [Whole-repo architecture review, 2026-09 (capture, storage, search, preview/export, UI, concurrency)](./architecture-review-2026-09.md)
-- [Rich fidelity pass: root causes and surgical fixes](./rich-fidelity-pass.md)
-- [Renderer hardening gate: review and implementation plan](./renderer-hardening-gate-plan.md)
 - [Markdown preview and clipboard architecture](./markdown-preview-architecture/proposal.md)
-- `search-backend-performance-optimization.md`
-- `semantic-search-offline-v1.md`
-- `v0.11-frontend-design.md`
-- `v0.11-improvement-plan.md`
+
+## Archived Proposals
+
+The following files retain their original design and implementation records. Their constraints and test commands describe the recorded baseline; current behavior belongs to `doc/current/`.
+
+- [Rich fidelity pass and implementation record](../archive/proposals/rich-fidelity-pass.md)
+- [Renderer hardening gate and implementation record](../archive/proposals/renderer-hardening-gate-plan.md)
+- [Search backend optimization review at v0.44.fix8](../archive/proposals/search-backend-performance-optimization.md)
+- [Unimplemented offline semantic-search design](../archive/proposals/semantic-search-offline-v1.md)
+- [v0.11 frontend design draft](../archive/proposals/v0.11-frontend-design.md)
+- [v0.11 improvement plan and implementation status](../archive/proposals/v0.11-improvement-plan.md)

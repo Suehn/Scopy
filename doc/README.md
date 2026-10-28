@@ -27,5 +27,5 @@ This directory is split into active operating docs, release history, performance
 - `perf/`: release profiles, baselines, and deeper performance studies.
 - `reviews/`: code, perf, and implementation reviews.
 - `proposals/`: design drafts and future-looking specs that are not active requirements.
-- `archive/`: preserved pre-reorg material and split historical changelog data.
+- `archive/`: earlier designs, dated implementation evidence, pre-reorg material, and historical changelog data.
 - `meta/`: machine-readable metadata and doc taxonomy.
