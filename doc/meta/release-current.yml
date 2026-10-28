@@ -8,10 +8,10 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-10-28T17:22:18+08:00
+last_verified_at: 2026-10-28T17:38:16+08:00
 summary: Synchronize history snapshots, preserve recopied items, and share frozen preview and export documents
 verification:
-  release_status: verified_ready_for_publication
+  release_status: published_and_installed
   docs_validate: pass
   release_validate: pass
   release_policy: pass_14_tests
@@ -27,6 +27,7 @@ verification:
   macos_14_runtime: not_run_deployment_target_preserved
   local_xcuitest: environment_blocked_system_authentication
   performance_ab: completed_84_runs_warm_query_0_98_percent_regression_no_speedup_claim
-  hosted_ci: pass_40655702698
-  test_tsan: pass_824_tests_40662167388_final_corrections_rechecking
-  publication: pending_tagged_dmg_checksum_casks_and_installed_bundle
+  hosted_ci: pass_40663757465
+  test_tsan: pass_40663757586_final_sources_826_tests
+  publication: pass_dmg_checksum_both_casks_installed_0_86_0_build_767
+  external_tap_sync: automatic_job_failed_repaired_with_commit_9a08c8a
