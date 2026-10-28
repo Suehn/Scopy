@@ -8,25 +8,25 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: null
+last_verified_at: 2026-10-28T17:22:18+08:00
 summary: Synchronize history snapshots, preserve recopied items, and share frozen preview and export documents
 verification:
-  release_status: draft_pending_integrated_verification
-  docs_validate: pass_draft
-  release_validate: pass_draft
-  release_policy: pending
-  test_tooling: pending
-  build: pending_integrated_debug_and_release
-  test_unit: pending_integrated_strict_native
-  renderer: pending_integrated_tests_and_bundled_assets
-  png_diff: pending_real_app_comparison_to_v0_85_0
-  snapshot_release: pending_integrated_release_gate
-  real_app_lifecycle: pending_integrated_capture_quit_restart
-  interactive_ui_matrix: pending_integrated_comparison
+  release_status: verified_ready_for_publication
+  docs_validate: pass
+  release_validate: pass
+  release_policy: pass_14_tests
+  test_tooling: pass_17_tests
+  build: pass_integrated_debug_and_universal_release
+  test_unit: pass_831_strict_native_tests
+  renderer: pass_219_tests_and_bundled_assets
+  png_diff: pass_tiled_snapshot_and_2x_pdf_byte_equal_to_v0_85_0
+  snapshot_release: pass_same_database_service_and_engine_thresholds
+  real_app_lifecycle: pass_capture_quit_restart_against_v0_85_0
+  interactive_ui_matrix: incomplete_expanded_driver_preserved_locally
   global_hotkey_input: not_verified
   macos_14_runtime: not_run_deployment_target_preserved
   local_xcuitest: environment_blocked_system_authentication
-  performance_ab: pending_evidence_review_no_gain_claim
-  hosted_ci: pending
-  test_tsan: pending_hosted
+  performance_ab: completed_84_runs_warm_query_0_98_percent_regression_no_speedup_claim
+  hosted_ci: pass_40655702698
+  test_tsan: pass_824_tests_40662167388_final_corrections_rechecking
   publication: pending_tagged_dmg_checksum_casks_and_installed_bundle
