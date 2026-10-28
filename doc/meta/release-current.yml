@@ -1,6 +1,6 @@
-version: v0.85.0
-date: 2026-10-25
-release_doc: doc/releases/history/v0.85.0.md
+version: v0.86.0
+date: 2026-10-28
+release_doc: doc/releases/history/v0.86.0.md
 release_index: doc/releases/README.md
 changelog_file: doc/releases/CHANGELOG.md
 profile_doc: null
@@ -8,24 +8,25 @@ runbook_doc: doc/current/release-runbook.md
 spec_doc: doc/current/product-spec.md
 development_doc: doc/current/development-guide.md
 architecture_doc: doc/current/architecture.md
-last_verified_at: 2026-10-25
-summary: Clarify capture, history and preview ownership, streamline search and rendering, and adopt Swift 6 while keeping macOS 14 support
+last_verified_at: null
+summary: Synchronize history snapshots, preserve recopied items, and share frozen preview and export documents
 verification:
-  release_status: validated_for_publication
-  docs_validate: pass
-  release_validate: pass
-  release_policy: pass_14_tests
-  test_tooling: pass_7_tests
-  build: pass_local_debug_and_universal_release
-  test_unit: pass_local_797_tests_0_failures_swift6_warnings_as_errors
-  focused_native: pass_80_tests_0_failures
-  renderer: pass_213_node_tests_and_atomic_assets
-  png_diff: pass_2_real_app_fixtures_byte_identical_to_v0_84_0
-  snapshot_release: pass_10000_row_db_bfcf2820_cmd_p95_0_331ms_prepared_cm_p95_3_817ms
-  macos_14_runtime: unavailable_on_this_host_deployment_target_preserved
-  search_ab_vs_v0_84_0: pass_3_aa_pairs_3_abba_groups_cold_build_median_1560_to_892ms_warm_query_25_187_to_21_972ms
-  warm_load_memory: within_noise_benchmark_peak_rss_not_app_footprint
-  real_app_lifecycle: pass_final_candidate_4_captures_pending_envelope_quit_restart_db_and_row_order_equal
-  interactive_ui_matrix: incomplete_baseline_input_driver_limitations_recorded_separately
-  hosted_ci: pass_40175943508_4784071_same_production_inputs
-  test_tsan: pass_hosted_40175946190_792_tests_0_failures_4784071_same_production_inputs
+  release_status: draft_pending_integrated_verification
+  docs_validate: pass_draft
+  release_validate: pass_draft
+  release_policy: pending
+  test_tooling: pending
+  build: pending_integrated_debug_and_release
+  test_unit: pending_integrated_strict_native
+  renderer: pending_integrated_tests_and_bundled_assets
+  png_diff: pending_real_app_comparison_to_v0_85_0
+  snapshot_release: pending_integrated_release_gate
+  real_app_lifecycle: pending_integrated_capture_quit_restart
+  interactive_ui_matrix: pending_integrated_comparison
+  global_hotkey_input: not_verified
+  macos_14_runtime: not_run_deployment_target_preserved
+  local_xcuitest: environment_blocked_system_authentication
+  performance_ab: pending_evidence_review_no_gain_claim
+  hosted_ci: pending
+  test_tsan: pending_hosted
+  publication: pending_tagged_dmg_checksum_casks_and_installed_bundle

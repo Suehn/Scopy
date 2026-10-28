@@ -2,7 +2,7 @@
 doc_type: spec
 status: active
 owner: maintainers
-last_reviewed: 2026-09-03
+last_reviewed: 2026-10-28
 canonical: true
 related_versions:
   - v0.78.2
@@ -55,7 +55,7 @@ Scopy is a native macOS clipboard manager for users who need durable clipboard h
 - Allow per-item copy, pin/unpin, delete, and contextual actions, including AirDrop for images/files and Open Containing Folder for real file-backed items.
 - Keyboard navigation, Enter, and Option+Delete act only on rows that are currently displayed: collapsed pinned rows are skipped, and Option+Delete never deletes an item while a text field (the search field or a note editor) is being edited.
 - ⌘1–⌘9 act on the first nine displayed rows with the same semantics as Enter (copy and close; a failed copy keeps the panel open). While ⌘ is held, those rows show their ⌘n hint in place of the relative time without changing row height.
-- Deleting a row removes it from the panel at once but sends the backend delete only after a 5 s undo window. During that window the footer shows "Deleted · Undo" and ⌘Z restores the row; outside it, ⌘Z stays text undo. Closing the panel, the next delete, or Clear All commits the pending delete immediately, and a backend republish of the same row inside the window (identical content copied again) undoes it implicitly. A pinned preview of the deleted item closes and does not reopen on undo.
+- Deleting a row removes it from the panel at once but sends the backend delete only after a 5 s undo window. During that window the footer shows "Deleted · Undo" and ⌘Z restores the row; outside it, ⌘Z stays text undo. Closing the panel, the next delete, or Clear All commits the pending delete immediately. If identical content is copied again before that deletion commits, the new copy is retained and the row is restored, even if its notification has not reached the panel yet. Metadata-only changes do not cancel a pending deletion. A pinned preview of the deleted item closes and does not reopen on undo.
 - A pin, delete, clear, share, or reveal action that fails is reported in the panel footer; it is never only logged.
 - Normal Quit waits for deletions already shown in the panel to commit, including a deletion still inside its undo window. If a deletion fails, restore the row and keep the app open with its error; logout, restart, and shutdown still quit and keep the restored row. Quit never waits more than a few seconds; a shutdown that hangs longer is treated like force quit. This does not cover force quit or power loss.
 - Allow file items to carry editable notes.

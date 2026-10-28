@@ -12,6 +12,22 @@
 
 - No unreleased entries.
 
+## [v0.86.0] - 2026-10-28
+
+### Changed
+
+- Committed history facts, page results, and search indexes carry database snapshot versions. Independent readers consume a bounded journal and recover missing ranges with scoped snapshots.
+- Capture binds replay identity and prepared payload ownership. Transforms preserve the durable source until acknowledgement and keep work files alive through their consumers.
+- Preview, pinning, and PNG export share a prepared document with its exact source and frozen render context. Sidecar I/O runs away from the main actor, concurrent previews share one fetch, and export preserves the displayed enrichment snapshot.
+- Bitmap allocation and tile drawing run as joined background steps. pngquant waits for process exit before returning or cleaning temporary files and supports output files that preserve the source.
+- Backslash math is tokenized by the existing Markdown parser, using the same math AST and KaTeX path.
+- Build and performance tools resolve current products and report callback metrics without legacy frame/drop aliases.
+
+### Fixed
+
+- An item copied again before its pending deletion commits is retained and restored, including when its notification is delayed or falls outside the bounded history log.
+- Explicit-math parsing keeps the correct source positions when Markdown begins with a byte-order mark.
+
 ## [v0.85.0] - 2026-10-25
 
 ### Changed
