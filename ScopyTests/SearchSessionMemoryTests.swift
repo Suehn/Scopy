@@ -41,7 +41,6 @@ final class SearchSessionMemoryTests: XCTestCase {
         XCTAssertFalse(trimmed.isBuilt)
 
         let added = try await storage.upsertItem(content("session zebra"))
-        await search.applyCommittedChanges()
 
         let result = try await search.search(request: fullFuzzy("zebra"))
         XCTAssertEqual(result.items.map(\.id), [added.id])

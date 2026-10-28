@@ -2,8 +2,9 @@ import XCTest
 @testable import ScopyKit
 
 final class SearchIndexMaintenanceTests: XCTestCase {
-    /// A cleanup commit tombstones its delete set in both indexes instead of dropping them.
-    func testCommittedCleanupKeepsIndexesBuiltAndSearchable() async throws {
+    /// One reader's reset must not consume the cleanup facts another reader needs to maintain
+    /// its indexes incrementally.
+    func testCommittedCleanupSurvivesAnotherReaderInvalidation() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-index-maintenance-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -28,6 +29,8 @@ final class SearchIndexMaintenanceTests: XCTestCase {
 
         let search = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
         try await search.open()
+        let otherReader = SearchEngineImpl(dbPath: dbPath, commitJournal: storage.commitJournal)
+        try await otherReader.open()
         await search.debugStartShortQueryIndexBuild(force: true)
         await search.debugAwaitShortQueryIndexBuild()
         let everything = SearchRequest(query: "maintained", mode: .fuzzy, forceFullFuzzy: true, limit: 200, offset: 0)
@@ -39,7 +42,8 @@ final class SearchIndexMaintenanceTests: XCTestCase {
         policy.maxItems = 90
         let cleanup = try await storage.performCleanup(mode: .light, policy: policy)
         XCTAssertEqual(cleanup.deletedItemIDs.count, 10)
-        await search.applyCommittedChanges()
+        await otherReader.invalidateCache()
+        _ = try await search.search(request: SearchRequest(query: "", mode: .exact, limit: 1))
 
         let fullHealth = await search.debugFullIndexHealth()
         XCTAssertTrue(fullHealth.isBuilt)
@@ -54,6 +58,7 @@ final class SearchIndexMaintenanceTests: XCTestCase {
         XCTAssertEqual(found, Set(inserted.map(\.id)).subtracting(deleted))
 
         await search.close()
+        await otherReader.close()
         await storage.close()
     }
 }

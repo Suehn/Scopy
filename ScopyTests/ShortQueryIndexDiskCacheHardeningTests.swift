@@ -249,7 +249,7 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
 
             // A common "usage update" path: same contentHash => update lastUsedAt/useCount only.
             _ = try await storage.incrementUsage(id: inserted.id, at: Date())
-            await search1.applyCommittedChanges()
+            _ = try await search1.search(request: SearchRequest(query: "", mode: .exact, limit: 1))
 
             await search1.close()
 
@@ -319,7 +319,7 @@ final class ShortQueryIndexDiskCacheHardeningTests: XCTestCase {
                 XCTAssertEqual(warmSource, "diskCache")
 
                 _ = try await storage.updateNote(id: inserted.id, note: "note-2")
-                await search1.applyCommittedChanges()
+                _ = try await search1.search(request: SearchRequest(query: "", mode: .exact, limit: 1))
 
                 let stats1 = await search1.debugShortQueryIndexStats()
                 XCTAssertEqual(stats1.live, 1)

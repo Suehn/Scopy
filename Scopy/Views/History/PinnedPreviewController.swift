@@ -85,8 +85,8 @@ final class PinnedPreviewController {
     }
 
     private var windows: [UUID: Window] = [:]
-    private var lastAppliedClearGeneration: UInt64 = 0
-    private var lastAppliedStamp: UInt64 = 0
+
+    var retainedItemIDs: Set<UUID> { Set(windows.keys) }
 
     func isPinned(itemID: UUID) -> Bool { windows[itemID] != nil }
 
@@ -169,17 +169,11 @@ final class PinnedPreviewController {
     }
 
     func reconcile(snapshot: HistoryContentRevisionReconciliationSnapshot) {
-        let clearChanged = lastAppliedClearGeneration != snapshot.clearGeneration
-        let previousStamp = lastAppliedStamp
-        lastAppliedClearGeneration = snapshot.clearGeneration
-        lastAppliedStamp = snapshot.stamp
         for window in Array(windows.values) {
             let preview = window.preview
             if snapshot.invalidates(
                 itemID: preview.itemID,
-                currentRevision: preview.revision,
-                clearGenerationChanged: clearChanged,
-                lastAppliedStamp: previousStamp
+                currentRevision: preview.revision
             ) {
                 dismiss(itemID: preview.itemID)
             }

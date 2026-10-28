@@ -99,7 +99,10 @@ actor SQLiteClipboardRepository {
     private let dbPath: String
     private var connection: SQLiteConnection?
     private var metadataUpdateInterlock: (@Sendable (MetadataUpdateKind, UUID) async -> Void)?
-    /// One entry per committed write, in commit order; drained by the search engine.
+    #if DEBUG
+    private var historyReadInterlockForTesting: (@Sendable () throws -> Void)?
+    #endif
+    /// One entry per committed write, read independently by search and presentation.
     nonisolated let commitJournal = StorageCommitJournal()
 
     init(dbPath: String) {
@@ -122,6 +125,11 @@ actor SQLiteClipboardRepository {
 
             try SQLiteMigrations.migrateIfNeeded(conn)
             try SQLiteSchema.requireCurrentSchema(conn)
+            let position = try conn.prepare("SELECT mutation_seq FROM scopy_meta WHERE id = 1")
+            guard try position.step() else {
+                throw RepositoryError.queryFailed("scopy_meta row is missing")
+            }
+            commitJournal.reset(to: position.columnInt64(0))
         } catch {
             conn.close()
             throw error
@@ -141,6 +149,12 @@ actor SQLiteClipboardRepository {
     ) {
         metadataUpdateInterlock = interlock
     }
+
+    #if DEBUG
+    func setHistoryReadInterlockForTesting(_ interlock: (@Sendable () throws -> Void)?) {
+        historyReadInterlockForTesting = interlock
+    }
+    #endif
 
     func fetchItemByHash(_ hash: String) throws -> ClipboardStoredItem? {
         let sql = """
@@ -168,6 +182,14 @@ actor SQLiteClipboardRepository {
             return try ClipboardItemRow.decodeFull(stmt)
         }
         return nil
+    }
+
+    private func fetchItemSummaryByID(_ id: UUID) throws -> ClipboardStoredItem? {
+        let stmt = try prepare(
+            "SELECT \(ClipboardItemRow.summaryColumns) FROM clipboard_items WHERE id = ? LIMIT 1"
+        )
+        try stmt.bindText(id.uuidString, at: 1)
+        return try stmt.step() ? ClipboardItemRow.decodeSummary(stmt) : nil
     }
 
     func insertItem(
@@ -199,10 +221,10 @@ actor SQLiteClipboardRepository {
                 storageRef: storageRef,
                 rawData: rawData
             )
-            guard let inserted = try fetchItemByID(id) else {
+            guard let inserted = try fetchItemSummaryByID(id) else {
                 throw RepositoryError.queryFailed("Inserted row could not be read back")
             }
-            return .upserted(inserted)
+            return .upserted(inserted, kind: .inserted)
         }
     }
 
@@ -233,7 +255,7 @@ actor SQLiteClipboardRepository {
         lastUsedAt: Date
     ) throws -> ExistingIngestCommitOutcome {
         var outcome: ExistingIngestCommitOutcome = .needsInsert
-        _ = try performConditionalWriteTransaction {
+        try performWriteTransaction {
             if let receiptItemID = try fetchIngestReceiptItemID(ingestID) {
                 outcome = .alreadyApplied(try fetchItemByID(receiptItemID))
                 return nil
@@ -242,7 +264,7 @@ actor SQLiteClipboardRepository {
             let updated = try incrementUsageRow(existing.id, lastUsedAt: lastUsedAt)
             try insertIngestReceipt(ingestID: ingestID, itemID: updated.id, committedAt: lastUsedAt)
             outcome = .updated(updated)
-            return .upserted(updated)
+            return .upserted(updated, kind: .usage)
         }
         return outcome
     }
@@ -266,7 +288,7 @@ actor SQLiteClipboardRepository {
         rawData: Data?
     ) throws -> IngestUpsertOutcome {
         var outcome: IngestUpsertOutcome?
-        _ = try performConditionalWriteTransaction {
+        try performWriteTransaction {
             if let receiptItemID = try fetchIngestReceiptItemID(ingestID) {
                 outcome = .alreadyApplied(try fetchItemByID(receiptItemID))
                 return nil
@@ -276,7 +298,7 @@ actor SQLiteClipboardRepository {
                 let updated = try incrementUsageRow(existing.id, lastUsedAt: lastUsedAt)
                 try insertIngestReceipt(ingestID: ingestID, itemID: updated.id, committedAt: lastUsedAt)
                 outcome = .updated(updated)
-                return .upserted(updated)
+                return .upserted(updated, kind: .usage)
             }
 
             try insertItemRow(
@@ -298,7 +320,7 @@ actor SQLiteClipboardRepository {
                 throw RepositoryError.queryFailed("Inserted ingest row could not be read back")
             }
             outcome = .inserted(inserted)
-            return .upserted(inserted)
+            return .upserted(inserted, kind: .inserted)
         }
 
         guard let outcome else {
@@ -328,7 +350,7 @@ actor SQLiteClipboardRepository {
     /// `MAX` prevents an older suspended command from moving `last_used_at` backwards.
     func incrementUsageReturningCurrent(id: UUID, lastUsedAt: Date) throws -> ClipboardStoredItem? {
         var updatedItem: ClipboardStoredItem?
-        _ = try performConditionalWriteTransaction {
+        try performWriteTransaction {
             guard try fetchItemByID(id) != nil else { return nil }
 
             let stmt = try prepare(
@@ -342,19 +364,24 @@ actor SQLiteClipboardRepository {
             try stmt.bindText(id.uuidString, at: 2)
             _ = try stmt.step()
             updatedItem = try fetchItemByID(id)
-            return updatedItem.map(StorageCommittedChange.upserted)
+            return updatedItem.map { .upserted($0, kind: .usage) }
         }
         return updatedItem
     }
 
     func updatePin(id: UUID, pinned: Bool) throws {
         try performWriteTransaction {
-            let sql = "UPDATE clipboard_items SET is_pinned = ? WHERE id = ?"
+            let sql = "UPDATE clipboard_items SET is_pinned = ? WHERE id = ? AND is_pinned <> ?"
             let stmt = try prepare(sql)
             try stmt.bindInt(pinned ? 1 : 0, at: 1)
             try stmt.bindText(id.uuidString, at: 2)
+            try stmt.bindInt(pinned ? 1 : 0, at: 3)
             _ = try stmt.step()
-            return .pinChanged(id: id, isPinned: pinned)
+            guard (connection?.changeCount() ?? 0) > 0 else { return nil }
+            guard let updated = try fetchItemSummaryByID(id) else {
+                throw RepositoryError.queryFailed("Updated row could not be read back")
+            }
+            return .upserted(updated, kind: .pin)
         }
     }
 
@@ -373,9 +400,16 @@ actor SQLiteClipboardRepository {
         rawData: Data?
     ) throws -> ClipboardStoredItem? {
         var committedItem: ClipboardStoredItem?
-        _ = try performConditionalWriteTransaction {
+        try performWriteTransaction {
             guard let current = try fetchItemByID(expected.id),
                   Self.hasSamePayload(current, as: expected) else {
+                return nil
+            }
+            if current.contentHash == contentHash,
+               current.sizeBytes == sizeBytes,
+               current.storageRef == storageRef,
+               current.rawData == rawData {
+                committedItem = current
                 return nil
             }
 
@@ -407,7 +441,7 @@ actor SQLiteClipboardRepository {
                 storageRef: storageRef,
                 rawData: rawData
             )
-            return committedItem.map(StorageCommittedChange.upserted)
+            return committedItem.map { .upserted($0, kind: .content) }
         }
         return committedItem
     }
@@ -428,19 +462,21 @@ actor SQLiteClipboardRepository {
         )
     }
 
-    func deleteItemReturningStorageRef(id: UUID) throws -> String? {
+    /// The caller's immutable usage count identifies the version it intended to delete. A
+    /// recopy wins over that intent; metadata changes alone do not prevent the deletion.
+    func deleteItem(id: UUID, expectedUseCount: Int) throws -> (
+        item: ClipboardStoredItem?, mutationSeq: Int64, storageRef: String?
+    ) {
+        var retainedItem: ClipboardStoredItem?
         var storageRef: String?
-        try performWriteTransaction {
-            // Finalize the statement before running the DELETE to avoid locking the table in the same connection.
-            do {
-                let sql = "SELECT storage_ref FROM clipboard_items WHERE id = ? LIMIT 1"
-                let stmt = try prepare(sql)
-                try stmt.bindText(id.uuidString, at: 1)
-                if try stmt.step(),
-                   let ref = stmt.columnText(0),
-                   !ref.isEmpty {
-                    storageRef = ref
-                }
+        let mutationSeq = try performWriteTransaction {
+            guard let current = try fetchItemSummaryByID(id) else { return nil }
+            guard current.useCount == expectedUseCount else {
+                retainedItem = current
+                return nil
+            }
+            if let ref = current.storageRef, !ref.isEmpty {
+                storageRef = ref
             }
 
             let sql = "DELETE FROM clipboard_items WHERE id = ?"
@@ -449,24 +485,29 @@ actor SQLiteClipboardRepository {
             _ = try stmt.step()
             return .deleted([id])
         }
-        return storageRef
+        return (retainedItem, mutationSeq, storageRef)
     }
 
     func deleteAllExceptPinnedReturningStorageRefs() throws -> [String] {
         var refs: [String] = []
         try performWriteTransaction {
+            var deletedItemIDs: [UUID] = []
             // Finalize the statement before running the DELETE to avoid locking the table in the same connection.
             do {
-                let sql = "SELECT storage_ref FROM clipboard_items WHERE is_pinned = 0 AND storage_ref IS NOT NULL AND storage_ref <> ''"
+                let sql = "SELECT id, storage_ref FROM clipboard_items WHERE is_pinned = 0"
                 let stmt = try prepare(sql)
                 while try stmt.step() {
-                    if let ref = stmt.columnText(0) {
+                    guard let idString = stmt.columnText(0), let id = UUID(uuidString: idString) else {
+                        throw ClipboardItemRow.DecodeError.invalidRow
+                    }
+                    deletedItemIDs.append(id)
+                    if let ref = stmt.columnText(1), !ref.isEmpty {
                         refs.append(ref)
                     }
                 }
             }
             try execute("DELETE FROM clipboard_items WHERE is_pinned = 0")
-            return .clearedUnpinned
+            return .clearedUnpinned(deletedItemIDs: deletedItemIDs)
         }
         return refs
     }
@@ -572,19 +613,72 @@ actor SQLiteClipboardRepository {
     /// total, from one read snapshot. One row past the page decides whether a next page exists.
     func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) throws -> (
         pinned: [ClipboardStoredItem], items: [ClipboardStoredItem], total: Int,
-        nextCursor: RecentHistoryCursor?
+        nextCursor: RecentHistoryCursor?, mutationSeq: Int64
     ) {
         let limit = max(1, limit)
         try execute("BEGIN DEFERRED TRANSACTION")
         do {
             let pinned = cursor == nil ? try fetchPinned() : []
             var items = try fetchUnpinned(limit: limit + 1, after: cursor)
-            let total = try getItemCount()
+            let total: Int
+            let mutationSeq: Int64
+            do {
+                let position = try prepare("SELECT item_count, mutation_seq FROM scopy_meta WHERE id = 1")
+                guard try position.step() else {
+                    throw RepositoryError.queryFailed("scopy_meta row is missing")
+                }
+                total = position.columnInt(0)
+                mutationSeq = position.columnInt64(1)
+            }
             try execute("COMMIT")
             let hasMore = items.count > limit
             if hasMore { items.removeLast() }
             let nextCursor = hasMore ? items.last.map { RecentHistoryCursor(lastUsedAt: $0.lastUsedAt, id: $0.id) } : nil
-            return (pinned, items, total, nextCursor)
+            return (pinned, items, total, nextCursor, mutationSeq)
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    /// Reads only requested identities from one snapshot. A requested ID absent from `items`
+    /// does not exist at the returned sequence, including when the request spans SQL batches.
+    func fetchHistoryItems(itemIDs: Set<UUID>) throws -> (items: [ClipboardStoredItem], mutationSeq: Int64) {
+        try execute("BEGIN DEFERRED TRANSACTION")
+        do {
+            let mutationSeq: Int64
+            do {
+                let position = try prepare("SELECT mutation_seq FROM scopy_meta WHERE id = 1")
+                guard try position.step() else {
+                    throw RepositoryError.queryFailed("scopy_meta row is missing")
+                }
+                mutationSeq = position.columnInt64(0)
+            }
+
+            let ids = itemIDs.sorted { $0.uuidString < $1.uuidString }
+            var items: [ClipboardStoredItem] = []
+            items.reserveCapacity(ids.count)
+            let batchSize = 900
+            for start in stride(from: 0, to: ids.count, by: batchSize) {
+                let batch = ids[start..<min(start + batchSize, ids.count)]
+                let placeholders = batch.map { _ in "?" }.joined(separator: ",")
+                let statement = try prepare(
+                    "SELECT \(ClipboardItemRow.summaryColumns) FROM clipboard_items WHERE id IN (\(placeholders)) ORDER BY id"
+                )
+                for (index, id) in batch.enumerated() {
+                    try statement.bindText(id.uuidString, at: Int32(index + 1))
+                }
+                while try statement.step() {
+                    items.append(try ClipboardItemRow.decodeSummary(statement))
+                }
+                #if DEBUG
+                if start == 0 {
+                    try historyReadInterlockForTesting?()
+                }
+                #endif
+            }
+            try execute("COMMIT")
+            return (items, mutationSeq)
         } catch {
             try? execute("ROLLBACK")
             throw error
@@ -635,7 +729,8 @@ actor SQLiteClipboardRepository {
     func updateItemSizeBytesBatchInTransaction(updates: [SizeBytesUpdate]) throws -> Int {
         guard !updates.isEmpty else { return 0 }
         var updatedCount = 0
-        _ = try performConditionalWriteTransaction {
+        try performWriteTransaction {
+            var updatedItems: [ClipboardStoredItem] = []
             let stmt = try prepare(
                 """
                 UPDATE clipboard_items
@@ -643,7 +738,7 @@ actor SQLiteClipboardRepository {
                 WHERE id = ? AND content_hash = ? AND size_bytes = ? AND storage_ref = ?
                 """
             )
-            for update in updates {
+            for update in updates where update.sizeBytes != update.expectedSizeBytes {
                 stmt.reset()
                 try stmt.bindInt(update.sizeBytes, at: 1)
                 try stmt.bindText(update.id.uuidString, at: 2)
@@ -651,9 +746,14 @@ actor SQLiteClipboardRepository {
                 try stmt.bindInt(update.expectedSizeBytes, at: 4)
                 try stmt.bindText(update.expectedStorageRef, at: 5)
                 _ = try stmt.step()
-                updatedCount += connection?.changeCount() ?? 0
+                guard (connection?.changeCount() ?? 0) > 0 else { continue }
+                guard let item = try fetchItemSummaryByID(update.id) else {
+                    throw RepositoryError.queryFailed("Updated row could not be read back")
+                }
+                updatedItems.append(item)
+                updatedCount += 1
             }
-            return updatedCount > 0 ? .unindexedFields : nil
+            return updatedItems.isEmpty ? nil : .storageSizesUpdated(updatedItems)
         }
         return updatedCount
     }
@@ -948,7 +1048,7 @@ actor SQLiteClipboardRepository {
 
         var deletedItemIDs: [UUID] = []
         var deletedStorageRefs: [String] = []
-        _ = try performConditionalWriteTransaction {
+        try performWriteTransaction {
             let batchSize = 900
             for batchStart in stride(from: 0, to: plan.candidates.count, by: batchSize) {
                 let batchEnd = min(batchStart + batchSize, plan.candidates.count)
@@ -995,37 +1095,47 @@ actor SQLiteClipboardRepository {
         return flags
     }
 
-    private func bumpMutationSeq() throws -> Int64 {
-        let stmt = try prepare("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1 RETURNING mutation_seq")
+    private func advanceCommitPosition() throws -> (mutationSeq: Int64, totalCount: Int) {
+        let stmt = try prepare("UPDATE scopy_meta SET mutation_seq = mutation_seq + 1 WHERE id = 1 RETURNING mutation_seq, item_count")
         guard try stmt.step() else {
             throw RepositoryError.queryFailed("scopy_meta row is missing")
         }
-        let mutationSeq = stmt.columnInt64(0)
+        let position = (mutationSeq: stmt.columnInt64(0), totalCount: stmt.columnInt(1))
         _ = try stmt.step()
-        return mutationSeq
+        return position
     }
 
     /// Commits `body` and records the change it reports in the commit journal, together with the
     /// commit's `mutation_seq`, before any other repository work can run.
-    private func performWriteTransaction(_ body: () throws -> StorageCommittedChange) throws {
-        _ = try performConditionalWriteTransaction { try body() }
-    }
-
-    /// `body` returns nil when it wrote nothing; such a transaction advances no sequence number.
+    /// A nil fact advances no sequence. Command acknowledgements, including an empty clear,
+    /// still return a fact even when no item row changed. The result is always read in this
+    /// transaction, including no-op commands that must return an authoritative snapshot position.
     @discardableResult
-    private func performConditionalWriteTransaction(
+    private func performWriteTransaction(
         _ body: () throws -> StorageCommittedChange?
-    ) throws -> Bool {
+    ) throws -> Int64 {
         try execute("BEGIN IMMEDIATE TRANSACTION")
         do {
             guard let change = try body() else {
+                let mutationSeq: Int64
+                do {
+                    let position = try prepare("SELECT mutation_seq FROM scopy_meta WHERE id = 1")
+                    guard try position.step() else {
+                        throw RepositoryError.queryFailed("scopy_meta row is missing")
+                    }
+                    mutationSeq = position.columnInt64(0)
+                }
                 try execute("COMMIT")
-                return false
+                return mutationSeq
             }
-            let mutationSeq = try bumpMutationSeq()
+            let position = try advanceCommitPosition()
             try execute("COMMIT")
-            commitJournal.append(mutationSeq: mutationSeq, change: Self.journalChange(change))
-            return true
+            commitJournal.append(
+                mutationSeq: position.mutationSeq,
+                totalCount: position.totalCount,
+                change: change
+            )
+            return position.mutationSeq
         } catch {
             do {
                 try execute("ROLLBACK")
@@ -1133,11 +1243,17 @@ actor SQLiteClipboardRepository {
         update: MetadataUpdate
     ) throws -> ClipboardStoredItem? {
         var updatedItem: ClipboardStoredItem?
-        _ = try performConditionalWriteTransaction {
+        try performWriteTransaction {
             guard let current = try fetchItemByID(id) else { return nil }
 
+            let kind: HistoryItemChangeKind
             switch update {
             case .note(let note):
+                guard current.note != note else {
+                    updatedItem = current
+                    return nil
+                }
+                kind = .content
                 do {
                     let stmt = try prepare("UPDATE clipboard_items SET note = ? WHERE id = ?")
                     try stmt.bindText(note, at: 1)
@@ -1147,6 +1263,7 @@ actor SQLiteClipboardRepository {
             case .fileSizeBytes(let expected, let fileSizeBytes):
                 guard Self.hasSamePayload(current, as: expected) else { return nil }
                 guard current.fileSizeBytes != fileSizeBytes else { return nil }
+                kind = .metadata
                 do {
                     let stmt = try prepare("UPDATE clipboard_items SET file_size_bytes = ? WHERE id = ?")
                     if let fileSizeBytes {
@@ -1160,30 +1277,9 @@ actor SQLiteClipboardRepository {
             }
 
             updatedItem = try fetchItemByID(id)
-            return updatedItem.map(StorageCommittedChange.upserted)
+            return updatedItem.map { .upserted($0, kind: kind) }
         }
         return updatedItem
-    }
-
-    /// Journal entries never hold payload bytes.
-    private static func journalChange(_ change: StorageCommittedChange) -> StorageCommittedChange {
-        guard case .upserted(let item) = change, item.rawData != nil else { return change }
-        return .upserted(ClipboardStoredItem(
-            id: item.id,
-            type: item.type,
-            contentHash: item.contentHash,
-            plainText: item.plainText,
-            note: item.note,
-            appBundleID: item.appBundleID,
-            createdAt: item.createdAt,
-            lastUsedAt: item.lastUsedAt,
-            useCount: item.useCount,
-            isPinned: item.isPinned,
-            sizeBytes: item.sizeBytes,
-            fileSizeBytes: item.fileSizeBytes,
-            storageRef: item.storageRef,
-            rawData: nil
-        ))
     }
 
     private static func hasSamePayload(

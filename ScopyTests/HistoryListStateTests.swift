@@ -10,7 +10,7 @@ final class HistoryListStateTests: XCTestCase {
         let secondPinned = makeItem(text: "second pinned", isPinned: true)
         var state = HistoryListState()
 
-        state.replacePage(items: [pinned, first, secondPinned], total: 10, hasMore: true)
+        state.replacePage(items: [pinned, first, secondPinned], total: 10, hasMore: true, mutationSeq: 0)
 
         XCTAssertEqual(state.items.map(\.id), [pinned.id, first.id, secondPinned.id])
         XCTAssertEqual(state.pinnedItems.map(\.id), [pinned.id, secondPinned.id])
@@ -25,9 +25,9 @@ final class HistoryListStateTests: XCTestCase {
         let first = makeItem(text: "first")
         let second = makeItem(text: "second")
         var state = HistoryListState()
-        state.replacePage(items: [first], total: 1, hasMore: false)
+        state.replacePage(items: [first], total: 1, hasMore: false, mutationSeq: 0)
 
-        state.appendPage(items: [second], total: 2, hasMore: false)
+        state.appendPage(items: [second], total: 2, hasMore: false, mutationSeq: 0)
 
         XCTAssertEqual(state.items.map(\.id), [first.id, second.id])
         XCTAssertEqual(state.indexOfItem(withID: first.id), 0)
@@ -43,10 +43,10 @@ final class HistoryListStateTests: XCTestCase {
         let second = makeItem(text: "second")
         let anotherPinned = makeItem(text: "another pinned", isPinned: true)
         var state = HistoryListState()
-        state.replacePage(items: [first, pinned], total: -1, hasMore: true)
+        state.replacePage(items: [first, pinned], total: -1, hasMore: true, mutationSeq: 0)
         let revision = state.projectionGeneration
 
-        state.appendPage(items: [second, anotherPinned], total: -1, hasMore: true)
+        state.appendPage(items: [second, anotherPinned], total: -1, hasMore: true, mutationSeq: 0)
         XCTAssertEqual(state.items.map(\.id), [first.id, pinned.id, second.id, anotherPinned.id])
         XCTAssertEqual(state.pinnedItems.map(\.id), [pinned.id, anotherPinned.id])
         XCTAssertEqual(state.unpinnedItems.map(\.id), [first.id, second.id])
@@ -55,7 +55,7 @@ final class HistoryListStateTests: XCTestCase {
         XCTAssertTrue(state.canLoadMore)
 
         // An empty terminal page still updates authoritative paging metadata.
-        state.appendPage(items: [], total: 4, hasMore: false)
+        state.appendPage(items: [], total: 4, hasMore: false, mutationSeq: 0)
         XCTAssertEqual(state.loadedCount, 4)
         XCTAssertEqual(state.totalCount, 4)
         XCTAssertFalse(state.canLoadMore)
@@ -65,7 +65,7 @@ final class HistoryListStateTests: XCTestCase {
         let first = makeItem(text: "first")
         let second = makeItem(text: "second")
         var state = HistoryListState()
-        state.replacePage(items: [first, second], total: 2, hasMore: false)
+        state.replacePage(items: [first, second], total: 2, hasMore: false, mutationSeq: 0)
 
         let updatedSecond = second.withPinned(true)
         let didUpdate = state.setItemIfChanged(at: 1, to: updatedSecond)
@@ -82,7 +82,7 @@ final class HistoryListStateTests: XCTestCase {
         let second = makeItem(text: "second")
         let third = makeItem(text: "third")
         var state = HistoryListState()
-        state.replacePage(items: [first, second, third], total: 4, hasMore: true)
+        state.replacePage(items: [first, second, third], total: 4, hasMore: true, mutationSeq: 0)
 
         let removed = state.removeItem(withID: second.id)
 
@@ -102,7 +102,7 @@ final class HistoryListStateTests: XCTestCase {
         let third = makeItem(text: "third")
         let fourth = makeItem(text: "fourth")
         var state = HistoryListState()
-        state.replacePage(items: [first, second, third, fourth], total: 7, hasMore: true)
+        state.replacePage(items: [first, second, third, fourth], total: 7, hasMore: true, mutationSeq: 0)
 
         let removedCount = state.removeItems(withIDs: [second.id, fourth.id, UUID()])
 
@@ -128,7 +128,8 @@ final class HistoryListStateTests: XCTestCase {
             isPinned: isPinned,
             sizeBytes: text.utf8.count,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 }

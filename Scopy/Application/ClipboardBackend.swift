@@ -25,14 +25,7 @@ actor ClipboardBackend {
         case afterExternalSourceLeaseBeforeValidation
         case afterExternalPayloadCommit
         case afterExternalSourceAdoptionBeforeVerification(attempt: Int)
-        case beforeSearchPublication
-    }
-
-    enum MetadataPublicationInterlockPoint: Sendable {
-        case afterNoteCommit
-        case afterNoteDTOConstructionBeforeEvent
-        case afterFileSizeCommit
-        case afterFileSizeDTOConstructionBeforeEvent
+        case beforeResultValidation
     }
 
     private enum ExternalSourceReconciliationResult: Sendable {
@@ -41,11 +34,9 @@ actor ClipboardBackend {
         case failedOrUnstable
     }
 
-    private enum AuthoritativePublicationKind: Sendable {
-        case newItem
-        case itemUpdated
-        case contentUpdated
-        case pinState
+    private struct HistoryPublicationWaiter {
+        let mutationSeq: Int64
+        let continuation: CheckedContinuation<Void, Never>
     }
 
     struct ImageOptimizationAdmissionSnapshot: Sendable, Equatable {
@@ -118,7 +109,6 @@ actor ClipboardBackend {
     private let monitorPasteboardName: String?
     private let monitorPollingInterval: TimeInterval?
     private let imageOptimizationInterlock: (@Sendable (ImageOptimizationInterlockPoint, UUID) async -> Void)?
-    private let metadataPublicationInterlock: (@Sendable (MetadataPublicationInterlockPoint, UUID) async -> Void)?
 
     private var monitor: ClipboardMonitor?
     private var storage: StorageService?
@@ -154,8 +144,20 @@ actor ClipboardBackend {
     private var thumbnailCacheIndexTask: Task<Void, Never>?
     private var thumbnailCacheIndexGeneration: UInt64 = 0
 
-    private let eventQueue: ClipboardEventQueue
-    private let itemMutationGate = ClipboardItemMutationGate()
+    private let eventQueue: AsyncBoundedQueue<ClipboardEvent>
+    private var historyPublicationTask: Task<Void, Never>?
+    /// Highest log position represented by an enqueued fact or resnapshot signal. The UI's
+    /// applied snapshot position is separate and comes from its actual database read.
+    private var publishedMutationSeq: Int64 = 0
+    private var historyPublicationWaiters: [HistoryPublicationWaiter] = []
+    #if DEBUG
+    private var beforeHistoryPublicationForTesting: (@Sendable (Int64) async -> Void)?
+    var isDrainingHistoryForTesting: Bool { !historyPublicationWaiters.isEmpty }
+
+    func setHistoryPublicationInterlockForTesting(_ interlock: (@Sendable (Int64) async -> Void)?) {
+        beforeHistoryPublicationForTesting = interlock
+    }
+    #endif
     private var monitorTask: Task<Void, Never>?
     private var storageRootLock: StorageRootLock?
     private var memoryPressureSources: [any DispatchSourceMemoryPressure] = []
@@ -218,22 +220,21 @@ actor ClipboardBackend {
         settingsStore: SettingsStore = .shared,
         monitorPasteboardName: String? = nil,
         monitorPollingInterval: TimeInterval? = nil,
-        imageOptimizationInterlock: (@Sendable (ImageOptimizationInterlockPoint, UUID) async -> Void)? = nil,
-        metadataPublicationInterlock: (@Sendable (MetadataPublicationInterlockPoint, UUID) async -> Void)? = nil
+        imageOptimizationInterlock: (@Sendable (ImageOptimizationInterlockPoint, UUID) async -> Void)? = nil
     ) {
         self.databasePath = databasePath
         self.settingsStore = settingsStore
         self.monitorPasteboardName = monitorPasteboardName
         self.monitorPollingInterval = monitorPollingInterval
         self.imageOptimizationInterlock = imageOptimizationInterlock
-        self.metadataPublicationInterlock = metadataPublicationInterlock
 
-        let queue = ClipboardEventQueue(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
+        let queue = AsyncBoundedQueue<ClipboardEvent>(capacity: ScopyThresholds.clipboardEventStreamMaxBufferedItems)
         self.eventQueue = queue
         self.eventStream = AsyncStream(unfolding: { await queue.dequeue() })
     }
 
     deinit {
+        historyPublicationTask?.cancel()
         monitorTask?.cancel()
         cleanupTask?.cancel()
         orphanCleanupTask?.cancel()
@@ -337,6 +338,7 @@ actor ClipboardBackend {
         do {
             try await storage.open()
             try await search.open()
+            startHistoryPublication(storage: storage)
 
             var deferredTerminalIngestIDs = Set<UUID>()
             while true {
@@ -385,7 +387,6 @@ actor ClipboardBackend {
             monitorTask = Task { [weak self] in
                 for await content in stream {
                     guard !Task.isCancelled else {
-                        IngestEnvelopeProcessor.cleanupPayloadIfNeeded(content.payload, ownership: content.fileOwnership)
                         break
                     }
                     guard let self else { return }
@@ -473,6 +474,15 @@ actor ClipboardBackend {
             await withCheckedContinuation { storageRequestsDrained = $0 }
         }
 
+        // No producer can commit now. Publish the remaining facts before cancelling the sole
+        // history consumer; its cancellation lifetime is independent of every initiating request.
+        if let storage {
+            await waitForHistoryPublication(through: storage.commitJournal.currentMutationSeq)
+        }
+        historyPublicationTask?.cancel()
+        await historyPublicationTask?.value
+        historyPublicationTask = nil
+
         // Only the writer, closing after the read connection, can checkpoint and truncate WAL.
         await search?.close()
         await storage?.close()
@@ -524,7 +534,24 @@ actor ClipboardBackend {
         var items: [ClipboardItemDTO] = []
         for item in page.pinned { pinned.append(await toDTO(item, storage: storage)) }
         for item in page.items { items.append(await toDTO(item, storage: storage)) }
-        return RecentHistoryPage(pinnedItems: pinned, items: items, total: page.total, nextCursor: page.nextCursor)
+        return RecentHistoryPage(
+            pinnedItems: pinned, items: items, total: page.total,
+            nextCursor: page.nextCursor, mutationSeq: page.mutationSeq
+        )
+    }
+
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+        let storage = try beginStorageRequest()
+        defer { endStorageRequest() }
+        let snapshot = try await storage.fetchHistoryItems(itemIDs: itemIDs)
+        var items: [ClipboardItemDTO] = []
+        items.reserveCapacity(snapshot.items.count)
+        for item in snapshot.items {
+            items.append(await toDTO(item, storage: storage))
+        }
+        return HistoryItemsSnapshot(
+            requestedItemIDs: itemIDs, items: items, mutationSeq: snapshot.mutationSeq
+        )
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -547,7 +574,8 @@ actor ClipboardBackend {
             hits: hits,
             total: result.total,
             hasMore: result.hasMore,
-            coverage: result.coverage
+            coverage: result.coverage,
+            mutationSeq: result.mutationSeq
         )
     }
 
@@ -562,76 +590,40 @@ actor ClipboardBackend {
     private func setPinned(itemID: UUID, pinned: Bool) async throws {
         let storage = try beginStorageRequest()
         defer { endStorageRequest() }
-        _ = try requireSearch()
-        guard let lease = await itemMutationGate.acquire(itemID: itemID) else {
-            throw CancellationError()
-        }
-
-        do {
-            guard !Task.isCancelled else { throw CancellationError() }
-            try await storage.setPin(itemID, pinned: pinned)
-            _ = await publishAuthoritativeItemState(
-                id: itemID,
-                storage: storage,
-                priority: .userInitiated,
-                kind: .pinState
-            )
-            await itemMutationGate.release(lease)
-        } catch {
-            await itemMutationGate.release(lease)
-            throw error
-        }
+        try Task.checkCancellation()
+        try await storage.setPin(itemID, pinned: pinned)
     }
 
     func updateNote(itemID: UUID, note: String?) async throws {
         let storage = try beginStorageRequest()
         defer { endStorageRequest() }
-        _ = try requireSearch()
-
-        guard let existing = try await storage.findByID(itemID) else {
-            throw ClipboardBackendError.itemNotFoundOrSuperseded
-        }
         let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = (trimmed?.isEmpty ?? true) ? nil : trimmed
-        guard existing.note != normalized else { return }
-
         guard try await storage.updateNote(id: itemID, note: normalized) != nil else {
             throw ClipboardBackendError.itemNotFoundOrSuperseded
         }
-        await metadataPublicationInterlock?(.afterNoteCommit, itemID)
-        _ = await publishAuthoritativeItemState(
-            id: itemID,
-            storage: storage,
-            priority: .userInitiated,
-            metadataInterlockPoint: .afterNoteDTOConstructionBeforeEvent
-        )
     }
 
-    func delete(itemID: UUID) async throws {
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
         let storage = try beginStorageRequest()
         defer { endStorageRequest() }
-        let search = try requireSearch()
-
-        try await storage.deleteItem(itemID)
-        await search.applyCommittedChanges()
-        fileSizeComputationLastAttemptAt.remove { $0.itemID == itemID }
-        await fileSizeComputationQueue?.cancelPending { $0.itemID == itemID }
-        let publication = await reservePublication(for: itemID)
-        await yieldEvent(.itemDeleted(itemID), publication: publication)
+        let outcome = try await storage.deleteItem(itemID, expectedUseCount: expectedUseCount)
+        let items: [ClipboardItemDTO]
+        if let retained = outcome.item {
+            items = [await toDTO(retained, storage: storage)]
+        } else {
+            items = []
+        }
+        return HistoryItemsSnapshot(
+            requestedItemIDs: [itemID], items: items, mutationSeq: outcome.mutationSeq
+        )
     }
 
     func clearAll() async throws {
         let storage = try beginStorageRequest()
         defer { endStorageRequest() }
-        let search = try requireSearch()
-
         try await storage.deleteAllExceptPinned()
-        await search.applyCommittedChanges()
-        fileSizeComputationLastAttemptAt.removeAll()
-        await fileSizeComputationQueue?.discardPending()
-        await thumbnailGenerationQueue?.discardPending()
-        await eventQueue.advanceClearGeneration()
-        await yieldEvent(.itemsCleared(keepPinned: true))
+        await waitForHistoryPublication(through: storage.commitJournal.currentMutationSeq)
     }
 
     func copyToClipboard(itemID: UUID) async throws {
@@ -666,7 +658,6 @@ actor ClipboardBackend {
         let monitor = try requireMonitor()
         let storage = try beginStorageRequest()
         defer { endStorageRequest() }
-        _ = try requireSearch()
 
         guard let item = try await storage.findByID(itemID) else {
             throw ClipboardCopyError.itemNotFound(itemID)
@@ -687,12 +678,6 @@ actor ClipboardBackend {
             ScopyLog.app.warning("Failed to update item usage stats: \(error.localizedDescription, privacy: .private)")
         }
 
-        _ = await publishAuthoritativeItemState(
-            id: item.id,
-            storage: storage,
-            priority: .userInitiated,
-            kind: .itemUpdated
-        )
     }
 
     private func performClipboardCopy(
@@ -972,8 +957,7 @@ actor ClipboardBackend {
                 do {
                     _ = try await storage.performCleanup(
                         mode: .full,
-                        policy: cleanupPolicy(),
-                        onCommitted: cleanupCommitHandler()
+                        policy: cleanupPolicy()
                     )
                 } catch {
                     ScopyLog.app.warning(
@@ -1029,7 +1013,6 @@ actor ClipboardBackend {
         defer { endStorageRequest() }
         let updated = try await storage.syncExternalImageSizeBytesFromDisk()
         if updated > 0 {
-            await search?.applyCommittedChanges()
             ScopyLog.storage.info("Synced external image size_bytes from disk: updated=\(updated, privacy: .public)")
         }
         return updated
@@ -1164,8 +1147,7 @@ actor ClipboardBackend {
             ) else {
                 return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
             }
-            guard let published = await publishOptimizedItem(updated, storage: storage),
-                  Self.hasSamePayload(published, as: updated) else {
+            guard await optimizedPayloadStillCurrent(updated, storage: storage) else {
                 return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
             }
             return ImageOptimizationOutcomeDTO(
@@ -1357,28 +1339,13 @@ actor ClipboardBackend {
 
             switch reconciliation {
             case .sourceUnavailable:
-                    let current = try? await storage.findByID(item.id)
-                    guard let current,
-                          Self.hasSamePayload(current, as: updated) else {
-                        _ = await publishAuthoritativeItemState(
-                            id: item.id,
-                            storage: storage,
-                            priority: .userInitiated
-                        )
-                        return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
-                    }
-                case .adopted, .failedOrUnstable:
-                    _ = await publishAuthoritativeItemState(
-                        id: item.id,
-                        storage: storage,
-                        priority: .userInitiated
-                    )
-                    return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
-                }
+                break
+            case .adopted, .failedOrUnstable:
+                return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
+            }
         }
 
-        guard let published = await publishOptimizedItem(updated, storage: storage),
-              Self.hasSamePayload(published, as: updated) else {
+        guard await optimizedPayloadStillCurrent(updated, storage: storage) else {
             return Self.supersededImageOptimizationOutcome(originalBytes: originalBytes)
         }
         return ImageOptimizationOutcomeDTO(
@@ -1389,80 +1356,15 @@ actor ClipboardBackend {
         )
     }
 
-    private func publishOptimizedItem(
+    /// The result's proof concerns payload ownership at completion, not history publication.
+    /// History always publishes the immutable transaction value, even if another commit follows it.
+    private func optimizedPayloadStillCurrent(
         _ updated: ClipboardStoredItem,
         storage: StorageService
-    ) async -> ClipboardStoredItem? {
-        await imageOptimizationInterlock?(.beforeSearchPublication, updated.id)
-        guard let current = await publishAuthoritativeItemState(
-            id: updated.id,
-            storage: storage,
-            priority: .userInitiated
-        ), Self.hasSamePayload(current, as: updated) else {
-            return nil
-        }
-        return current
-    }
-
-    @discardableResult
-    private func publishAuthoritativeItemState(
-        id: UUID,
-        storage: StorageService,
-        priority: TaskPriority,
-        kind: AuthoritativePublicationKind = .contentUpdated,
-        metadataInterlockPoint: MetadataPublicationInterlockPoint? = nil
-    ) async -> ClipboardStoredItem? {
-        let publication = await reservePublication(for: id)
-        guard let current = await synchronizeSearchWithCurrentItem(id: id, storage: storage) else {
-            let latest: ClipboardStoredItem?
-            do {
-                latest = try await storage.findByID(id)
-            } catch {
-                await eventQueue.discardPublication(publication)
-                return nil
-            }
-            guard latest == nil else {
-                await eventQueue.discardPublication(publication)
-                return nil
-            }
-            let accepted = await yieldEvent(.itemDeleted(id), publication: publication)
-            guard accepted else { return nil }
-            return nil
-        }
-
-        let dto = await toDTO(
-            current,
-            storage: storage,
-            thumbnailGenerationPriority: priority
-        )
-        let event: ClipboardEvent
-        switch kind {
-        case .newItem:
-            event = .newItem(dto)
-        case .itemUpdated:
-            event = .itemUpdated(dto)
-        case .contentUpdated:
-            event = .itemContentUpdated(dto)
-        case .pinState:
-            event = current.isPinned ? .itemPinned(dto) : .itemUnpinned(dto)
-        }
-        if let metadataInterlockPoint {
-            await metadataPublicationInterlock?(metadataInterlockPoint, id)
-        }
-        let accepted = await yieldEvent(event, publication: publication)
-        guard accepted else { return nil }
-        return current
-    }
-
-    /// Applies committed storage changes to search before the item is published, so a search
-    /// issued after the event sees it, then returns the item's current row (nil when it no longer
-    /// exists or cannot be read).
-    private func synchronizeSearchWithCurrentItem(
-        id: UUID,
-        storage: StorageService
-    ) async -> ClipboardStoredItem? {
-        await search?.applyCommittedChanges()
-        return try? await storage.findByID(id)
+    ) async -> Bool {
+        await imageOptimizationInterlock?(.beforeResultValidation, updated.id)
+        guard let current = try? await storage.findByID(updated.id) else { return false }
+        return Self.hasSamePayload(current, as: updated)
     }
 
     private func externalSourceMatches(
@@ -1603,16 +1505,10 @@ actor ClipboardBackend {
         guard let storage, search != nil else { return }
 
         if content.type == .image && !settings.saveImages {
-            if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
-                try? FileManager.default.removeItem(at: ingestURL)
-            }
             await acknowledgeIngestEnvelopeIfNeeded(content, storage: storage)
             return
         }
         if content.type == .file && !settings.saveFiles {
-            if content.fileOwnership == .transient, let ingestURL = content.ingestFileURL {
-                try? FileManager.default.removeItem(at: ingestURL)
-            }
             await acknowledgeIngestEnvelopeIfNeeded(content, storage: storage)
             return
         }
@@ -1620,26 +1516,7 @@ actor ClipboardBackend {
         let preparedContent = await prepareContentForStorage(content)
 
         do {
-            let outcome = try await storage.upsertItemWithOutcome(preparedContent)
-            switch outcome {
-            case .inserted(let storedItem):
-                _ = await publishAuthoritativeItemState(
-                    id: storedItem.id,
-                    storage: storage,
-                    priority: .userInitiated,
-                    kind: .newItem
-                )
-            case .updated(let storedItem):
-                _ = await publishAuthoritativeItemState(
-                    id: storedItem.id,
-                    storage: storage,
-                    priority: .userInitiated,
-                    kind: .itemUpdated
-                )
-            case .alreadyApplied:
-                break
-            }
-
+            _ = try await storage.upsertItemWithOutcome(preparedContent)
             await acknowledgeIngestEnvelopeIfNeeded(preparedContent, storage: storage)
             scheduleCleanup(storage: storage)
         } catch {
@@ -1661,90 +1538,48 @@ actor ClipboardBackend {
             colors: settings.pngquantCopyImageColors
         )
 
-        switch content.payload {
+        let payload: CapturedPayload
+        let contentHash: String
+        let sizeBytes: Int
+        switch content.payload.storage {
         case .data(let data):
-            let compressed = await Task.detached(priority: .utility) {
-                await PngquantService.compressBestEffort(data, options: options)
-            }.value
-
+            let compressed = await PngquantService.compressBestEffort(data, options: options)
             guard compressed != data else { return content }
-            let hash = ClipboardMonitor.computeHashStatic(compressed)
-            return ClipboardMonitor.ClipboardContent(
-                type: content.type,
-                plainText: content.plainText,
-                payload: .data(compressed),
-                note: content.note,
-                appBundleID: content.appBundleID,
-                contentHash: hash,
-                sizeBytes: compressed.count,
-                fileSizeBytes: content.fileSizeBytes,
-                ingestEnvelopeURL: content.ingestEnvelopeURL,
-                ingestID: content.ingestID,
-                fileOwnership: content.fileOwnership
-            )
-        case .file(let url):
-            let preparedURL: URL
-            let preparedOwnership: ClipboardMonitor.ClipboardContent.FileOwnership
-            if content.fileOwnership == .durableSpool {
-                guard let copiedURL = await Task.detached(priority: .utility, operation: {
-                    try? ClipboardMonitor.createTransientWorkCopy(for: content)
-                }).value else {
-                    return content
-                }
-                let replaced = await Task.detached(priority: .utility) {
-                    await PngquantService.compressFileBestEffort(copiedURL, options: options)
-                }.value
-                guard replaced else {
-                    try? FileManager.default.removeItem(at: copiedURL)
-                    return content
-                }
-                preparedURL = copiedURL
-                preparedOwnership = .transient
-            } else {
-                let replaced = await Task.detached(priority: .utility) {
-                    await PngquantService.compressFileBestEffort(url, options: options)
-                }.value
-                guard replaced else { return content }
-                preparedURL = url
-                preparedOwnership = content.fileOwnership
+            payload = content.payload.replacingData(compressed, type: content.type)
+            contentHash = ClipboardMonitor.computeHashStatic(compressed)
+            sizeBytes = compressed.count
+        case .file:
+            do {
+                guard let transformed = try await content.payload.transformingFile({ input, output in
+                    try await PngquantService.compressPNGFile(input, to: output, options: options)
+                }) else { return content }
+                payload = transformed.payload
+                sizeBytes = transformed.data.count
+                contentHash = ClipboardMonitor.computeHashStatic(transformed.data)
+            } catch {
+                return content
             }
-
-            let updatedSize: Int = {
-                guard let attrs = try? FileManager.default.attributesOfItem(atPath: preparedURL.path),
-                      let size = attrs[.size] as? Int else { return content.sizeBytes }
-                return size
-            }()
-
-            let updatedHash: String = {
-                guard let data = try? Data(contentsOf: preparedURL, options: [.mappedIfSafe]) else {
-                    return content.contentHash
-                }
-                return ClipboardMonitor.computeHashStatic(data)
-            }()
-
-            return ClipboardMonitor.ClipboardContent(
-                type: content.type,
-                plainText: content.plainText,
-                payload: .file(preparedURL),
-                note: content.note,
-                appBundleID: content.appBundleID,
-                contentHash: updatedHash,
-                sizeBytes: updatedSize,
-                fileSizeBytes: content.fileSizeBytes,
-                ingestEnvelopeURL: content.ingestEnvelopeURL,
-                ingestID: content.ingestID,
-                fileOwnership: preparedOwnership
-            )
         case .none:
             return content
         }
+
+        return ClipboardMonitor.ClipboardContent(
+            type: content.type,
+            plainText: content.plainText,
+            payload: payload,
+            note: content.note,
+            appBundleID: content.appBundleID,
+            contentHash: contentHash,
+            sizeBytes: sizeBytes,
+            fileSizeBytes: content.fileSizeBytes
+        )
     }
 
     private func acknowledgeIngestEnvelopeIfNeeded(
         _ content: ClipboardMonitor.ClipboardContent,
         storage: StorageService
     ) async {
-        guard let envelopeURL = content.ingestEnvelopeURL else { return }
+        guard let envelopeURL = content.payload.ingest?.envelopeURL else { return }
         let outcome = await MainActor.run { [monitor] in
             monitor?.acknowledgeIngestEnvelope(at: envelopeURL)
         }
@@ -1765,48 +1600,78 @@ actor ClipboardBackend {
         await eventQueue.enqueue(event)
     }
 
-    private func cleanupCommitHandler() -> StorageService.CleanupCommitHandler {
-        { [weak self] result in
-            guard let self else { return }
-            await self.handoffCommittedCleanup(result)
+    private func startHistoryPublication(storage: StorageService) {
+        let journal = storage.commitJournal
+        publishedMutationSeq = journal.currentMutationSeq
+        let wakeups = journal.wakeups()
+        historyPublicationTask = Task { [weak self] in
+            for await _ in wakeups {
+                guard !Task.isCancelled, let self else { return }
+                await self.publishCommittedHistory(storage: storage)
+            }
         }
     }
 
-    /// The caller may be a debounce task that becomes cancelled after SQLite commits. A detached
-    /// handoff gives the already-committed search/UI convergence work an independent cancellation
-    /// lifetime; cancellation remains meaningful only before a cleanup commit.
-    private func handoffCommittedCleanup(_ result: StorageService.CleanupResult) async {
-        guard !result.deletedItemIDs.isEmpty else { return }
-        let handoff = Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            await self.publishCommittedCleanup(result)
+    /// The single consumer owns its cursor and serializes DTO hydration with event delivery.
+    /// A wakeup is only a hint; the bounded log is the authority, including explicit history gaps.
+    private func publishCommittedHistory(storage: StorageService) async {
+        switch storage.commitJournal.read(after: publishedMutationSeq) {
+        case .changes(let entries, _):
+            for entry in entries {
+                #if DEBUG
+                await beforeHistoryPublicationForTesting?(entry.mutationSeq)
+                #endif
+                let change: HistoryChange
+                switch entry.change {
+                case .upserted(let item, let kind):
+                    let dto = await toDTO(item, storage: storage, thumbnailGenerationPriority: .userInitiated)
+                    change = .itemsChanged([dto], kind: kind)
+                case .storageSizesUpdated(let items):
+                    var dtos: [ClipboardItemDTO] = []
+                    dtos.reserveCapacity(items.count)
+                    for item in items {
+                        dtos.append(await toDTO(item, storage: storage))
+                    }
+                    change = .itemsChanged(dtos, kind: .metadata)
+                case .deleted(let ids):
+                    await discardBackgroundWork(for: ids)
+                    change = .itemsRemoved(ids)
+                case .clearedUnpinned(let ids):
+                    await discardBackgroundWork(for: ids)
+                    await thumbnailGenerationQueue?.discardPending()
+                    change = .itemsCleared(deletedItemIDs: ids)
+                }
+                await yieldEvent(.history(CommittedHistoryChange(
+                    mutationSeq: entry.mutationSeq, totalCount: entry.totalCount, change: change
+                )))
+                advanceHistoryPublication(to: entry.mutationSeq)
+            }
+        case .resnapshotRequired(let through):
+            await yieldEvent(.historyResnapshotRequired(mutationSeq: through))
+            advanceHistoryPublication(to: through)
         }
-        await handoff.value
     }
 
-    private func publishCommittedCleanup(_ result: StorageService.CleanupResult) async {
-        var seen: Set<UUID> = []
-        let deletedItemIDs = result.deletedItemIDs.filter { seen.insert($0).inserted }
-        guard !deletedItemIDs.isEmpty else { return }
-        let deletedSet = Set(deletedItemIDs)
-
-        await search?.applyCommittedChanges()
-        fileSizeComputationLastAttemptAt.remove { deletedSet.contains($0.itemID) }
-        await fileSizeComputationQueue?.cancelPending { deletedSet.contains($0.itemID) }
-        await eventQueue.invalidatePublications(itemIDs: deletedItemIDs)
-        await yieldEvent(.itemsRemoved(deletedItemIDs))
+    private func discardBackgroundWork(for deletedItemIDs: [UUID]) async {
+        let ids = Set(deletedItemIDs)
+        fileSizeComputationLastAttemptAt.remove { ids.contains($0.itemID) }
+        await fileSizeComputationQueue?.cancelPending { ids.contains($0.itemID) }
     }
 
-    private func reservePublication(for itemID: UUID) async -> ClipboardEventQueue.PublicationToken {
-        await eventQueue.reservePublication(itemID: itemID)
+    private func waitForHistoryPublication(through mutationSeq: Int64) async {
+        guard publishedMutationSeq < mutationSeq else { return }
+        await withCheckedContinuation { continuation in
+            historyPublicationWaiters.append(
+                HistoryPublicationWaiter(mutationSeq: mutationSeq, continuation: continuation)
+            )
+        }
     }
 
-    @discardableResult
-    private func yieldEvent(
-        _ event: ClipboardEvent,
-        publication: ClipboardEventQueue.PublicationToken
-    ) async -> Bool {
-        await eventQueue.enqueue(event, publication: publication)
+    private func advanceHistoryPublication(to mutationSeq: Int64) {
+        publishedMutationSeq = mutationSeq
+        let completed = historyPublicationWaiters.filter { $0.mutationSeq <= mutationSeq }
+        historyPublicationWaiters.removeAll { $0.mutationSeq <= mutationSeq }
+        completed.forEach { $0.continuation.resume() }
     }
 
     private func scheduleCleanup(storage: StorageService) {
@@ -1848,8 +1713,7 @@ actor ClipboardBackend {
         do {
             _ = try await storage.performCleanup(
                 mode: mode,
-                policy: cleanupPolicy(),
-                onCommitted: cleanupCommitHandler()
+                policy: cleanupPolicy()
             )
             lastLightCleanupAt = now
             if needsFull { lastFullCleanupAt = now }
@@ -1997,7 +1861,8 @@ actor ClipboardBackend {
             sizeBytes: item.sizeBytes,
             fileSizeBytes: fileSizeBytes,
             thumbnailPath: thumbnailPath,
-            storageRef: item.storageRef
+            storageRef: item.storageRef,
+            useCount: item.useCount
         )
     }
 
@@ -2079,13 +1944,6 @@ actor ClipboardBackend {
                 return
             }
             fileSizeComputationLastAttemptAt.remove(key)
-            await metadataPublicationInterlock?(.afterFileSizeCommit, expected.id)
-            _ = await publishAuthoritativeItemState(
-                id: expected.id,
-                storage: storage,
-                priority: .utility,
-                metadataInterlockPoint: .afterFileSizeDTOConstructionBeforeEvent
-            )
         } catch {
             ScopyLog.app.warning("Failed to update fileSizeBytes for item \(expected.id.uuidString, privacy: .private): \(error.localizedDescription, privacy: .private)")
         }
@@ -2105,7 +1963,13 @@ actor ClipboardBackend {
            (storagePath == nil || storagePath?.isEmpty == true),
            rawData == nil,
            !Task.isCancelled {
-            fallbackImageData = await storage.loadPayloadData(for: item)
+            // A log row is an immutable summary. Never place a later payload under its old
+            // content-hash cache key when hydration races a replacement or deletion.
+            guard let current = try? await storage.findByID(item.id),
+                  current.type == item.type,
+                  current.contentHash == item.contentHash,
+                  current.storageRef == item.storageRef else { return nil }
+            fallbackImageData = current.rawData
         } else {
             fallbackImageData = nil
         }
@@ -2214,26 +2078,15 @@ actor ClipboardBackend {
         _ work: ThumbnailGenerationWork,
         thumbnailPath: String
     ) async {
-        guard isStarted, settings.showImageThumbnails, let storage else { return }
+        guard isStarted, settings.showImageThumbnails else { return }
         rememberThumbnailExists(thumbnailPath: thumbnailPath)
-        let itemIDs = work.itemIDs.sorted { $0.uuidString < $1.uuidString }
-        for itemID in itemIDs {
-            let publication = await reservePublication(for: itemID)
-            guard let current = try? await storage.findByID(itemID),
-                  current.type == work.item.type,
-                  current.contentHash == work.item.contentHash else {
-                await eventQueue.discardPublication(publication)
-                continue
-            }
-            await yieldEvent(
-                .thumbnailUpdated(
-                    itemID: itemID,
-                    expectedType: work.item.type,
-                    expectedContentHash: work.item.contentHash,
-                    thumbnailPath: thumbnailPath
-                ),
-                publication: publication
-            )
+        for itemID in work.itemIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            await yieldEvent(.thumbnailUpdated(
+                itemID: itemID,
+                expectedType: work.item.type,
+                expectedContentHash: work.item.contentHash,
+                thumbnailPath: thumbnailPath
+            ))
         }
     }
 

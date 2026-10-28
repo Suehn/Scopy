@@ -88,8 +88,9 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         var emittedItem: ClipboardItemDTO?
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID }) else { continue }
                 emittedItem = item
                 contentUpdated.fulfill()
                 return
@@ -171,8 +172,9 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         noContentUpdate.isInverted = true
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      items.contains(where: { $0.id == fixture.itemID }) else { continue }
                 noContentUpdate.fulfill()
                 return
             }
@@ -225,8 +227,9 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         noContentUpdate.isInverted = true
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      items.contains(where: { $0.id == fixture.itemID }) else { continue }
                 noContentUpdate.fulfill()
                 return
             }
@@ -298,8 +301,9 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         var emittedItem: ClipboardItemDTO?
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID }) else { continue }
                 emittedItem = item
                 contentUpdated.fulfill()
                 return
@@ -341,12 +345,14 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
 
     func testInlineOptimizationPreservesConcurrentMetadataInPersistedAndEmittedItem() async throws {
         let fixture = try await startFixture(compressorScript: Self.blockingInlineCompressorScript)
+        let optimizedHash = ClipboardMonitor.computeHashStatic(Data(fixture.originalData.prefix(8)))
         let contentUpdated = expectation(description: "optimized content event")
         var emittedItem: ClipboardItemDTO?
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID && $0.contentHash == optimizedHash }) else { continue }
                 emittedItem = item
                 contentUpdated.fulfill()
                 return
@@ -359,24 +365,21 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         }
         try await waitForFile(fixture.compressorReadyURL)
 
-        let competingStorage = StorageService(databasePath: fixture.databasePath)
-        try await competingStorage.open()
-        _ = try await competingStorage.updateNote(id: fixture.itemID, note: "concurrent note")
-        try await competingStorage.setPin(fixture.itemID, pinned: true)
+        try await fixture.service.updateNote(itemID: fixture.itemID, note: "concurrent note")
+        try await fixture.service.pin(itemID: fixture.itemID)
         try Data().write(to: fixture.compressorGateURL)
 
         let outcome = try await optimization.value
         await fulfillment(of: [contentUpdated], timeout: 2)
         XCTAssertEqual(outcome.result, .optimized)
 
-        let persistedResult = try await competingStorage.findByID(fixture.itemID)
-        let persisted = try XCTUnwrap(persistedResult)
+        let persistedItems = try await fixture.service.fetchRecent(limit: 10, offset: 0)
+        let persisted = try XCTUnwrap(persistedItems.first(where: { $0.id == fixture.itemID }))
         XCTAssertEqual(persisted.note, "concurrent note")
         XCTAssertTrue(persisted.isPinned)
         XCTAssertEqual(emittedItem?.note, "concurrent note")
         XCTAssertEqual(emittedItem?.isPinned, true)
         XCTAssertEqual(emittedItem?.contentHash, outcome.resultingContentHash)
-        await competingStorage.close()
     }
 
     func testDuplicateSameIDOptimizationDoesNotLaunchSecondProcess() async throws {
@@ -488,25 +491,26 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         XCTAssertEqual(drained.queuedRequestCount, 0)
     }
 
-    func testPostCASPayloadReplacementRepairsSearchAndSkipsStalePublication() async throws {
+    func testPostCASReplacementKeepsTheCommittedEventButSuppressesCurrentPayloadProof() async throws {
         let publicationGate = ImageOptimizationInterlockGate()
         let fixture = try await startFixture(
             compressorScript: Self.blockingInlineCompressorScript,
             imageOptimizationInterlock: { point, _ in
-                guard case .beforeSearchPublication = point else { return }
+                guard case .beforeResultValidation = point else { return }
                 await publicationGate.pause()
             }
         )
         let replacementData = Self.makePNGFixtureData(fillByte: 0x47)
         let replacementHash = ClipboardMonitor.computeHashStatic(replacementData)
-        let authoritativeReplacement = expectation(description: "authoritative replacement event")
+        let committedOptimization = expectation(description: "original optimization commit event")
         var emittedItem: ClipboardItemDTO?
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID }) else { continue }
                 emittedItem = item
-                authoritativeReplacement.fulfill()
+                committedOptimization.fulfill()
                 return
             }
         }
@@ -539,57 +543,56 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         let persisted = try XCTUnwrap(persistedResult)
         XCTAssertEqual(persisted.contentHash, replacementHash)
         XCTAssertEqual(persisted.rawData, replacementData)
-        await fulfillment(of: [authoritativeReplacement], timeout: 2)
-        XCTAssertEqual(emittedItem?.contentHash, replacementHash)
-        XCTAssertEqual(emittedItem?.sizeBytes, replacementData.count)
+        await fulfillment(of: [committedOptimization], timeout: 2)
+        XCTAssertEqual(emittedItem?.contentHash, ClipboardMonitor.computeHashStatic(Data(fixture.originalData.prefix(8))))
+        XCTAssertEqual(emittedItem?.sizeBytes, 8)
         await competingStorage.close()
     }
 
-    func testPostCASMetadataChangePublishesLatestMetadata() async throws {
-        let publicationGate = ImageOptimizationInterlockGate()
+    func testPostCASMetadataChangesPublishTheirOwnTransactionValuesInOrder() async throws {
+        let resultGate = ImageOptimizationInterlockGate()
         let fixture = try await startFixture(
             compressorScript: Self.blockingInlineCompressorScript,
             imageOptimizationInterlock: { point, _ in
-                guard case .beforeSearchPublication = point else { return }
-                await publicationGate.pause()
+                guard case .beforeResultValidation = point else { return }
+                await resultGate.pause()
             }
         )
-        let contentUpdated = expectation(description: "latest metadata content event")
-        var emittedItem: ClipboardItemDTO?
+        let changesDelivered = expectation(description: "content, note and pin commits delivered")
+        var changes: [(Int64, ClipboardItemDTO)] = []
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
-                emittedItem = item
-                contentUpdated.fulfill()
-                return
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, _) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID }) else { continue }
+                changes.append((committed.mutationSeq, item))
+                if changes.count == 3 {
+                    changesDelivered.fulfill()
+                    return
+                }
             }
         }
         defer { eventTask.cancel() }
 
-        let optimization = Task {
-            try await fixture.service.optimizeImage(itemID: fixture.itemID)
-        }
+        let optimization = Task { try await fixture.service.optimizeImage(itemID: fixture.itemID) }
         try await waitForFile(fixture.compressorReadyURL)
         try Data().write(to: fixture.compressorGateURL)
-        await publicationGate.waitUntilPaused()
-
-        let competingStorage = StorageService(databasePath: fixture.databasePath)
-        try await competingStorage.open()
-        _ = try await competingStorage.updateNote(id: fixture.itemID, note: "post-CAS note")
-        try await competingStorage.setPin(fixture.itemID, pinned: true)
-        await publicationGate.release()
+        await resultGate.waitUntilPaused()
+        try await fixture.service.updateNote(itemID: fixture.itemID, note: "post-CAS note")
+        try await fixture.service.pin(itemID: fixture.itemID)
+        await resultGate.release()
 
         let outcome = try await optimization.value
-        await fulfillment(of: [contentUpdated], timeout: 2)
+        await fulfillment(of: [changesDelivered], timeout: 2)
         XCTAssertEqual(outcome.result, .optimized)
-        XCTAssertEqual(emittedItem?.note, "post-CAS note")
-        XCTAssertEqual(emittedItem?.isPinned, true)
-        let persistedResult = try await competingStorage.findByID(fixture.itemID)
-        let persisted = try XCTUnwrap(persistedResult)
+        XCTAssertEqual(changes.count, 3)
+        XCTAssertEqual(changes.map { $0.0 }, changes.map { $0.0 }.sorted())
+        XCTAssertEqual(changes.map { $0.1.note }, [nil, "post-CAS note", "post-CAS note"])
+        XCTAssertEqual(changes.map { $0.1.isPinned }, [false, false, true])
+        let persistedItems = try await fixture.service.fetchRecent(limit: 10, offset: 0)
+        let persisted = try XCTUnwrap(persistedItems.first(where: { $0.id == fixture.itemID }))
         XCTAssertEqual(persisted.note, "post-CAS note")
         XCTAssertTrue(persisted.isPinned)
-        await competingStorage.close()
     }
 
     func testExternalSourceChangeAfterCASPublishesAuthoritativeLiveBytesWithoutProof() async throws {
@@ -607,12 +610,15 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
             }
         )
         let sourceURL = URL(fileURLWithPath: try XCTUnwrap(fixture.storageRef))
-        let contentUpdated = expectation(description: "authoritative live payload after source race")
+        let liveData = Self.makePNGFixtureData(fillByte: 0x6B, totalByteCount: originalData.count)
+        let liveHash = ClipboardMonitor.computeHashStatic(liveData)
+        let contentUpdated = expectation(description: "live payload reconciliation commit")
         var emittedItem: ClipboardItemDTO?
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID && $0.contentHash == liveHash }) else { continue }
                 emittedItem = item
                 contentUpdated.fulfill()
                 return
@@ -627,10 +633,6 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         try Data().write(to: fixture.compressorGateURL)
         await postCommitGate.waitUntilPaused()
 
-        let liveData = Self.makePNGFixtureData(
-            fillByte: 0x6B,
-            totalByteCount: originalData.count
-        )
         try liveData.write(to: sourceURL, options: .atomic)
         await postCommitGate.release()
 
@@ -680,8 +682,9 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         var emittedItem: ClipboardItemDTO?
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID }) else { continue }
                 emittedItem = item
                 contentUpdated.fulfill()
                 return
@@ -738,13 +741,18 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         let sourceURL = URL(fileURLWithPath: try XCTUnwrap(fixture.storageRef))
         let contentUpdated = expectation(description: "repaired optimized authority event")
         var emittedItem: ClipboardItemDTO?
+        var emittedHashes: [String] = []
         let eventTask = Task { @MainActor in
             for await event in fixture.service.eventStream {
-                guard case .itemContentUpdated(let item) = event,
-                      item.id == fixture.itemID else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsChanged(let items, kind: .content) = committed.change,
+                      let item = items.first(where: { $0.id == fixture.itemID }) else { continue }
                 emittedItem = item
-                contentUpdated.fulfill()
-                return
+                emittedHashes.append(item.contentHash)
+                if emittedHashes.count == 3 {
+                    contentUpdated.fulfill()
+                    return
+                }
             }
         }
         defer { eventTask.cancel() }
@@ -782,6 +790,7 @@ final class ClipboardServiceImageOptimizationTests: XCTestCase {
         XCTAssertEqual(emittedItem?.storageRef, optimizedRef)
         XCTAssertEqual(emittedItem?.contentHash, persisted.contentHash)
         XCTAssertEqual(emittedItem?.sizeBytes, persisted.sizeBytes)
+        XCTAssertEqual(emittedHashes, [persisted.contentHash, ClipboardMonitor.computeHashStatic(liveData), persisted.contentHash])
     }
 
     private func startFixture(

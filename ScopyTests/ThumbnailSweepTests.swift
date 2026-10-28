@@ -24,7 +24,7 @@ final class ThumbnailSweepTests: XCTestCase {
             contentHash: keptFileHash,
             sizeBytes: 13
         ))
-        try await storage.deleteItem(deletedImage.id)
+        _ = try await storage.deleteItem(deletedImage.id, expectedUseCount: deletedImage.useCount)
 
         let thumbnails = storage.thumbnailCacheDirectoryPath
         try FileManager.default.createDirectory(atPath: thumbnails, withIntermediateDirectories: true)

@@ -423,7 +423,8 @@ final class HistoryItemRowDescriptorTests: XCTestCase {
             isPinned: false,
             sizeBytes: plainText.utf8.count,
             thumbnailPath: thumbnailPath,
-            storageRef: storageRef
+            storageRef: storageRef,
+            useCount: 1
         )
     }
 }

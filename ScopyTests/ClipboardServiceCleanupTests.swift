@@ -61,6 +61,10 @@ final class ClipboardServiceCleanupTests: XCTestCase {
         try await service.start()
 
         let gate = CleanupCommitGate()
+        let publicationGate = CleanupCommitGate()
+        await service.setHistoryPublicationInterlockForTesting { _ in
+            await publicationGate.pause()
+        }
         await service.setCleanupInterlockForTesting { point in
             guard case .afterCommitBeforeFileCleanup(let deletedItemIDs) = point,
                   deletedItemIDs.contains(oldest.id) else { return }
@@ -71,7 +75,8 @@ final class ClipboardServiceCleanupTests: XCTestCase {
         var deliveredIDs: [UUID] = []
         let eventTask = Task { @MainActor in
             for await event in service.eventStream {
-                guard case .itemsRemoved(let itemIDs) = event else { continue }
+                guard case .history(let committed) = event,
+                      case .itemsRemoved(let itemIDs) = committed.change else { continue }
                 deliveredIDs = itemIDs
                 removalDelivered.fulfill()
                 return
@@ -86,6 +91,7 @@ final class ClipboardServiceCleanupTests: XCTestCase {
         }
 
         await gate.waitUntilPaused()
+        await publicationGate.waitUntilPaused()
         updateTask.cancel()
         let stopTask = Task { await service.stop() }
         await waitForConditionAsync(timeout: 2, pollInterval: 0.01) {
@@ -112,6 +118,17 @@ final class ClipboardServiceCleanupTests: XCTestCase {
         }
 
         await gate.release()
+        await waitForConditionAsync(timeout: 2, pollInterval: 0.01) {
+            await service.isDrainingHistoryForTesting
+        }
+        do {
+            let descriptor = try StorageRootLock.lockFile(atPath: lockPath)
+            close(descriptor)
+            XCTFail("Shutdown released its writer lock before publishing the final committed sequence")
+        } catch {
+            XCTAssertEqual(error as? StorageRootLock.HeldByAnotherProcess, .init(rootPath: directory.path))
+        }
+        await publicationGate.release()
         await fulfillment(of: [removalDelivered], timeout: 2.0)
         _ = try? await updateTask.value
         await stopTask.value

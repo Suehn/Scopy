@@ -94,7 +94,8 @@ final class PngquantServiceTests: XCTestCase {
                 if [ "$1" = "--" ]; then shift; input="$1"; fi
                 shift
             done
-            /usr/bin/printf '%s' "$$" > "$0.pid"
+            /usr/bin/printf '%s' "$$" > "$0.pid.tmp"
+            /bin/mv "$0.pid.tmp" "$0.pid"
             /usr/bin/printf '%s' "$input" > "$0.input"
             trap '[ -f "$input" ] && /usr/bin/touch "$0.input-survived"; exit 0' TERM
             /usr/bin/touch "$0.started"
@@ -130,7 +131,8 @@ final class PngquantServiceTests: XCTestCase {
         let binary = try makeExecutable(named: "ignore-term", script: """
         #!/bin/sh
         trap '' TERM
-        /usr/bin/printf '%s' "$$" > "$0.pid"
+        /usr/bin/printf '%s' "$$" > "$0.pid.tmp"
+        /bin/mv "$0.pid.tmp" "$0.pid"
         while :; do :; done
         """)
         let task = Self.startCompressionTask(options: options(binary: binary, timeout: 60))

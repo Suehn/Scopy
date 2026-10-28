@@ -21,7 +21,11 @@ final class SearchStateMachineTests: XCTestCase {
         func fetchRecent(limit _: Int, offset _: Int) async throws -> [ClipboardItemDTO] { [] }
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
         func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
+            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil, mutationSeq: 0)
+        }
+
+        func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: [], mutationSeq: 0)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -45,14 +49,17 @@ final class SearchStateMachineTests: XCTestCase {
                 hits: [SearchResultHit(item: item, matchContext: context)],
                 total: 1,
                 hasMore: false,
-                coverage: .complete
+                coverage: .complete,
+                mutationSeq: 0
             )
         }
 
         func pin(itemID _: UUID) async throws {}
         func unpin(itemID _: UUID) async throws {}
         func updateNote(itemID _: UUID, note _: String?) async throws {}
-        func delete(itemID _: UUID) async throws {}
+        func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: [itemID], items: [], mutationSeq: 0)
+        }
         func clearAll() async throws {}
         func copyToClipboard(itemID _: UUID) async throws {}
         func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
@@ -93,7 +100,8 @@ final class SearchStateMachineTests: XCTestCase {
                 isPinned: false,
                 sizeBytes: text.utf8.count,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         }
     }
@@ -114,6 +122,7 @@ final class SearchStateMachineTests: XCTestCase {
         var eventStream: AsyncStream<ClipboardEvent> { AsyncStream { $0.finish() } }
         private(set) var recordedSearchRequests: [SearchRequest] = []
 
+        var mutationSeq: Int64 = 0
         private var pages: [RequestKey: Page] = [:]
         private var blockedRequests: Set<RequestKey> = []
         private var startedRequests: Set<RequestKey> = []
@@ -162,7 +171,11 @@ final class SearchStateMachineTests: XCTestCase {
         func fetchRecent(limit _: Int, offset _: Int) async throws -> [ClipboardItemDTO] { [] }
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
         func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
+            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil, mutationSeq: mutationSeq)
+        }
+
+        func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: [], mutationSeq: mutationSeq)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -197,14 +210,17 @@ final class SearchStateMachineTests: XCTestCase {
                 },
                 total: page.total,
                 hasMore: page.hasMore,
-                coverage: page.coverage
+                coverage: page.coverage,
+                mutationSeq: mutationSeq
             )
         }
 
         func pin(itemID _: UUID) async throws {}
         func unpin(itemID _: UUID) async throws {}
         func updateNote(itemID _: UUID, note _: String?) async throws {}
-        func delete(itemID _: UUID) async throws {}
+        func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: [itemID], items: [], mutationSeq: 0)
+        }
         func clearAll() async throws {}
         func copyToClipboard(itemID _: UUID) async throws {}
         func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
@@ -249,7 +265,11 @@ final class SearchStateMachineTests: XCTestCase {
 
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
         func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-            RecentHistoryPage(slicing: recentItems, limit: limit, after: cursor)
+            RecentHistoryPage(slicing: recentItems, limit: limit, after: cursor, mutationSeq: 0)
+        }
+
+        func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: recentItems.filter { itemIDs.contains($0.id) }, mutationSeq: 0)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -260,7 +280,8 @@ final class SearchStateMachineTests: XCTestCase {
                         hits: [],
                         total: 100,
                         hasMore: true,
-                        coverage: .complete
+                        coverage: .complete,
+                        mutationSeq: 0
                     )
                 }
 
@@ -271,7 +292,8 @@ final class SearchStateMachineTests: XCTestCase {
                     ].map { try Self.makeHit(item: $0, request: query) },
                     total: 100,
                     hasMore: true,
-                    coverage: .complete
+                    coverage: .complete,
+                    mutationSeq: 0
                 )
             }
 
@@ -283,17 +305,20 @@ final class SearchStateMachineTests: XCTestCase {
                     ].map { try Self.makeHit(item: $0, request: query) },
                     total: 100,
                     hasMore: true,
-                    coverage: .complete
+                    coverage: .complete,
+                    mutationSeq: 0
                 )
             }
 
-            return SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
+            return SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete, mutationSeq: 0)
         }
 
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}
         func updateNote(itemID: UUID, note: String?) async throws {}
-        func delete(itemID: UUID) async throws {}
+        func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: [itemID], items: [], mutationSeq: 0)
+        }
         func clearAll() async throws {}
         func copyToClipboard(itemID: UUID) async throws {}
         func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
@@ -334,7 +359,8 @@ final class SearchStateMachineTests: XCTestCase {
                 isPinned: false,
                 sizeBytes: text.utf8.count,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         }
 
@@ -370,7 +396,11 @@ final class SearchStateMachineTests: XCTestCase {
 
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
         func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-            RecentHistoryPage(slicing: recentItems, limit: limit, after: cursor)
+            RecentHistoryPage(slicing: recentItems, limit: limit, after: cursor, mutationSeq: 0)
+        }
+
+        func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: recentItems.filter { itemIDs.contains($0.id) }, mutationSeq: 0)
         }
 
         func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -384,14 +414,17 @@ final class SearchStateMachineTests: XCTestCase {
                 hits: items.map { SearchResultHit(item: $0, matchContext: nil) },
                 total: 100,
                 hasMore: true,
-                coverage: .recentOnly(limit: 2000)
+                coverage: .recentOnly(limit: 2000),
+                mutationSeq: 0
             )
         }
 
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}
         func updateNote(itemID: UUID, note: String?) async throws {}
-        func delete(itemID: UUID) async throws {}
+        func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: [itemID], items: [], mutationSeq: 0)
+        }
         func clearAll() async throws {}
         func copyToClipboard(itemID: UUID) async throws {}
         func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
@@ -432,7 +465,8 @@ final class SearchStateMachineTests: XCTestCase {
                 isPinned: false,
                 sizeBytes: text.utf8.count,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         }
     }
@@ -454,7 +488,8 @@ final class SearchStateMachineTests: XCTestCase {
             isPinned: false,
             sizeBytes: text.utf8.count,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 
@@ -475,7 +510,8 @@ final class SearchStateMachineTests: XCTestCase {
             sizeBytes: item.sizeBytes,
             fileSizeBytes: item.fileSizeBytes,
             thumbnailPath: item.thumbnailPath,
-            storageRef: item.storageRef
+            storageRef: item.storageRef,
+            useCount: item.useCount
         )
     }
 
@@ -493,7 +529,8 @@ final class SearchStateMachineTests: XCTestCase {
                 isPinned: false,
                 sizeBytes: 6,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         ]
 
@@ -759,10 +796,11 @@ final class SearchStateMachineTests: XCTestCase {
             sizeBytes: original.sizeBytes,
             fileSizeBytes: original.fileSizeBytes,
             thumbnailPath: original.thumbnailPath,
-            storageRef: original.storageRef
+            storageRef: original.storageRef,
+            useCount: original.useCount
         )
 
-        await viewModel.handleEvent(.itemUpdated(updated))
+        await viewModel.handleEvent(.history(CommittedHistoryChange(mutationSeq: 1, totalCount: 1, change: .itemsChanged([updated], kind: .usage))))
 
         XCTAssertEqual(service.recordedSearchRequests.count, requestCount)
         XCTAssertEqual(viewModel.items.map(\.id), [original.id])
@@ -807,7 +845,8 @@ final class SearchStateMachineTests: XCTestCase {
         )
         let requestCount = service.recordedSearchRequests.count
 
-        await viewModel.handleEvent(.itemContentUpdated(updated))
+        service.mutationSeq = 1
+        await viewModel.handleEvent(.history(CommittedHistoryChange(mutationSeq: 1, totalCount: 1, change: .itemsChanged([updated], kind: .content))))
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
             service.recordedSearchRequests.count == requestCount + 1
                 && viewModel.items.first?.note == updated.note
@@ -828,7 +867,8 @@ final class SearchStateMachineTests: XCTestCase {
             total: 0,
             hasMore: false
         )
-        await viewModel.handleEvent(.itemContentUpdated(noLongerMatching))
+        service.mutationSeq = 2
+        await viewModel.handleEvent(.history(CommittedHistoryChange(mutationSeq: 2, totalCount: 1, change: .itemsChanged([noLongerMatching], kind: .content))))
         await waitForCondition(timeout: 1.0, pollInterval: 0.005) {
             service.recordedSearchRequests.count == requestCount + 2 && !viewModel.isLoading
         }

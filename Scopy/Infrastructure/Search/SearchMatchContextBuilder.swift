@@ -1666,7 +1666,8 @@ extension SearchMatchContextBuilder {
             coverage: result.coverage,
             searchTimeMs: result.searchTimeMs,
             perf: result.perf,
-            matchContexts: contexts
+            matchContexts: contexts,
+            mutationSeq: result.mutationSeq
         )
     }
 }

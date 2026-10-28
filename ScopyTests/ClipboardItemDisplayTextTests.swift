@@ -256,7 +256,8 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
             isPinned: false,
             sizeBytes: plainText.utf8.count,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 
@@ -274,7 +275,8 @@ final class ClipboardItemDisplayTextTests: XCTestCase {
             sizeBytes: plainText.utf8.count,
             fileSizeBytes: fileSizeBytes,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 

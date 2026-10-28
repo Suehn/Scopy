@@ -53,10 +53,10 @@ final class FullIndexTombstoneUpsertStaleTests: XCTestCase {
                     XCTFail("updateNote returned nil")
                     break
                 }
-                await engine.applyCommittedChanges()
+                _ = try await engine.search(request: SearchRequest(query: "", mode: .exact, limit: 1))
 
                 let build = await engine.debugFullIndexBuildHealth()
-                if build.isBuilding { break }
+                if build { break }
             }
 
             await engine.debugAwaitFullIndexBuild()

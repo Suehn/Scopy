@@ -206,7 +206,8 @@ struct HistoryItemHarnessView: View {
                 sizeBytes: 2_048,
                 fileSizeBytes: nil,
                 thumbnailPath: path,
-                storageRef: path
+                storageRef: path,
+                useCount: 1
             )
         case .inlineImage:
             let path = makeHarnessImagePath()
@@ -223,7 +224,8 @@ struct HistoryItemHarnessView: View {
                 sizeBytes: 2_048,
                 fileSizeBytes: nil,
                 thumbnailPath: path,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         case .file:
             let path = makeHarnessFilePath()
@@ -240,7 +242,8 @@ struct HistoryItemHarnessView: View {
                 sizeBytes: 64,
                 fileSizeBytes: 64,
                 thumbnailPath: nil,
-                storageRef: path
+                storageRef: path,
+                useCount: 1
             )
         case .markdownFile:
             let path = makeHarnessMarkdownFilePath()
@@ -257,7 +260,8 @@ struct HistoryItemHarnessView: View {
                 sizeBytes: 256,
                 fileSizeBytes: 256,
                 thumbnailPath: nil,
-                storageRef: path
+                storageRef: path,
+                useCount: 1
             )
         case .markdownText:
             return ClipboardItemDTO(
@@ -298,7 +302,8 @@ Inline math: $E = mc^2$.[^harness]
                 sizeBytes: 512,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         case .longMarkdownText:
             return ClipboardItemDTO(
@@ -331,7 +336,8 @@ Inline math: $E = mc^2$.[^harness]
                 sizeBytes: 1_024,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         case .plainText:
             return ClipboardItemDTO(
@@ -347,7 +353,8 @@ Inline math: $E = mc^2$.[^harness]
                 sizeBytes: 128,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         }
     }

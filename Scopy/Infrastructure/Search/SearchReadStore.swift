@@ -158,9 +158,6 @@ final class SearchReadStore {
             throw SearchEngineImpl.SearchError.searchFailed(error.localizedDescription)
         }
 
-        // The callback runs synchronously inside SQLite on the task executing this statement.
-        // No connection pointer escapes to a cancellation handler or survives close/reopen.
-        sqlite3_progress_handler(conn.handle, 1_000, { _ in Task.isCancelled ? 1 : 0 }, nil)
         connection = conn
         statementCache = [:]
         statementCacheLRU = []
@@ -199,6 +196,8 @@ final class SearchReadStore {
             conn.close()
             throw error
         }
+        // Every scan observes the task executing SQLite, including detached index builds.
+        sqlite3_progress_handler(conn.handle, 1_000, { _ in Task.isCancelled ? 1 : 0 }, nil)
         return conn
     }
 
@@ -241,6 +240,32 @@ final class SearchReadStore {
                 statementCacheLRU.remove(at: idx)
             }
             throw SearchEngineImpl.SearchError.searchFailed(error.localizedDescription)
+        }
+    }
+
+    /// The sequence and every read in `body` belong to one SQLite snapshot. The closure is
+    /// synchronous: the engine cannot reenter this connection while the transaction is open.
+    func withReadSnapshot<Value>(_ body: (Int64) throws -> Value) throws -> Value {
+        guard let connection else { throw SearchEngineImpl.SearchError.databaseNotOpen }
+        return try Self.withReadSnapshot(connection: connection, body)
+    }
+
+    private static func withReadSnapshot<Value>(
+        connection: SQLiteConnection,
+        _ body: (Int64) throws -> Value
+    ) throws -> Value {
+        try connection.execute("BEGIN DEFERRED")
+        do {
+            let statement = try connection.prepare("SELECT mutation_seq FROM scopy_meta WHERE id = 1")
+            guard try statement.step() else { throw ClipboardItemRow.DecodeError.invalidRow }
+            let mutationSeq = statement.columnInt64(0)
+            statement.reset()
+            let value = try body(mutationSeq)
+            try connection.execute("COMMIT")
+            return value
+        } catch {
+            try? connection.execute("ROLLBACK")
+            throw error
         }
     }
 
@@ -922,65 +947,78 @@ final class SearchReadStore {
 
     /// Every row's short-index fields; `nil` when the task is cancelled or the scan fails. A row
     /// that cannot be decoded fails the scan: an index missing rows must not pass as complete.
-    static func loadShortQueryIndex(dbPath: String, reserveSlots: Int) -> ShortQueryIndex? {
+    static func loadShortQueryIndex(dbPath: String, reserveSlots: Int) -> ShortQueryIndexSnapshot? {
         guard let conn = try? openConnection(dbPath: dbPath) else { return nil }
         defer { conn.close() }
 
-        var index = ShortQueryIndex(reserveSlots: reserveSlots)
-
         do {
-            let stmt = try conn.prepare("SELECT id, type, content_hash, plain_text, note FROM clipboard_items")
-            var row = 0
-            while try stmt.step() {
-                if row % 256 == 0, Task.isCancelled { return nil }
-                row += 1
+            return try withReadSnapshot(connection: conn) { mutationSeq in
+                var index = ShortQueryIndex(reserveSlots: reserveSlots)
+                let stmt = try conn.prepare("SELECT id, type, content_hash, plain_text, note FROM clipboard_items")
+                defer { stmt.reset() }
+                var row = 0
+                while try stmt.step() {
+                    if row % 256 == 0 { try Task.checkCancellation() }
+                    row += 1
 
-                guard let idString = stmt.columnText(0),
-                      let id = UUID(uuidString: idString),
-                      let typeRaw = stmt.columnText(1),
-                      let type = ClipboardItemType(rawValue: typeRaw) else {
-                    throw ClipboardItemRow.DecodeError.invalidRow
+                    guard let idString = stmt.columnText(0),
+                          let id = UUID(uuidString: idString),
+                          let typeRaw = stmt.columnText(1),
+                          let type = ClipboardItemType(rawValue: typeRaw) else {
+                        throw ClipboardItemRow.DecodeError.invalidRow
+                    }
+                    index.upsert(
+                        id: id,
+                        type: type,
+                        contentHash: stmt.columnText(2) ?? "",
+                        plainText: stmt.columnText(3) ?? "",
+                        note: stmt.columnText(4)
+                    )
                 }
-
-                let contentHash = stmt.columnText(2) ?? ""
-                let plainText = stmt.columnText(3) ?? ""
-                let note = stmt.columnText(4)
-
-                index.upsert(id: id, type: type, contentHash: contentHash, plainText: plainText, note: note)
+                try Task.checkCancellation()
+                return ShortQueryIndexSnapshot(index: index, source: .database, mutationSeq: mutationSeq)
             }
         } catch {
-            logScanFailure("short", error)
+            if !Task.isCancelled, !(error is CancellationError) { logScanFailure("short", error) }
             return nil
         }
-
-        guard !Task.isCancelled else { return nil }
-        return index
     }
 
-    /// Every row's summary; `nil` when the task is cancelled or the scan fails. A row that cannot
-    /// be decoded fails the scan: an index missing rows must not pass as complete.
-    static func loadFullIndex(dbPath: String, reserveSlots: Int) -> FullFuzzyIndex? {
+    /// Every row's summary and its SQLite position, from one read transaction. A decode or
+    /// cancellation failure cannot publish an index with missing rows as a complete snapshot.
+    static func loadFullIndex(dbPath: String, reserveSlots: Int) -> FullIndexSnapshot? {
         guard let conn = try? openConnection(dbPath: dbPath) else { return nil }
         defer { conn.close() }
 
-        var index = FullFuzzyIndex(reserveSlots: reserveSlots)
-
         do {
-            let stmt = try conn.prepare("SELECT \(ClipboardItemRow.summaryColumns) FROM clipboard_items")
-            defer { stmt.reset() }
-
-            var row = 0
-            while try stmt.step() {
-                if row % 512 == 0, Task.isCancelled { return nil }
-                row += 1
-                index.append(IndexedItem(from: try ClipboardItemRow.decodeSummary(stmt)))
+            return try withReadSnapshot(connection: conn) { mutationSeq in
+                let index = try buildFullIndex(connection: conn, reserveSlots: reserveSlots)
+                return FullIndexSnapshot(index: index, source: .database, mutationSeq: mutationSeq)
             }
         } catch {
-            logScanFailure("full", error)
+            if !Task.isCancelled, !(error is CancellationError) { logScanFailure("full", error) }
             return nil
         }
+    }
 
-        guard !Task.isCancelled else { return nil }
+    /// Called inside the query's existing transaction when a bounded journal cannot advance a
+    /// detached snapshot. The same scan also supplies ordinary background index builds.
+    func buildFullIndex() throws -> FullFuzzyIndex {
+        guard let connection else { throw SearchEngineImpl.SearchError.databaseNotOpen }
+        return try Self.buildFullIndex(connection: connection, reserveSlots: 0)
+    }
+
+    private static func buildFullIndex(connection: SQLiteConnection, reserveSlots: Int) throws -> FullFuzzyIndex {
+        var index = FullFuzzyIndex(reserveSlots: reserveSlots)
+        let stmt = try connection.prepare("SELECT \(ClipboardItemRow.summaryColumns) FROM clipboard_items")
+        defer { stmt.reset() }
+        var row = 0
+        while try stmt.step() {
+            if row % 512 == 0 { try Task.checkCancellation() }
+            row += 1
+            index.append(IndexedItem(from: try ClipboardItemRow.decodeSummary(stmt)))
+        }
+        try Task.checkCancellation()
         return index
     }
 

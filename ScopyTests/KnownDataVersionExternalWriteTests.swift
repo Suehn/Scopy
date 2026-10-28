@@ -46,7 +46,6 @@ final class KnownDataVersionExternalWriteTests: XCTestCase {
         // Now perform a normal internal mutation that *is* journaled. Applying it must not swallow
         // the prior unobserved commit and keep a stale in-memory full index (missing "banana").
         _ = try await storage.upsertItem(makeTextContent("cherry"))
-        await search.applyCommittedChanges()
 
         let result = try await search.search(request: SearchRequest(query: "banana", mode: .fuzzy, limit: 10, offset: 0))
         XCTAssertTrue(result.items.contains { $0.id == banana.id })

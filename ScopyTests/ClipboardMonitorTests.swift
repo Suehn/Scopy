@@ -1358,7 +1358,7 @@ final class ClipboardMonitorTests: XCTestCase {
         let expectation = XCTestExpectation(description: "Large content delivered after polling interval change")
         let task = Task {
             for await content in monitor.contentStream where content.type == .image {
-                if let envelopeURL = content.ingestEnvelopeURL {
+                if let envelopeURL = content.payload.ingest?.envelopeURL {
                     self.acknowledgeAndCompleteEnvelope(envelopeURL)
                 }
                 expectation.fulfill()
@@ -1411,7 +1411,7 @@ final class ClipboardMonitorTests: XCTestCase {
         let expectation = XCTestExpectation(description: "Pending envelope replayed after restart")
         let task = Task {
             for await content in monitor.contentStream where content.type == .image {
-                if let envelopeURL = content.ingestEnvelopeURL {
+                if let envelopeURL = content.payload.ingest?.envelopeURL {
                     self.acknowledgeAndCompleteEnvelope(envelopeURL)
                 }
                 expectation.fulfill()
@@ -1438,11 +1438,11 @@ final class ClipboardMonitorTests: XCTestCase {
         let expectation = XCTestExpectation(description: "Large TIFF converted to PNG payload file")
         let task = Task {
             for await content in monitor.contentStream where content.type == .image {
-                guard let ingestURL = content.ingestFileURL else { continue }
-                let data = try? Data(contentsOf: ingestURL)
+                guard case .file(let file) = content.payload.storage else { continue }
+                let data = try? Data(contentsOf: file.url)
                 XCTAssertTrue(self.isLikelyPNG(data ?? Data()), "Emitted file payload should contain PNG bytes")
                 XCTAssertEqual(content.sizeBytes, data?.count)
-                if let envelopeURL = content.ingestEnvelopeURL {
+                if let envelopeURL = content.payload.ingest?.envelopeURL {
                     self.acknowledgeAndCompleteEnvelope(envelopeURL)
                 }
                 expectation.fulfill()
@@ -1626,7 +1626,7 @@ final class ClipboardMonitorTests: XCTestCase {
         let stream = monitor.contentStream
         log.consumer = Task {
             for await content in stream {
-                if let envelopeURL = content.ingestEnvelopeURL {
+                if let envelopeURL = content.payload.ingest?.envelopeURL {
                     self.acknowledgeAndCompleteEnvelope(envelopeURL)
                 }
                 log.items.append(content)

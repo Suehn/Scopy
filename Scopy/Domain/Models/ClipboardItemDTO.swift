@@ -30,6 +30,8 @@ public struct RecentHistoryCursor: Sendable, Hashable {
 /// One page of the recent list, read from one database snapshot. The first page (no cursor)
 /// carries every pinned row; a later page holds only the unpinned rows after its cursor.
 public struct RecentHistoryPage: Sendable {
+    /// Read in the same SQLite transaction as the rows, total and continuation.
+    public let mutationSeq: Int64
     public let pinnedItems: [ClipboardItemDTO]
     public let items: [ClipboardItemDTO]
     public let total: Int
@@ -37,7 +39,8 @@ public struct RecentHistoryPage: Sendable {
     public let nextCursor: RecentHistoryCursor?
 
     public init(pinnedItems: [ClipboardItemDTO], items: [ClipboardItemDTO], total: Int,
-                nextCursor: RecentHistoryCursor?) {
+                nextCursor: RecentHistoryCursor?, mutationSeq: Int64) {
+        self.mutationSeq = mutationSeq
         self.pinnedItems = pinnedItems
         self.items = items
         self.total = total
@@ -45,7 +48,7 @@ public struct RecentHistoryPage: Sendable {
     }
 
     /// The page after `cursor` cut from an in-memory history in any order, as storage reads it.
-    public init(slicing rows: [ClipboardItemDTO], limit: Int, after cursor: RecentHistoryCursor?) {
+    public init(slicing rows: [ClipboardItemDTO], limit: Int, after cursor: RecentHistoryCursor?, mutationSeq: Int64) {
         let inRecentOrder: (ClipboardItemDTO, ClipboardItemDTO) -> Bool = {
             RecentHistoryCursor($0).precedes($1)
         }
@@ -57,7 +60,8 @@ public struct RecentHistoryPage: Sendable {
             pinnedItems: cursor == nil ? rows.filter(\.isPinned).sorted(by: inRecentOrder) : [],
             items: page,
             total: rows.count,
-            nextCursor: following.count > page.count ? page.last.map(RecentHistoryCursor.init) : nil
+            nextCursor: following.count > page.count ? page.last.map(RecentHistoryCursor.init) : nil,
+            mutationSeq: mutationSeq
         )
     }
 }
@@ -73,6 +77,7 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
     public let appBundleID: String?
     public let createdAt: Date
     public let lastUsedAt: Date
+    public let useCount: Int
     public let isPinned: Bool
     public let sizeBytes: Int
     public let fileSizeBytes: Int?
@@ -92,7 +97,8 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
         sizeBytes: Int,
         fileSizeBytes: Int? = nil,
         thumbnailPath: String?,
-        storageRef: String?
+        storageRef: String?,
+        useCount: Int
     ) {
         self.id = id
         self.type = type
@@ -102,6 +108,7 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
         self.appBundleID = appBundleID
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
+        self.useCount = useCount
         self.isPinned = isPinned
         self.sizeBytes = sizeBytes
         self.fileSizeBytes = fileSizeBytes
@@ -124,7 +131,8 @@ public struct ClipboardItemDTO: Identifiable, Sendable, Hashable {
             sizeBytes: sizeBytes,
             fileSizeBytes: fileSizeBytes,
             thumbnailPath: thumbnailPath,
-            storageRef: storageRef
+            storageRef: storageRef,
+            useCount: useCount
         )
         return copy
     }

@@ -181,7 +181,7 @@ enum SearchIndexDiskCache {
         }
 
         guard let index = ShortQueryIndex(diskCache: cache) else { return nil }
-        return ShortQueryIndexSnapshot(index: index, source: .diskCache)
+        return ShortQueryIndexSnapshot(index: index, source: .diskCache, mutationSeq: cache.mutationSeq)
     }
 
     static func loadFullSnapshot(
@@ -355,7 +355,7 @@ enum SearchIndexDiskCache {
         #endif
 
         return FullIndexDiskCacheLoadOutcome(
-            snapshot: FullIndexSnapshot(index: index, source: .diskCache),
+            snapshot: FullIndexSnapshot(index: index, source: .diskCache, mutationSeq: candidate.stamp.mutationSeq),
             reason: .diskCacheHit,
             metadata: metadata
         )

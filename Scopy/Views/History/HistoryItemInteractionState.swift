@@ -237,8 +237,6 @@ final class HistoryItemInteractionSessionStore {
 
     private let capacity: Int
     private var retainedByItemID: [UUID: Entry] = [:]
-    private var lastAppliedClearGeneration: UInt64 = 0
-    private var lastAppliedStamp: UInt64 = 0
 
     init(capacity: Int = 64) {
         self.capacity = max(1, capacity)
@@ -247,6 +245,8 @@ final class HistoryItemInteractionSessionStore {
     var retainedCount: Int {
         retainedByItemID.count
     }
+
+    var retainedItemIDs: Set<UUID> { Set(retainedByItemID.keys) }
 
     func makeAttachmentToken() -> AttachmentToken {
         AttachmentToken()
@@ -324,10 +324,6 @@ final class HistoryItemInteractionSessionStore {
     /// Reconciles off-screen work against the view model's bounded authoritative registry. Missing
     /// entries are unknown (for example capacity eviction), never an implicit delete.
     func reconcile(snapshot: HistoryContentRevisionReconciliationSnapshot) {
-        let clearGenerationChanged = lastAppliedClearGeneration != snapshot.clearGeneration
-        let previousStamp = lastAppliedStamp
-        lastAppliedClearGeneration = snapshot.clearGeneration
-        lastAppliedStamp = snapshot.stamp
         guard !retainedByItemID.isEmpty else { return }
         var itemIDsToRelease: [UUID] = []
 
@@ -336,9 +332,7 @@ final class HistoryItemInteractionSessionStore {
             // A newer revision is adopted below instead of tearing the session down.
             if snapshot.invalidates(
                 itemID: itemID,
-                currentRevision: nil,
-                clearGenerationChanged: clearGenerationChanged,
-                lastAppliedStamp: previousStamp
+                currentRevision: nil
             ) {
                 state.tearDown()
                 itemIDsToRelease.append(itemID)

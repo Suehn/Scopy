@@ -69,7 +69,9 @@ public struct SearchResultHit: Sendable, Equatable, Hashable {
     }
 }
 
+/// A search projection and the SQLite snapshot that supplied its rows, order, and evidence.
 public struct SearchResultPage: Sendable {
+    public let mutationSeq: Int64
     public let hits: [SearchResultHit]
     public let total: Int
     public let hasMore: Bool
@@ -80,8 +82,10 @@ public struct SearchResultPage: Sendable {
         hits: [SearchResultHit],
         total: Int,
         hasMore: Bool,
-        coverage: SearchCoverage
+        coverage: SearchCoverage,
+        mutationSeq: Int64
     ) {
+        self.mutationSeq = mutationSeq
         self.hits = hits
         self.total = total
         self.hasMore = hasMore

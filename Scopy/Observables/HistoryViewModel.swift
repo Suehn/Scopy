@@ -4,294 +4,14 @@ import Observation
 import ScopyKit
 import ScopyUISupport
 
-struct HistoryContentRevisionReconciliationSnapshot {
-    let knownRevisionsByItemID: [UUID: ClipboardItemContentRevision]
-    let deletedItemIDs: Set<UUID>
-    let clearGeneration: UInt64
-    let clearSurvivingItemIDs: Set<UUID>
-    let clearSurvivorSetIsAuthoritative: Bool
-    /// The registry's newest stamp when this snapshot was taken. A holder keeps the stamp of the
-    /// snapshot it last applied: every tombstone up to it was in a snapshot the holder saw.
-    let stamp: UInt64
-    /// Stamp of the newest tombstone the bounded registry has evicted (0 when none).
-    let newestEvictedDeletionStamp: UInt64
-
-    func revision(for itemID: UUID) -> ClipboardItemContentRevision? {
-        knownRevisionsByItemID[itemID]
-    }
-
-    func wasDeleted(_ itemID: UUID) -> Bool {
-        deletedItemIDs.contains(itemID)
-    }
-
-    /// Whether state held for `itemID` outside the list must be torn down.
-    ///
-    /// Shared by every off-list holder (retained row sessions, the pinned preview window) so they
-    /// cannot disagree about what "gone" means. The clear generation and stamp are the caller's,
-    /// because each holder applies snapshots on its own schedule.
-    func invalidates(
-        itemID: UUID,
-        currentRevision: ClipboardItemContentRevision?,
-        clearGenerationChanged: Bool,
-        lastAppliedStamp: UInt64
-    ) -> Bool {
-        if wasDeleted(itemID) { return true }
-        if clearGenerationChanged,
-           clearSurvivorSetIsAuthoritative,
-           !clearSurvivingItemIDs.contains(itemID) {
-            return true
-        }
-        // Only a tombstone evicted before the holder ever saw it can hide a deletion of its item.
-        // Evicting tombstones the holder already applied loses nothing: with history at its
-        // max-items limit every capture deletes a row and evicts the oldest tombstone.
-        if !clearGenerationChanged, newestEvictedDeletionStamp > lastAppliedStamp { return true }
-        if let currentRevision, let known = revision(for: itemID), known != currentRevision {
-            return true
-        }
-        return false
-    }
-}
-
-struct BoundedHistoryContentRevisionRegistry {
-    private struct RevisionEntry {
-        let revision: ClipboardItemContentRevision
-        let isPinned: Bool
-        let stamp: UInt64
-    }
-
-    private struct DeletionEntry {
-        let stamp: UInt64
-    }
-
-    private let capacity: Int
-    private var nextStamp: UInt64 = 0
-    private var revisionsByItemID: [UUID: RevisionEntry] = [:]
-    private var revisionOrder: [(itemID: UUID, stamp: UInt64)] = []
-    private var revisionOrderCursor = 0
-    private var deletionsByItemID: [UUID: DeletionEntry] = [:]
-    private var deletionOrder: [(itemID: UUID, stamp: UInt64)] = []
-    private var deletionOrderCursor = 0
-    private(set) var clearGeneration: UInt64 = 0
-    private(set) var clearSurvivingItemIDs: Set<UUID> = []
-    private(set) var clearSurvivorSetIsAuthoritative = true
-    private(set) var newestEvictedDeletionStamp: UInt64 = 0
-
-    init(capacity: Int) {
-        self.capacity = max(1, capacity)
-    }
-
-    var snapshot: HistoryContentRevisionReconciliationSnapshot {
-        HistoryContentRevisionReconciliationSnapshot(
-            knownRevisionsByItemID: revisionsByItemID.mapValues(\.revision),
-            deletedItemIDs: Set(deletionsByItemID.keys),
-            clearGeneration: clearGeneration,
-            clearSurvivingItemIDs: clearSurvivingItemIDs,
-            clearSurvivorSetIsAuthoritative: clearSurvivorSetIsAuthoritative,
-            stamp: nextStamp,
-            newestEvictedDeletionStamp: newestEvictedDeletionStamp
-        )
-    }
-
-    var testingQueueCounts: (revision: Int, deletion: Int) {
-        (revisionOrder.count, deletionOrder.count)
-    }
-
-    func revision(for itemID: UUID) -> ClipboardItemContentRevision? {
-        revisionsByItemID[itemID]?.revision
-    }
-
-    func isDeleted(itemID: UUID) -> Bool {
-        deletionsByItemID[itemID] != nil
-    }
-
-    func acceptsProjection(itemID: UUID) -> Bool {
-        !isDeleted(itemID: itemID)
-    }
-
-    @discardableResult
-    mutating func merge(
-        items: [ClipboardItemDTO],
-        allowRevivingDeletedItems: Bool
-    ) -> Bool {
-        var changed = false
-        for item in items {
-            let revision = ClipboardItemContentRevision.resolve(item: item)
-            if deletionsByItemID[item.id] != nil {
-                guard allowRevivingDeletedItems else { continue }
-                deletionsByItemID.removeValue(forKey: item.id)
-                changed = true
-            }
-            if let existing = revisionsByItemID[item.id],
-               existing.revision == revision,
-               existing.isPinned == item.isPinned {
-                continue
-            }
-
-            let stamp = makeStamp()
-            revisionsByItemID[item.id] = RevisionEntry(
-                revision: revision,
-                isPinned: item.isPinned,
-                stamp: stamp
-            )
-            revisionOrder.append((item.id, stamp))
-            changed = true
-        }
-        evictRevisionsIfNeeded()
-        compactQueuesIfNeeded()
-        return changed
-    }
-
-    @discardableResult
-    mutating func invalidate(itemID: UUID) -> Bool {
-        var changed = revisionsByItemID.removeValue(forKey: itemID) != nil
-        if deletionsByItemID[itemID] == nil {
-            let stamp = makeStamp()
-            deletionsByItemID[itemID] = DeletionEntry(stamp: stamp)
-            deletionOrder.append((itemID, stamp))
-            changed = true
-        }
-        evictDeletionsIfNeeded()
-        compactQueuesIfNeeded()
-        return changed
-    }
-    @discardableResult
-    mutating func invalidate(itemIDs: Set<UUID>) -> Int {
-        guard !itemIDs.isEmpty else { return 0 }
-        var newlyDeletedCount = 0
-        for itemID in itemIDs {
-            revisionsByItemID.removeValue(forKey: itemID)
-            if deletionsByItemID[itemID] == nil {
-                let stamp = makeStamp()
-                deletionsByItemID[itemID] = DeletionEntry(stamp: stamp)
-                deletionOrder.append((itemID, stamp))
-                newlyDeletedCount += 1
-            }
-        }
-        evictDeletionsIfNeeded()
-        compactQueuesIfNeeded()
-        return newlyDeletedCount
-    }
-
-    @discardableResult
-    mutating func setPinned(itemID: UUID, isPinned: Bool) -> Bool {
-        guard let existing = revisionsByItemID[itemID],
-              existing.isPinned != isPinned else { return false }
-        let stamp = makeStamp()
-        revisionsByItemID[itemID] = RevisionEntry(
-            revision: existing.revision,
-            isPinned: isPinned,
-            stamp: stamp
-        )
-        revisionOrder.append((itemID, stamp))
-        compactQueuesIfNeeded()
-        return true
-    }
-
-    mutating func clear(
-        survivingPinnedItems: [ClipboardItemDTO],
-        survivorSetIsAuthoritative: Bool = true
-    ) {
-        guard !survivingPinnedItems.isEmpty || !survivorSetIsAuthoritative else {
-            clearSurvivingItemIDs = []
-            clearSurvivorSetIsAuthoritative = true
-            revisionsByItemID.removeAll(keepingCapacity: true)
-            revisionOrder.removeAll(keepingCapacity: true)
-            revisionOrderCursor = 0
-            deletionsByItemID.removeAll(keepingCapacity: true)
-            deletionOrder.removeAll(keepingCapacity: true)
-            deletionOrderCursor = 0
-            clearGeneration &+= 1
-            return
-        }
-
-        var survivingPinnedItemIDs = Set(survivingPinnedItems.map(\.id))
-        if !survivorSetIsAuthoritative {
-            survivingPinnedItemIDs.formUnion(
-                revisionsByItemID.compactMap { itemID, entry in
-                    entry.isPinned ? itemID : nil
-                }
-            )
-        }
-        let removedItemIDs = revisionsByItemID.keys.filter {
-            !survivingPinnedItemIDs.contains($0)
-        }
-        for itemID in removedItemIDs {
-            _ = invalidate(itemID: itemID)
-        }
-        _ = merge(
-            items: survivingPinnedItems,
-            allowRevivingDeletedItems: true
-        )
-        // Keep the clear survivor proof separate from the bounded revision registry. A successful
-        // fetch is authoritative even when not every pinned revision fits; a failed fetch records
-        // only best-known survivors and tells retained sessions to preserve capacity-unknown rows.
-        clearSurvivingItemIDs = survivingPinnedItemIDs
-        clearSurvivorSetIsAuthoritative = survivorSetIsAuthoritative
-        clearGeneration &+= 1
-    }
-
-    private mutating func makeStamp() -> UInt64 {
-        nextStamp &+= 1
-        return nextStamp
-    }
-
-    private mutating func evictRevisionsIfNeeded() {
-        while revisionsByItemID.count > capacity, revisionOrderCursor < revisionOrder.count {
-            let candidate = revisionOrder[revisionOrderCursor]
-            revisionOrderCursor += 1
-            guard revisionsByItemID[candidate.itemID]?.stamp == candidate.stamp else { continue }
-            revisionsByItemID.removeValue(forKey: candidate.itemID)
-        }
-    }
-
-    private mutating func evictDeletionsIfNeeded() {
-        while deletionsByItemID.count > capacity, deletionOrderCursor < deletionOrder.count {
-            let candidate = deletionOrder[deletionOrderCursor]
-            deletionOrderCursor += 1
-            guard deletionsByItemID[candidate.itemID]?.stamp == candidate.stamp else { continue }
-            deletionsByItemID.removeValue(forKey: candidate.itemID)
-            // The queue is in stamp order, so this only grows.
-            newestEvictedDeletionStamp = candidate.stamp
-        }
-    }
-
-    private mutating func compactQueuesIfNeeded() {
-        if revisionOrder.count > capacity * 4 {
-            revisionOrder = revisionsByItemID.map { itemID, entry in
-                (itemID: itemID, stamp: entry.stamp)
-            }.sorted { $0.stamp < $1.stamp }
-            revisionOrderCursor = 0
-        } else if revisionOrderCursor > capacity,
-                  revisionOrderCursor * 2 > revisionOrder.count {
-            revisionOrder.removeFirst(revisionOrderCursor)
-            revisionOrderCursor = 0
-        }
-        if deletionOrder.count > capacity * 4 {
-            deletionOrder = deletionsByItemID.map { itemID, entry in
-                (itemID: itemID, stamp: entry.stamp)
-            }.sorted { $0.stamp < $1.stamp }
-            deletionOrderCursor = 0
-        } else if deletionOrderCursor > capacity,
-                  deletionOrderCursor * 2 > deletionOrder.count {
-            deletionOrder.removeFirst(deletionOrderCursor)
-            deletionOrderCursor = 0
-        }
-    }
-}
-
 @Observable
 @MainActor
 final class HistoryViewModel {
-    private struct PinnedSurvivorResolution {
-        let items: [ClipboardItemDTO]
-        let isAuthoritative: Bool
-    }
     struct Timing: Sendable {
         var searchDebounceNs: UInt64
         var refineShortQueryDelayNs: UInt64
         var refineLongQueryDelayNs: UInt64
         var recentAppsRefreshDelayNs: UInt64
-        var staleLoadRetryDelayNs: UInt64
         /// How long a deleted row stays undoable before the backend delete is sent.
         var undoDeletionWindowNs: UInt64
 
@@ -301,7 +21,6 @@ final class HistoryViewModel {
             refineShortQueryDelayNs: 10_000_000,
             refineLongQueryDelayNs: 0,
             recentAppsRefreshDelayNs: 500_000_000,
-            staleLoadRetryDelayNs: 100_000_000,
             undoDeletionWindowNs: 5_000_000_000
         )
 
@@ -310,13 +29,14 @@ final class HistoryViewModel {
             refineShortQueryDelayNs: 40_000_000,
             refineLongQueryDelayNs: 40_000_000,
             recentAppsRefreshDelayNs: 20_000_000,
-            staleLoadRetryDelayNs: 20_000_000,
             undoDeletionWindowNs: 50_000_000
         )
     }
 
     private struct PendingDeletion {
-        let item: ClipboardItemDTO
+        var item: ClipboardItemDTO
+        var mutationSeq: Int64?
+        let useCountAtDeletion: Int
         let token: UUID
         /// Which projection the row left and its neighbours there, so undo can put it straight
         /// back even after newer rows were inserted in front.
@@ -324,7 +44,7 @@ final class HistoryViewModel {
         let index: Int
         let predecessorID: UUID?
         let successorID: UUID?
-        let evidence: SearchMatchContext?
+        var evidence: SearchMatchContext?
         let commit: Task<Void, Never>
     }
 
@@ -349,6 +69,7 @@ final class HistoryViewModel {
     /// offers Undo and ⌘Z restores the row only while this is set.
     var undoableDeletionID: UUID? { pendingDeletion?.item.id }
     private var pendingDeletion: PendingDeletion?
+    @ObservationIgnored private var suppressedItemIDs: Set<UUID> = []
     @ObservationIgnored private var inFlightDeletions: [UUID: Task<Bool, Never>] = [:]
     @ObservationIgnored private var isTerminating = false
     @ObservationIgnored private var deletionFailureGeneration: UInt64 = 0
@@ -379,14 +100,18 @@ final class HistoryViewModel {
     private(set) var contentRevisionReconciliationToken: UInt64 = 0
 
     var contentRevisionReconciliationSnapshot: HistoryContentRevisionReconciliationSnapshot {
-        contentRevisionRegistry.snapshot
+        let snapshot = contentRevisionRegistry.snapshot
+        return HistoryContentRevisionReconciliationSnapshot(
+            knownRevisionsByItemID: snapshot.knownRevisionsByItemID,
+            deletedItemIDs: snapshot.deletedItemIDs.union(suppressedItemIDs)
+        )
     }
 
     func isContentRevisionCurrent(
         itemID: UUID,
         revision: ClipboardItemContentRevision
     ) -> Bool {
-        guard !contentRevisionRegistry.isDeleted(itemID: itemID) else { return false }
+        guard !suppressedItemIDs.contains(itemID), !contentRevisionRegistry.isDeleted(itemID: itemID) else { return false }
         if let knownRevision = contentRevisionRegistry.revision(for: itemID) {
             return knownRevision == revision
         }
@@ -405,19 +130,17 @@ final class HistoryViewModel {
     }
 
     var items: [ClipboardItemDTO] {
-        get {
-            _ = projectionGeneration
-            return listState.items
-        }
-        set {
-            let currentItems = excludingKnownDeletedItems(newValue)
-            if isUnfilteredList {
-                searchMatchContexts.removeAll(keepingCapacity: true)
-            }
-            mutateProjection { $0.replaceItems(currentItems) }
-            mergeKnownContentRevisions(currentItems)
-        }
+        _ = projectionGeneration
+        return listState.items
     }
+
+    #if DEBUG
+    func replaceItemsForTesting(_ newItems: [ClipboardItemDTO]) {
+        let currentItems = excludingKnownDeletedItems(newItems)
+        if isUnfilteredList { searchMatchContexts.removeAll(keepingCapacity: true) }
+        mutateProjection { $0.replaceItemsForTesting(currentItems) }
+    }
+    #endif
 
     var loadedCount: Int {
         _ = projectionGeneration
@@ -512,14 +235,11 @@ final class HistoryViewModel {
     var isScrolling: Bool = false
 
     private let requests = HistoryRequestLifecycle()
-    /// Advances on every history event. A recent page read while it moved may predate the commit
-    /// the event describes, so it is read again from the same cursor.
-    @ObservationIgnored private var recentMutationEpoch: UInt64 = 0
-    /// Every history event delivered while a recent page read is in flight, in order; see
-    /// `fetchSettledRecentPage`.
-    @ObservationIgnored private var eventsDuringRecentReads: [ClipboardEvent] = []
-    @ObservationIgnored private var recentReadsInFlight = 0
-    @ObservationIgnored private var historyCountTask: Task<Void, Never>?
+    @ObservationIgnored private var latestHistoryMutationSeq: Int64 = 0
+    @ObservationIgnored private var activeHistoryReads: [UUID: HistoryReadChanges] = [:]
+    /// Reads the IDs from their actual resource owners; this is not another mutable ID registry.
+    @ObservationIgnored var retainedContentItemIDs: (() -> Set<UUID>)?
+    @ObservationIgnored private var storageStatsRefreshTask: Task<Void, Never>?
 
 
     var searchCoverage: SearchCoverage = .complete
@@ -634,170 +354,170 @@ final class HistoryViewModel {
         captureReadBlocked = false
         cancelTask(&storageDetailsTask)
         cancelTask(&recentAppsRefreshTask)
-        cancelTask(&historyCountTask)
+        cancelTask(&storageStatsRefreshTask)
     }
 
     // MARK: - Event Handling
 
     func handleEvent(_ event: ClipboardEvent) async {
-        if recentReadsInFlight > 0 { eventsDuringRecentReads.append(event) }
         switch event {
-        case .newItem, .itemUpdated, .itemContentUpdated, .itemDeleted, .itemsRemoved, .itemPinned, .itemUnpinned, .itemsCleared:
-            recentMutationEpoch &+= 1
-            if isUnfilteredList { scheduleHistoryCountRefresh() }
-        default:
-            break
-        }
+        case .history(let commit):
+            for read in activeHistoryReads.values { read.record(commit) }
+            latestHistoryMutationSeq = max(latestHistoryMutationSeq, commit.mutationSeq)
+            protectRetainedContent()
+            reconcilePendingDeletion(with: commit)
 
-        await reconcilePendingDeletion(with: event)
-        switch event {
-        case .newItem(let item):
-            mergeKnownContentRevisions([item], allowRevivingDeletedItems: true)
-            if let bundleID = item.appBundleID, !recentApps.contains(bundleID) {
-                scheduleRecentAppsRefresh()
+            switch commit.change {
+            case .itemsChanged(let items, let kind):
+                applyCommittedItems(items, kind: kind, mutationSeq: commit.mutationSeq)
+            case .itemsRemoved(let ids):
+                applyCommittedRemovals(Set(ids), mutationSeq: commit.mutationSeq)
+            case .itemsCleared(let ids):
+                applyCommittedRemovals(Set(ids), mutationSeq: commit.mutationSeq)
             }
-
-            if hasSemanticSearchQuery {
-                refreshSearchAfterHistoryChange()
-                return
-            }
-
-            let didMatchCurrentFilters = matchesCurrentFilters(item)
-
-            if didMatchCurrentFilters {
-                // A new row joins a filtered result set; the unfiltered count is refreshed from storage.
-                let joinsFilteredList = !isUnfilteredList && indexOfItem(withID: item.id) == nil
-                _ = upsertRecentItem(item)
-                if joinsFilteredList, totalCount >= 0 {
-                    mutateProjection { $0.updateTotalCount($0.totalCount + 1) }
-                }
-                prewarmDisplayText(for: [item])
-            } else {
-                _ = removeItem(withID: item.id)
-            }
-
-        case .thumbnailUpdated(
-            let itemID,
-            let expectedType,
-            let expectedContentHash,
-            let thumbnailPath
-        ):
-            ThumbnailCache.shared.remove(path: thumbnailPath)
-            applyThumbnail(
-                thumbnailPath, toItemID: itemID,
-                expectedType: expectedType, expectedContentHash: expectedContentHash
-            )
-        case .itemUpdated(let item):
-            mergeKnownContentRevisions([item])
-            guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
-
-            // Usage and last-used updates (including copy) keep their current search position
-            // and evidence. Content mutations arrive through itemContentUpdated and re-search.
-            if hasSemanticSearchQuery {
-                guard let index = indexOfItem(withID: item.id) else { return }
-                setItemIfChanged(at: index, to: item)
-                prewarmDisplayText(for: [item])
-                return
-            }
-
-            let didMatchCurrentFilters = matchesCurrentFilters(item)
-            if didMatchCurrentFilters {
-                _ = upsertRecentItem(item)
-                prewarmDisplayText(for: [item])
-            } else {
-                _ = removeItem(withID: item.id)
-            }
-
-            if totalCount >= 0 {
-                mutateProjection { $0.recomputeCanLoadMore() }
-            }
-        case .itemContentUpdated(let item):
-            mergeKnownContentRevisions([item])
-            guard !contentRevisionRegistry.isDeleted(itemID: item.id) else { return }
-            if hasSemanticSearchQuery {
-                refreshSearchAfterHistoryChange()
-                return
-            }
-            guard let index = indexOfItem(withID: item.id) else { return }
-            let existing = items[index]
-            if existing.thumbnailPath != item.thumbnailPath, let oldPath = existing.thumbnailPath {
-                ThumbnailCache.shared.remove(path: oldPath)
-            }
-            setItemIfChanged(at: index, to: item)
-            prewarmDisplayText(for: [item])
-        case .itemDeleted(let id):
-            invalidateKnownContentRevision(itemID: id)
-            invalidateInFlightProjectionWorkForDeletion()
-            _ = removeItem(withID: id)
-            if hasActiveFilters {
-                refreshSearchAfterHistoryChange()
-            }
-        case .itemsRemoved(let itemIDs):
-            let deletedIDs = Set(itemIDs)
-            guard !deletedIDs.isEmpty else { return }
-            let newlyDeletedCount = invalidateKnownContentRevisions(itemIDs: deletedIDs)
-            invalidateInFlightProjectionWorkForDeletion()
-            mutateProjection { _ = $0.removeItems(withIDs: deletedIDs) }
-            // One write: each write to `searchMatchContexts` copies the map (the fan-out shares
-            // its storage) and walks every registered row.
-            var contexts = searchMatchContexts
-            for id in deletedIDs {
-                contexts.removeValue(forKey: id)
-            }
-            if contexts.count != searchMatchContexts.count {
-                searchMatchContexts = contexts
-            }
-
             if isUnfilteredList {
-                // Refresh only the authoritative count. Re-fetching the first page here would
-                // collapse a user's already-loaded pagination depth back to the initial 50 rows.
-                let projectionVersion = requests.version
-                let epoch = recentMutationEpoch
-                do {
-                    let stats = try await service.getStorageStats()
-                    guard requests.isCurrent(projectionVersion), epoch == recentMutationEpoch, isUnfilteredList else { return }
-                    mutateProjection { $0.updateTotalCount(stats.itemCount) }
-                    settingsViewModel.storageStats = stats
-                } catch {
-                    guard requests.isCurrent(projectionVersion), epoch == recentMutationEpoch, isUnfilteredList else { return }
-                    // Exact committed IDs are still the best available authority on a transient
-                    // stats read failure; duplicate bulk events do not decrement twice.
-                    mutateProjection { $0.decrementTotalCount(by: newlyDeletedCount) }
-                    ScopyLog.app.error(
-                        "Failed to refresh history count after cleanup: \(error.localizedDescription, privacy: .private)"
-                    )
-                }
-            } else {
-                refreshSearchAfterHistoryChange()
+                mutateProjection { $0.updateTotalCount(commit.totalCount, mutationSeq: commit.mutationSeq) }
+                scheduleStorageStatsRefresh()
             }
-        case .itemPinned(let item), .itemUnpinned(let item):
-            setKnownContentPinned(itemID: item.id, isPinned: item.isPinned)
-            if let index = indexOfItem(withID: item.id) {
-                // The loaded row may carry newer fields, such as a thumbnail, than the event.
-                let updated = items[index].withPinned(item.isPinned)
-                if hasSemanticSearchQuery {
-                    setItemIfChanged(at: index, to: updated)
-                } else {
-                    _ = upsertRecentItem(updated)
-                }
-                mergeKnownContentRevisions([updated])
-            } else if item.isPinned, !hasSemanticSearchQuery, matchesCurrentFilters(item),
-                      !contentRevisionRegistry.isDeleted(itemID: item.id) {
-                // Pages after the first hold unpinned rows only: a row pinned before it was
-                // loaded joins the pinned group here or not at all.
-                _ = upsertRecentItem(item)
-                mergeKnownContentRevisions([item])
-            }
-        case .itemsCleared(let keepPinned):
-            let pinnedSurvivors = await resolvePinnedSurvivors(
-                keepPinned: keepPinned
+
+        case .historyResnapshotRequired:
+            await resnapshotHistory()
+
+        case .thumbnailUpdated(let itemID, let expectedType, let expectedContentHash, let thumbnailPath):
+            let thumbnail = HistoryReadChanges.Thumbnail(
+                itemID: itemID, expectedType: expectedType,
+                expectedContentHash: expectedContentHash, path: thumbnailPath
             )
-            prepareForItemsCleared(pinnedSurvivors: pinnedSurvivors)
-            await refreshAfterItemsCleared()
+            for read in activeHistoryReads.values { read.recordThumbnail(thumbnail) }
+            ThumbnailCache.shared.remove(path: thumbnailPath)
+            applyThumbnail(thumbnailPath, toItemID: itemID,
+                           expectedType: expectedType, expectedContentHash: expectedContentHash)
         case .captureReadBlocked(let blocked):
             captureReadBlocked = blocked
         case .settingsChanged:
             break
+        }
+    }
+
+    private func applyCommittedItems(
+        _ incoming: [ClipboardItemDTO],
+        kind: HistoryItemChangeKind,
+        mutationSeq: Int64
+    ) {
+        let changed = incoming.filter {
+            mutationSeq > (listState.mutationSeq(for: $0.id) ?? -1) &&
+                contentRevisionRegistry.acceptsHistoryChange(itemID: $0.id, mutationSeq: mutationSeq)
+        }.map { listState.preservingThumbnail(in: $0) }
+        guard !changed.isEmpty else { return }
+        mergeKnownContentRevisions(changed, mutationSeq: mutationSeq)
+        if kind == .inserted,
+           changed.contains(where: { $0.appBundleID.map { !recentApps.contains($0) } ?? false }) {
+            scheduleRecentAppsRefresh()
+        }
+        if kind == .content {
+            for item in changed {
+                if let previous = listState.item(withID: item.id),
+                   previous.thumbnailPath != item.thumbnailPath, let oldPath = previous.thumbnailPath {
+                    ThumbnailCache.shared.remove(path: oldPath)
+                }
+            }
+        }
+        if hasSemanticSearchQuery, kind == .inserted || kind == .content {
+            refreshSearchAfterHistoryChange()
+            return
+        }
+
+        for item in changed {
+            guard !suppressedItemIDs.contains(item.id) else { continue }
+            guard listState.acceptsHistoryChange(itemID: item.id, mutationSeq: mutationSeq) else { continue }
+            if hasSemanticSearchQuery {
+                guard let index = indexOfItem(withID: item.id) else { continue }
+                setItemIfChanged(at: index, to: item, mutationSeq: mutationSeq)
+            } else if matchesCurrentFilters(item) {
+                let wasLoaded = indexOfItem(withID: item.id) != nil
+                if (kind == .content || kind == .metadata), !wasLoaded { continue }
+                if kind == .pin, !wasLoaded, !item.isPinned { continue }
+                _ = upsertRecentItem(item, mutationSeq: mutationSeq)
+                if kind == .inserted, !isUnfilteredList, !wasLoaded, totalCount >= 0 {
+                    mutateProjection { $0.updateTotalCount($0.totalCount + 1) }
+                }
+            } else {
+                _ = removeItem(withID: item.id, mutationSeq: mutationSeq)
+            }
+        }
+        prewarmDisplayText(for: changed)
+    }
+
+    @discardableResult
+    private func applyCommittedRemovals(_ ids: Set<UUID>, mutationSeq: Int64) -> Bool {
+        let accepted = Set(ids.filter {
+            mutationSeq > (listState.mutationSeq(for: $0) ?? -1) &&
+                contentRevisionRegistry.acceptsHistoryChange(itemID: $0, mutationSeq: mutationSeq)
+        })
+        guard !accepted.isEmpty else { return false }
+        _ = invalidateKnownContentRevisions(itemIDs: accepted, mutationSeq: mutationSeq)
+        suppressedItemIDs.subtract(accepted)
+        // Only a complete, settled projection identifies every matching row. A partial page or
+        // pending query cannot turn the global deletion set into an exact filtered total.
+        let completeFilteredCount: Int? = hasActiveFilters && searchCoverage == .complete &&
+            totalCount == loadedCount && !requests.replacementIsPending &&
+            !requests.isLoading && !requests.hasPendingPage ? totalCount : nil
+        invalidateInFlightProjectionWorkForDeletion()
+        let projected = Set(accepted.filter { listState.acceptsHistoryChange(itemID: $0, mutationSeq: mutationSeq) })
+        mutateProjection {
+            let removedCount = $0.removeItems(withIDs: projected, mutationSeq: mutationSeq)
+            if let completeFilteredCount {
+                $0.updateTotalCount(completeFilteredCount - removedCount, mutationSeq: mutationSeq)
+            }
+        }
+        var contexts = searchMatchContexts
+        for id in projected { contexts.removeValue(forKey: id) }
+        if contexts.count != searchMatchContexts.count { searchMatchContexts = contexts }
+        reconcileSelectionAfterProjectionReplacement()
+        if hasActiveFilters { refreshSearchAfterHistoryChange() }
+        return true
+    }
+
+    /// Old rows remain actionable while the gap snapshot is in flight. Cover every identity
+    /// they can hand to a new resource owner, as well as existing off-list owners and Undo.
+    private func resnapshotHistory() async {
+        requests.cancel()
+        let version = requests.version
+        let retainedIDs = Set(listState.items.map(\.id))
+            .union(retainedContentItemIDs?() ?? []).union(suppressedItemIDs)
+        let readID = UUID()
+        activeHistoryReads[readID] = HistoryReadChanges(protecting: retainedIDs)
+        defer { activeHistoryReads.removeValue(forKey: readID) }
+        protectRetainedContent()
+        do {
+            if !retainedIDs.isEmpty {
+                let snapshot = try await service.fetchHistoryItems(itemIDs: retainedIDs)
+                _ = invalidateKnownContentRevisions(
+                    itemIDs: snapshot.missingItemIDs, mutationSeq: snapshot.mutationSeq
+                )
+                mergeKnownContentRevisions(snapshot.items, mutationSeq: snapshot.mutationSeq)
+                if let pending = pendingDeletion,
+                   snapshot.mutationSeq >= (pending.mutationSeq ?? -1) {
+                    if let item = snapshot.items.first(where: { $0.id == pending.item.id }) {
+                        reconcilePendingDeletion(with: item, mutationSeq: snapshot.mutationSeq)
+                    } else if snapshot.missingItemIDs.contains(pending.item.id),
+                              contentRevisionRegistry.isDeleted(itemID: pending.item.id) {
+                        discardPendingDeletion()
+                    }
+                }
+            }
+            guard requests.isCurrent(version) else { return }
+            if isUnfilteredList {
+                let limit = max(Self.initialPageSize, listState.unpinnedItems.count)
+                let task = requests.replace { [self] currentVersion in
+                    await loadRecent(version: currentVersion, limit: limit)
+                }
+                await task.value
+            } else {
+                refreshSearchAfterHistoryChange()
+            }
+        } catch {
+            reportFetchFailure(String(localized: "Loading history failed"), error)
         }
     }
 
@@ -835,19 +555,18 @@ final class HistoryViewModel {
         }
     }
 
-    private func scheduleHistoryCountRefresh() {
-        historyCountTask?.cancel()
-        let epoch = recentMutationEpoch
-        historyCountTask = Task {
+    private func scheduleStorageStatsRefresh() {
+        storageStatsRefreshTask?.cancel()
+        let mutationSeq = latestHistoryMutationSeq
+        storageStatsRefreshTask = Task {
             try? await Task.sleep(nanoseconds: timing.recentAppsRefreshDelayNs)
             guard !Task.isCancelled, isUnfilteredList else { return }
             do {
                 let stats = try await service.getStorageStats()
-                guard !Task.isCancelled, isUnfilteredList, epoch == recentMutationEpoch else { return }
-                mutateProjection { $0.updateTotalCount(stats.itemCount) }
+                guard !Task.isCancelled, isUnfilteredList, mutationSeq == latestHistoryMutationSeq else { return }
                 settingsViewModel.storageStats = stats
             } catch {
-                ScopyLog.app.warning("Failed to refresh history count: \(error.localizedDescription, privacy: .private)")
+                ScopyLog.app.warning("Failed to refresh storage statistics: \(error.localizedDescription, privacy: .private)")
             }
         }
     }
@@ -891,7 +610,7 @@ final class HistoryViewModel {
         })
     }
 
-    private func loadRecent(version currentVersion: HistoryRequestLifecycle.Version) async {
+    private func loadRecent(version currentVersion: HistoryRequestLifecycle.Version, limit: Int = initialPageSize) async {
         cancelTask(&storageDetailsTask)
         guard shouldApplyLoadResult(version: currentVersion) else { return }
 
@@ -900,19 +619,25 @@ final class HistoryViewModel {
         do {
             let startTime = CFAbsoluteTimeGetCurrent()
 
-            guard let settled = try await fetchSettledRecentPage(
-                limit: Self.initialPageSize, after: nil, version: currentVersion
-            ) else { return }
-            let snapshot = settled.page
-            let fetchedItems = excludingKnownDeletedItems(snapshot.pinnedItems + snapshot.items)
-
+            let readID = UUID()
+            let read = HistoryReadChanges()
+            activeHistoryReads[readID] = read
+            defer { activeHistoryReads.removeValue(forKey: readID) }
+            let snapshot = try await service.fetchHistoryPage(limit: limit, after: nil)
+            guard shouldApplyLoadResult(version: currentVersion) else { return }
+            let fetchedItems = acceptedSnapshotItems(snapshot.pinnedItems + snapshot.items, mutationSeq: snapshot.mutationSeq)
+            mergeKnownContentRevisions(snapshot.pinnedItems + snapshot.items, mutationSeq: snapshot.mutationSeq)
+            let acceptedIDs = Set(read.changedItemIDs.filter { !suppressedItemIDs.contains($0) && contentRevisionRegistry.acceptsProjection(itemID: $0) })
             searchMatchContexts.removeAll(keepingCapacity: true)
             mutateProjection {
-                $0.replaceRecentPage(items: fetchedItems, total: snapshot.total, continuingAfter: snapshot.nextCursor)
+                $0.replaceRecentPage(items: fetchedItems, total: snapshot.total,
+                                     continuingAfter: snapshot.nextCursor, mutationSeq: snapshot.mutationSeq)
+                read.merge(after: snapshot.mutationSeq, into: &$0, accepting: acceptedIDs.contains)
             }
-            mergeKnownContentRevisions(fetchedItems)
-            replayRowChanges(of: settled.overlappingEvents)
-            prewarmDisplayText(for: fetchedItems)
+            applyThumbnails(from: read)
+            reconcileSelectionAfterProjectionReplacement()
+            activeHistoryReads.removeValue(forKey: readID)
+            prewarmDisplayText(for: listState.items)
             searchCoverage = .complete
             lastLoadedAt = Date()
 
@@ -936,79 +661,11 @@ final class HistoryViewModel {
         requests.isCurrent(version) && isUnfilteredList
     }
 
-    /// Reads of one recent page before a read that overlapped events is used anyway. Ingest replay
-    /// or a program writing the pasteboard in a loop can deliver an event during every read, and
-    /// `AppState.start` waits for the first page.
-    static let settledRecentReadAttempts = 3
-
-    /// Reads the recent page after `cursor` until no history event arrived during the read: such
-    /// an event may describe a commit the snapshot predates, and applying the snapshot after it
-    /// would undo the event. The first retry is immediate and the next waits
-    /// `staleLoadRetryDelayNs`. The last read is returned even if events overlapped it, with
-    /// those events; the caller applies its rows and replays them in the same actor turn
-    /// (`replayRowChanges`). `nil` when the request was superseded.
-    private func fetchSettledRecentPage(
-        limit: Int,
-        after cursor: RecentHistoryCursor?,
-        version: HistoryRequestLifecycle.Version
-    ) async throws -> (page: RecentHistoryPage, epoch: UInt64, overlappingEvents: [ClipboardEvent])? {
-        recentReadsInFlight += 1
-        defer {
-            recentReadsInFlight -= 1
-            if recentReadsInFlight == 0 { eventsDuringRecentReads.removeAll() }
-        }
-        var attempt = 1
-        while true {
-            guard shouldApplyLoadResult(version: version) else { return nil }
-            let epoch = recentMutationEpoch
-            let firstOverlapping = eventsDuringRecentReads.endIndex
-            let page = try await service.fetchHistoryPage(limit: limit, after: cursor)
-            guard shouldApplyLoadResult(version: version) else { return nil }
-            if recentMutationEpoch == epoch { return (page, epoch, []) }
-            if attempt == Self.settledRecentReadAttempts {
-                return (page, recentMutationEpoch, Array(eventsDuringRecentReads[firstOverlapping...]))
-            }
-            if attempt > 1 {
-                try? await Task.sleep(nanoseconds: timing.staleLoadRetryDelayNs)
-            }
-            attempt += 1
-        }
-    }
-
-    /// Applies, in order, the row changes of the events that overlapped the read whose rows were
-    /// just applied: the read may predate them. Each event carries the stored row as of its
-    /// commit, so replaying one the page already includes changes nothing once the later events
-    /// are replayed too. The events already updated the registry; this restores the revisions the
-    /// page's older copies overwrote. Deletions need no replay: pages pass through tombstones.
-    private func replayRowChanges(of events: [ClipboardEvent]) {
-        for event in events {
-            let row: ClipboardItemDTO
-            switch event {
-            case .newItem(let item), .itemUpdated(let item):
-                row = item
-            case .itemContentUpdated(let item):
-                // A content change does not move a row or bring an unloaded one in.
-                guard listState.item(withID: item.id) != nil else { continue }
-                row = item
-            case .itemPinned(let item), .itemUnpinned(let item):
-                if let loaded = listState.item(withID: item.id) {
-                    row = loaded.withPinned(item.isPinned)
-                } else {
-                    guard item.isPinned else { continue }
-                    row = item
-                }
-            case .thumbnailUpdated(let itemID, let expectedType, let expectedContentHash, let thumbnailPath):
-                applyThumbnail(
-                    thumbnailPath, toItemID: itemID,
-                    expectedType: expectedType, expectedContentHash: expectedContentHash
-                )
-                continue
-            default:
-                continue
-            }
-            guard contentRevisionRegistry.acceptsProjection(itemID: row.id) else { continue }
-            _ = upsertRecentItem(row)
-            mergeKnownContentRevisions([row])
+    private func applyThumbnails(from read: HistoryReadChanges) {
+        for thumbnail in read.thumbnails.values {
+            applyThumbnail(thumbnail.path, toItemID: thumbnail.itemID,
+                           expectedType: thumbnail.expectedType,
+                           expectedContentHash: thumbnail.expectedContentHash)
         }
     }
 
@@ -1036,7 +693,8 @@ final class HistoryViewModel {
             sizeBytes: existing.sizeBytes,
             fileSizeBytes: existing.fileSizeBytes,
             thumbnailPath: thumbnailPath,
-            storageRef: existing.storageRef
+            storageRef: existing.storageRef,
+            useCount: existing.useCount
         )
         setItemIfChanged(at: index, to: updated)
     }
@@ -1116,6 +774,9 @@ final class HistoryViewModel {
                         ScrollPerformanceProfile.shared.incrementCounter(
                             name: "list.pagination_request"
                         )
+                        let readID = UUID()
+                        activeHistoryReads[readID] = HistoryReadChanges()
+                        defer { activeHistoryReads.removeValue(forKey: readID) }
                         let result = try await service.search(query: request)
                         guard requests.isCurrent(currentVersion) else { return }
                         guard await applyRefinedSearchPage(with: result, version: currentVersion) else { return }
@@ -1139,50 +800,51 @@ final class HistoryViewModel {
                     ScrollPerformanceProfile.shared.incrementCounter(
                         name: "list.pagination_request"
                     )
+                    let readID = UUID()
+                    activeHistoryReads[readID] = HistoryReadChanges()
+                    defer { activeHistoryReads.removeValue(forKey: readID) }
                     let result = try await service.search(query: request)
                     guard requests.isCurrent(currentVersion) else { return }
-                    prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
+                    prewarmDisplayText(for: acceptedSearchHits(result.hits, mutationSeq: result.mutationSeq).map(\.item))
                     guard await appendSearchPage(with: result, version: currentVersion) else { return }
                     searchCoverage = result.coverage
                 } else {
                     ScrollPerformanceProfile.shared.incrementCounter(
                         name: "list.pagination_request"
                     )
-                    // Each applied chunk moves the cursor to its last row. An event seen between
-                    // chunks may postdate the read, so the rest is read again from that cursor.
-                    var remaining = Self.loadMorePageSize
-                    pages: while remaining > 0, let cursor = listState.recentCursor {
-                        guard let settled = try await fetchSettledRecentPage(
-                            limit: remaining, after: cursor, version: currentVersion
-                        ) else { return }
-                        let page = settled.page
-                        prewarmDisplayText(for: excludingKnownDeletedItems(page.items))
-                        // A read that overlapped events is applied in one step, so the replay
-                        // of those events follows it before any later event can arrive.
-                        let chunkRows = settled.overlappingEvents.isEmpty
-                            ? Self.loadMoreApplyChunkRows : page.items.count
-                        var start = 0
-                        repeat {
-                            if start > 0 {
-                                try? await Task.sleep(nanoseconds: 20_000_000)
-                                guard requests.isCurrent(currentVersion) else { return }
-                                guard recentMutationEpoch == settled.epoch else { continue pages }
-                            }
-                            let end = min(page.items.count, start + chunkRows)
-                            let chunk = page.items[start..<end]
-                            let continuation = end == page.items.count
-                                ? page.nextCursor
-                                : chunk.last.map(RecentHistoryCursor.init)
-                            let accepted = excludingKnownDeletedItems(Array(chunk))
-                            mutateProjection { $0.appendRecentPage(items: accepted, continuingAfter: continuation) }
-                            mergeKnownContentRevisions(accepted)
-                            replayRowChanges(of: settled.overlappingEvents)
-                            remaining -= chunk.count
-                            start = end
-                        } while start < page.items.count
-                        mutateProjection { $0.updateTotalCount(page.total) }
-                        break
-                    }
+                    guard let cursor = listState.recentCursor else { return }
+                    let readID = UUID()
+                    let read = HistoryReadChanges()
+                    activeHistoryReads[readID] = read
+                    defer { activeHistoryReads.removeValue(forKey: readID) }
+                    let page = try await service.fetchHistoryPage(limit: Self.loadMorePageSize, after: cursor)
+                    guard requests.isCurrent(currentVersion) else { return }
+                    prewarmDisplayText(for: excludingKnownDeletedItems(page.items))
+                    var start = 0
+                    repeat {
+                        if start > 0 {
+                            try? await Task.sleep(nanoseconds: 20_000_000)
+                            guard requests.isCurrent(currentVersion) else { return }
+                        }
+                        let end = min(page.items.count, start + Self.loadMoreApplyChunkRows)
+                        let chunk = page.items[start..<end]
+                        let continuation = end == page.items.count
+                            ? page.nextCursor : chunk.last.map(RecentHistoryCursor.init)
+                        let accepted = acceptedSnapshotItems(Array(chunk), mutationSeq: page.mutationSeq)
+                        mergeKnownContentRevisions(Array(chunk), mutationSeq: page.mutationSeq)
+                        let acceptedIDs = Set(read.changedItemIDs.filter {
+                            !suppressedItemIDs.contains($0) && contentRevisionRegistry.acceptsProjection(itemID: $0)
+                        })
+                        mutateProjection {
+                            $0.appendRecentPage(items: accepted, continuingAfter: continuation,
+                                                mutationSeq: page.mutationSeq)
+                            read.merge(after: page.mutationSeq, into: &$0, accepting: acceptedIDs.contains)
+                            $0.updateTotalCount(page.total, mutationSeq: page.mutationSeq)
+                        }
+                        applyThumbnails(from: read)
+                        reconcileSelectionAfterProjectionReplacement()
+                        start = end
+                    } while start < page.items.count
                     searchCoverage = .complete
                 }
             } catch {
@@ -1239,9 +901,12 @@ final class HistoryViewModel {
 
             do {
                 let startTime = CFAbsoluteTimeGetCurrent()
+                let readID = UUID()
+                activeHistoryReads[readID] = HistoryReadChanges()
+                defer { activeHistoryReads.removeValue(forKey: readID) }
                 let result = try await service.search(query: request)
                 guard requests.isCurrent(currentVersion) else { return }
-                let prefilterItems = acceptedSearchHits(result.hits).map(\.item)
+                let prefilterItems = acceptedSearchHits(result.hits, mutationSeq: result.mutationSeq).map(\.item)
                 prewarmDisplayText(for: prefilterItems)
                 let refineFollows = (request.mode == .fuzzy || request.mode == .fuzzyPlus)
                     && result.coverage.isStagedRefine
@@ -1274,10 +939,13 @@ final class HistoryViewModel {
                         )
 
                         do {
+                            let readID = UUID()
+                            activeHistoryReads[readID] = HistoryReadChanges()
+                            defer { activeHistoryReads.removeValue(forKey: readID) }
                             let refined = try await service.search(query: refineRequest)
                             guard requests.isCurrent(currentVersion) else { return }
 
-                            prewarmDisplayText(for: acceptedSearchHits(refined.hits).map(\.item))
+                            prewarmDisplayText(for: acceptedSearchHits(refined.hits, mutationSeq: refined.mutationSeq).map(\.item))
                             replaceSearchPage(with: refined, skippingIdenticalRefine: true)
                             searchCoverage = refined.coverage
                         } catch {
@@ -1336,9 +1004,12 @@ final class HistoryViewModel {
             try? await Task.sleep(nanoseconds: debounceNs)
             guard requests.isCurrent(currentVersion) else { return }
             do {
+                let readID = UUID()
+                activeHistoryReads[readID] = HistoryReadChanges()
+                defer { activeHistoryReads.removeValue(forKey: readID) }
                 let result = try await service.search(query: request)
                 guard requests.isCurrent(currentVersion) else { return }
-                prewarmDisplayText(for: acceptedSearchHits(result.hits).map(\.item))
+                prewarmDisplayText(for: acceptedSearchHits(result.hits, mutationSeq: result.mutationSeq).map(\.item))
                 replaceSearchPage(with: result, skippingIdenticalRefine: true)
                 searchCoverage = result.coverage
                 fetchFailureMessage = nil
@@ -1500,7 +1171,6 @@ final class HistoryViewModel {
             } else {
                 try await service.pin(itemID: item.id)
             }
-            mergeKnownContentRevisions([item.withPinned(!item.isPinned)])
         } catch {
             ScopyLog.app.error("Pin toggle failed: \(error.localizedDescription, privacy: .private)")
             reportActionFailure(error)
@@ -1509,7 +1179,7 @@ final class HistoryViewModel {
 
     /// Removes the row at once and sends the backend delete after `Timing.undoDeletionWindowNs`,
     /// so the footer or ⌘Z can undo it. One deletion is pending at a time: the next delete, a
-    /// clear, or closing the panel commits the previous one first. The tombstone keeps events,
+    /// clear, or closing the panel commits the previous one first. Local suppression keeps events,
     /// searches and loads from reviving the row meanwhile, and closes its pinned preview.
     func delete(_ item: ClipboardItemDTO) async {
         guard !isTerminating else { return }
@@ -1518,7 +1188,8 @@ final class HistoryViewModel {
         let previous = pendingDeletion
         previous?.commit.cancel()
         pendingDeletion = nil
-        invalidateKnownContentRevision(itemID: item.id)
+        suppressedItemIDs.insert(item.id)
+        contentRevisionReconciliationToken &+= 1
         let index = indexOfItem(withID: item.id) ?? 0
         let predecessorID = index > 0 ? listState.item(at: index - 1)?.id : nil
         let successorID = listState.item(at: index + 1)?.id
@@ -1528,6 +1199,8 @@ final class HistoryViewModel {
         let window = timing.undoDeletionWindowNs
         pendingDeletion = PendingDeletion(
             item: item,
+            mutationSeq: contentRevisionRegistry.mutationSeq(for: item.id),
+            useCountAtDeletion: item.useCount,
             token: token,
             projection: projectionIdentity,
             index: index,
@@ -1585,14 +1258,32 @@ final class HistoryViewModel {
     private func sendDeletion(_ pending: PendingDeletion) async -> Bool {
         if let existing = inFlightDeletions[pending.token] { return await existing.value }
         let task = Task { @MainActor in
-            defer { inFlightDeletions.removeValue(forKey: pending.token) }
+            let readID = UUID()
+            let read = HistoryReadChanges(protecting: [pending.item.id])
+            activeHistoryReads[readID] = read
+            defer {
+                activeHistoryReads.removeValue(forKey: readID)
+                inFlightDeletions.removeValue(forKey: pending.token)
+            }
             do {
-                try await service.delete(itemID: pending.item.id)
+                let snapshot = try await service.delete(
+                    itemID: pending.item.id, expectedUseCount: pending.useCountAtDeletion
+                )
+                if snapshot.missingItemIDs.contains(pending.item.id) {
+                    let applied = applyCommittedRemovals([pending.item.id], mutationSeq: snapshot.mutationSeq)
+                    if !applied, hasActiveFilters { refreshSearchAfterHistoryChange() }
+                } else if snapshot.requestedItemIDs.contains(pending.item.id),
+                          let item = snapshot.items.first(where: { $0.id == pending.item.id }) {
+                    mergeKnownContentRevisions([item], mutationSeq: snapshot.mutationSeq)
+                    restoreAfterDeletionDecision(pending, item: item, mutationSeq: snapshot.mutationSeq, changes: read)
+                } else {
+                    throw DeletionSnapshotError.missingRequestedIdentity
+                }
                 return true
             } catch {
                 deletionFailureGeneration &+= 1
                 ScopyLog.app.error("Delete failed: \(error.localizedDescription, privacy: .private)")
-                revive(pending)
+                restoreAfterDeletionDecision(pending, item: pending.item, mutationSeq: pending.mutationSeq, changes: read)
                 reportActionFailure(error)
                 return false
             }
@@ -1601,37 +1292,88 @@ final class HistoryViewModel {
         return await task.value
     }
 
+    private enum DeletionSnapshotError: LocalizedError {
+        case missingRequestedIdentity
+
+        var errorDescription: String? {
+            String(localized: "The deletion result could not be verified.")
+        }
+    }
+
+    /// A newer copy can win the transaction after the Undo slot has moved on. Restore that
+    /// version without treating a declined deletion as a failure, and retain later facts.
+    private func restoreAfterDeletionDecision(
+        _ pending: PendingDeletion,
+        item: ClipboardItemDTO,
+        mutationSeq: Int64?,
+        changes: HistoryReadChanges
+    ) {
+        var restored = pending
+        restored.item = changes.item(withID: item.id, after: mutationSeq ?? -1) ?? item
+        restored.mutationSeq = [mutationSeq, changes.mutationSeq(for: item.id)].compactMap { $0 }.max()
+        if pending.item.plainText != restored.item.plainText || pending.item.note != restored.item.note {
+            restored.evidence = nil
+        }
+        revive(restored)
+        if !contentRevisionRegistry.isDeleted(itemID: item.id), !hasSemanticSearchQuery,
+           matchesCurrentFilters(restored.item) {
+            _ = upsertRecentItem(restored.item)
+        }
+        applyThumbnails(from: changes)
+        if hasActiveFilters { refreshSearchAfterHistoryChange() }
+    }
+
     /// The backend deleted the pending row itself; there is nothing left to send or undo.
     private func discardPendingDeletion() {
         pendingDeletion?.commit.cancel()
+        if let pendingDeletion { suppressedItemIDs.remove(pendingDeletion.item.id) }
         pendingDeletion = nil
     }
 
     /// A pending deletion is undone implicitly when the backend publishes the same row again
     /// (identical content copied inside the window and deduplicated onto this row): committing
     /// it would delete what the user just copied.
-    private func reconcilePendingDeletion(with event: ClipboardEvent) async {
-        guard let pending = pendingDeletion else { return }
-        switch event {
-        case .newItem(let item), .itemUpdated(let item), .itemContentUpdated(let item):
-            if item.id == pending.item.id { await undoPendingDeletion() }
-        case .itemDeleted(let id):
-            if id == pending.item.id { discardPendingDeletion() }
-        case .itemsRemoved(let ids):
+    private func reconcilePendingDeletion(with commit: CommittedHistoryChange) {
+        guard let pending = pendingDeletion,
+              commit.mutationSeq > (pending.mutationSeq ?? -1) else { return }
+        switch commit.change {
+        case .itemsChanged(let items, _):
+            guard let item = items.first(where: { $0.id == pending.item.id }) else { return }
+            reconcilePendingDeletion(with: item, mutationSeq: commit.mutationSeq)
+        case .itemsRemoved(let ids), .itemsCleared(let ids):
             if ids.contains(pending.item.id) { discardPendingDeletion() }
-        case .itemsCleared(let keepPinned):
-            if !(keepPinned && pending.item.isPinned) { discardPendingDeletion() }
-        default:
-            break
         }
     }
 
-    /// Lifts the tombstone and puts the row back where it was removed from, with its evidence,
-    /// while the projection is still the one it left; after a new search or load the row simply
-    /// shows up in the next fetch.
+    /// The counter survives a journal gap and still advances when MAX keeps lastUsedAt fixed.
+    /// Its deletion-time baseline never changes when metadata refreshes the retained row.
+    private func reconcilePendingDeletion(with item: ClipboardItemDTO, mutationSeq: Int64) {
+        guard var pending = pendingDeletion, pending.item.id == item.id,
+              mutationSeq >= (pending.mutationSeq ?? -1) else { return }
+        if pending.item.plainText != item.plainText || pending.item.note != item.note {
+            pending.evidence = nil
+        }
+        pending.item = item
+        pending.mutationSeq = mutationSeq
+        guard item.useCount > pending.useCountAtDeletion else {
+            pendingDeletion = pending
+            return
+        }
+        pending.commit.cancel()
+        pendingDeletion = nil
+        revive(pending)
+        if pending.projection == projectionIdentity, !hasSemanticSearchQuery, matchesCurrentFilters(item) {
+            _ = upsertRecentItem(item)
+        }
+    }
+
+    /// Lifts local suppression and restores the latest row retained by the undo slot.
+    /// A committed deletion remains authoritative even if an older delete attempt failed.
     private func revive(_ pending: PendingDeletion) {
-        mergeKnownContentRevisions([pending.item], allowRevivingDeletedItems: true)
-        guard pending.projection == projectionIdentity else { return }
+        suppressedItemIDs.remove(pending.item.id)
+        contentRevisionReconciliationToken &+= 1
+        guard !contentRevisionRegistry.isDeleted(itemID: pending.item.id),
+              pending.projection == projectionIdentity else { return }
         let index: Int
         if let successorID = pending.successorID, let successor = indexOfItem(withID: successorID) {
             index = successor
@@ -1640,7 +1382,7 @@ final class HistoryViewModel {
         } else {
             index = pending.index
         }
-        mutateProjection { $0.insertItem(pending.item, at: index) }
+        mutateProjection { $0.insertItem(pending.item, at: index, mutationSeq: pending.mutationSeq) }
         if let evidence = pending.evidence {
             searchMatchContexts[pending.item.id] = evidence
         }
@@ -1670,6 +1412,8 @@ final class HistoryViewModel {
         await commitPendingDeletionNow()
         do {
             try await service.clearAll()
+            lastSelectionSource = .programmatic
+            selectedID = nil
         } catch {
             ScopyLog.app.error("Clear failed: \(error.localizedDescription, privacy: .private)")
             reportActionFailure(error)
@@ -1786,111 +1530,47 @@ final class HistoryViewModel {
     private func excludingKnownDeletedItems(
         _ items: [ClipboardItemDTO]
     ) -> [ClipboardItemDTO] {
-        items.filter { contentRevisionRegistry.acceptsProjection(itemID: $0.id) }
+        items.filter { !suppressedItemIDs.contains($0.id) && contentRevisionRegistry.acceptsProjection(itemID: $0.id) }
     }
 
     private func mergeKnownContentRevisions(
         _ items: [ClipboardItemDTO],
-        allowRevivingDeletedItems: Bool = false
+        mutationSeq: Int64
     ) {
-        guard !items.isEmpty,
-              contentRevisionRegistry.merge(
-                  items: items,
-                  allowRevivingDeletedItems: allowRevivingDeletedItems
-              ) else { return }
-        contentRevisionReconciliationToken &+= 1
-    }
-
-    private func invalidateKnownContentRevision(itemID: UUID) {
-        guard contentRevisionRegistry.invalidate(itemID: itemID) else { return }
+        protectRetainedContent()
+        let accepted = items.filter { contentRevisionRegistry.acceptsSnapshot(itemID: $0.id, mutationSeq: mutationSeq) }
+        for read in activeHistoryReads.values { read.record(items: accepted, mutationSeq: mutationSeq) }
+        guard contentRevisionRegistry.merge(items: accepted, mutationSeq: mutationSeq) else { return }
         contentRevisionReconciliationToken &+= 1
     }
 
     @discardableResult
-    private func invalidateKnownContentRevisions(itemIDs: Set<UUID>) -> Int {
-        let newlyDeletedCount = contentRevisionRegistry.invalidate(itemIDs: itemIDs)
+    private func invalidateKnownContentRevisions(itemIDs: Set<UUID>, mutationSeq: Int64) -> Int {
+        protectRetainedContent()
+        let accepted = Set(itemIDs.filter { contentRevisionRegistry.acceptsHistoryChange(itemID: $0, mutationSeq: mutationSeq) })
+        for read in activeHistoryReads.values { read.recordMissing(itemIDs: accepted, mutationSeq: mutationSeq) }
+        let newlyDeletedCount = contentRevisionRegistry.invalidate(itemIDs: accepted, mutationSeq: mutationSeq)
         guard newlyDeletedCount > 0 else { return 0 }
         contentRevisionReconciliationToken &+= 1
         return newlyDeletedCount
     }
 
-    private func setKnownContentPinned(itemID: UUID, isPinned: Bool) {
-        guard contentRevisionRegistry.setPinned(
-            itemID: itemID,
-            isPinned: isPinned
-        ) else { return }
-        contentRevisionReconciliationToken &+= 1
-    }
-
-    private func clearKnownContentRevisions(
-        pinnedSurvivors: PinnedSurvivorResolution
-    ) {
-        contentRevisionRegistry.clear(
-            survivingPinnedItems: pinnedSurvivors.items,
-            survivorSetIsAuthoritative: pinnedSurvivors.isAuthoritative
-        )
-        contentRevisionReconciliationToken &+= 1
+    private func protectRetainedContent() {
+        var protectedIDs = (retainedContentItemIDs?() ?? []).union(suppressedItemIDs)
+        for read in activeHistoryReads.values { protectedIDs.formUnion(read.protectedItemIDs) }
+        contentRevisionRegistry.protect(itemIDs: protectedIDs)
+        for id in protectedIDs {
+            guard let item = listState.item(withID: id), let version = listState.mutationSeq(for: id) else { continue }
+            _ = contentRevisionRegistry.merge(items: [item], mutationSeq: version)
+        }
     }
 
     /// A search page continues from an offset, which a deletion shifts. Recent pages continue from
-    /// a key and read again after any event themselves.
+    /// a key and merge committed versions without restarting the read.
     private func invalidateInFlightProjectionWorkForDeletion() {
         guard !isUnfilteredList else { return }
         requests.cancel()
         cancelTask(&storageDetailsTask)
-    }
-
-    private func resolvePinnedSurvivors(
-        keepPinned: Bool
-    ) async -> PinnedSurvivorResolution {
-        guard keepPinned else {
-            return PinnedSurvivorResolution(items: [], isAuthoritative: true)
-        }
-        do {
-            return PinnedSurvivorResolution(
-                items: try await service.fetchPinned(),
-                isAuthoritative: true
-            )
-        } catch {
-            ScopyLog.app.error(
-                "Failed to verify pinned items after clear: \(error.localizedDescription, privacy: .private)"
-            )
-            // A transient read failure is not proof that every pinned row disappeared. Preserve
-            // the loaded projection plus registry-known pinned IDs; known unpinned rows still get
-            // tombstoned by the non-authoritative clear boundary.
-            return PinnedSurvivorResolution(
-                items: listState.pinnedItems,
-                isAuthoritative: false
-            )
-        }
-    }
-
-    private func prepareForItemsCleared(
-        pinnedSurvivors: PinnedSurvivorResolution
-    ) {
-        requests.cancel()
-        cancelTask(&storageDetailsTask)
-        projectionIdentity = UUID()
-        selectedID = nil
-        lastSelectionSource = .programmatic
-        let preservedItems = isUnfilteredList ? pinnedSurvivors.items : []
-        searchMatchContexts.removeAll(keepingCapacity: true)
-        mutateProjection {
-            $0.replacePage(items: preservedItems, total: preservedItems.count, hasMore: false)
-        }
-        searchCoverage = .complete
-        lastLoadedAt = .distantPast
-        clearKnownContentRevisions(pinnedSurvivors: pinnedSurvivors)
-    }
-
-    private func refreshAfterItemsCleared() async {
-        if isUnfilteredList {
-            await load()
-            return
-        }
-
-        search()
-        await requests.waitForPrimary()
     }
 
     private func resolvedFileURLs(for item: ClipboardItemDTO) async -> [URL] {
@@ -1922,15 +1602,46 @@ final class HistoryViewModel {
         listState.indexOfItem(withID: id)
     }
 
-    private func acceptedSearchHits(_ hits: [SearchResultHit]) -> [SearchResultHit] {
-        hits.filter { contentRevisionRegistry.acceptsProjection(itemID: $0.item.id) }
+    private func acceptedSnapshotItems(_ items: [ClipboardItemDTO], mutationSeq: Int64) -> [ClipboardItemDTO] {
+        items.filter {
+            !suppressedItemIDs.contains($0.id) &&
+                contentRevisionRegistry.acceptsSnapshot(itemID: $0.id, mutationSeq: mutationSeq)
+        }
+    }
+
+    private func acceptedSearchHits(_ hits: [SearchResultHit], mutationSeq: Int64) -> [SearchResultHit] {
+        hits.compactMap { hit in
+            let id = hit.item.id
+            guard !suppressedItemIDs.contains(id) else { return nil }
+            if contentRevisionRegistry.acceptsSnapshot(itemID: id, mutationSeq: mutationSeq) { return hit }
+            guard !contentRevisionRegistry.isDeleted(itemID: id) else { return nil }
+            let latestRead = activeHistoryReads.values.max {
+                ($0.mutationSeq(for: id) ?? -1) < ($1.mutationSeq(for: id) ?? -1)
+            }
+            guard let current = latestRead?.item(withID: id, after: mutationSeq) ?? listState.item(withID: id) else {
+                return nil
+            }
+            let sameSearchContent = current.plainText == hit.item.plainText && current.note == hit.item.note
+            return SearchResultHit(item: current, matchContext: sameSearchContent ? hit.matchContext : nil)
+        }
+    }
+
+    private func recordSearchVersions(_ items: [ClipboardItemDTO], snapshotVersion: Int64) {
+        mergeKnownContentRevisions(items, mutationSeq: snapshotVersion)
+        mutateProjection { state in
+            for item in items {
+                guard let index = state.indexOfItem(withID: item.id),
+                      let known = contentRevisionRegistry.mutationSeq(for: item.id), known > snapshotVersion else { continue }
+                _ = state.setItemIfChanged(at: index, to: item, mutationSeq: known)
+            }
+        }
     }
 
     private func replaceSearchPage(with result: SearchResultPage, skippingIdenticalRefine: Bool = false) {
         // A row appears once, as on the append path: two hits for one id would trap the evidence
         // map below and give the List two rows with one identity.
         var seenIDs = Set<UUID>()
-        let hits = acceptedSearchHits(result.hits).filter { seenIDs.insert($0.item.id).inserted }
+        let hits = acceptedSearchHits(result.hits, mutationSeq: result.mutationSeq).filter { seenIDs.insert($0.item.id).inserted }
         let resultItems = hits.map(\.item)
         let contexts = Dictionary(
             uniqueKeysWithValues: hits.compactMap { hit in
@@ -1941,20 +1652,21 @@ final class HistoryViewModel {
         if skippingIdenticalRefine,
            resultItems == listState.items,
            contexts == searchMatchContexts {
-            mutateProjection { $0.updatePagination(total: result.total, hasMore: result.hasMore) }
+            mutateProjection { $0.updatePagination(total: result.total, hasMore: result.hasMore, mutationSeq: result.mutationSeq) }
+            recordSearchVersions(resultItems, snapshotVersion: result.mutationSeq)
             return
         }
         // Evidence first: rows created for the new page read theirs when they are built.
         searchMatchContexts = contexts
         mutateProjection {
-            $0.replacePage(items: resultItems, total: result.total, hasMore: result.hasMore)
+            $0.replacePage(items: resultItems, total: result.total, hasMore: result.hasMore, mutationSeq: result.mutationSeq)
         }
-        mergeKnownContentRevisions(resultItems)
+        recordSearchVersions(resultItems, snapshotVersion: result.mutationSeq)
         reconcileSelectionAfterProjectionReplacement()
     }
 
     private func applyRefinedSearchPage(with result: SearchResultPage, version: HistoryRequestLifecycle.Version) async -> Bool {
-        let hits = acceptedSearchHits(result.hits)
+        let hits = acceptedSearchHits(result.hits, mutationSeq: result.mutationSeq)
         let existingIDs = Set(items.map(\.id))
         let newHits = hits.filter { !existingIDs.contains($0.item.id) }
         prewarmDisplayText(for: hits.map(\.item))
@@ -1962,13 +1674,8 @@ final class HistoryViewModel {
         // while mounting new rows. Once they exist, commit the full ranking atomically.
         // Replacing a truncated prefix first can temporarily remove the current scroll anchor.
         if !newHits.isEmpty {
-            let additions = SearchResultPage(
-                hits: newHits,
-                total: result.total,
-                hasMore: result.hasMore,
-                coverage: result.coverage
-            )
-            guard await appendSearchPage(with: additions, version: version) else { return false }
+            let newIDs = Set(newHits.map { $0.item.id })
+            guard await appendSearchPage(with: result, version: version, including: newIDs) else { return false }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         guard requests.isCurrent(version) else { return false }
@@ -1976,17 +1683,22 @@ final class HistoryViewModel {
         return true
     }
 
-    private func appendSearchPage(with result: SearchResultPage, version: HistoryRequestLifecycle.Version) async -> Bool {
+    private func appendSearchPage(
+        with result: SearchResultPage,
+        version: HistoryRequestLifecycle.Version,
+        including itemIDs: Set<UUID>? = nil
+    ) async -> Bool {
         guard requests.isCurrent(version) else { return false }
-        if result.hits.isEmpty {
-            mutateProjection { $0.updatePagination(total: result.total, hasMore: result.hasMore) }
+        let sourceHits = itemIDs.map { ids in result.hits.filter { ids.contains($0.item.id) } } ?? result.hits
+        if sourceHits.isEmpty {
+            mutateProjection { $0.updatePagination(total: result.total, hasMore: result.hasMore, mutationSeq: result.mutationSeq) }
             return true
         }
         var start = 0
-        while start < result.hits.count {
+        while start < sourceHits.count {
             guard requests.isCurrent(version) else { return false }
-            let end = min(start + Self.loadMoreApplyChunkRows, result.hits.count)
-            let hits = acceptedSearchHits(Array(result.hits[start..<end]))
+            let end = min(start + Self.loadMoreApplyChunkRows, sourceHits.count)
+            let hits = acceptedSearchHits(Array(sourceHits[start..<end]), mutationSeq: result.mutationSeq)
             let resultItems = hits.map(\.item)
 
             // Publish each chunk's evidence and rows in the same actor turn. Yield only after
@@ -2003,12 +1715,13 @@ final class HistoryViewModel {
                 $0.appendPage(
                     items: resultItems,
                     total: result.total,
-                    hasMore: end < result.hits.count || result.hasMore
+                    hasMore: end < sourceHits.count || result.hasMore,
+                    mutationSeq: result.mutationSeq
                 )
             }
-            mergeKnownContentRevisions(resultItems)
+            recordSearchVersions(resultItems, snapshotVersion: result.mutationSeq)
             start = end
-            if start < result.hits.count {
+            if start < sourceHits.count {
                 // Match recent-history paging: allow layout to commit before the next chunk.
                 try? await Task.sleep(nanoseconds: 20_000_000)
             }
@@ -2023,28 +1736,28 @@ final class HistoryViewModel {
     }
 
     @discardableResult
-    private func setItemIfChanged(at index: Int, to value: ClipboardItemDTO) -> Bool {
+    private func setItemIfChanged(at index: Int, to value: ClipboardItemDTO, mutationSeq: Int64? = nil) -> Bool {
         var changed = false
-        mutateProjection { changed = $0.setItemIfChanged(at: index, to: value) }
+        mutateProjection { changed = $0.setItemIfChanged(at: index, to: value, mutationSeq: mutationSeq) }
         return changed
     }
 
     @discardableResult
-    private func removeItem(withID id: UUID) -> Bool {
+    private func removeItem(withID id: UUID, mutationSeq: Int64? = nil) -> Bool {
         searchMatchContexts.removeValue(forKey: id)
         if selectedID == id {
             selectedID = nil
             lastSelectionSource = .programmatic
         }
         var removed = false
-        mutateProjection { removed = $0.removeItem(withID: id) }
+        mutateProjection { removed = $0.removeItem(withID: id, mutationSeq: mutationSeq) }
         return removed
     }
 
     @discardableResult
-    private func upsertRecentItem(_ item: ClipboardItemDTO) -> Bool {
+    private func upsertRecentItem(_ item: ClipboardItemDTO, mutationSeq: Int64? = nil) -> Bool {
         var changed = false
-        mutateProjection { changed = $0.upsertRecentItem(item) }
+        mutateProjection { changed = $0.upsertRecentItem(item, mutationSeq: mutationSeq) }
         // A row that moved past the cursor left for a later page, and the selection with it.
         if changed, selectedID == item.id, indexOfItem(withID: item.id) == nil {
             reconcileSelectionAfterProjectionReplacement()
@@ -2062,6 +1775,7 @@ final class HistoryViewModel {
     /// The only way the projection changes: applies `change` and then writes each observed cell
     /// only if its value moved, so a pagination-only or total-only update leaves the rows alone.
     private func mutateProjection(_ change: (inout HistoryListState) -> Void) {
+        protectRetainedContent()
         change(&listState)
         if projectionGeneration != listState.projectionGeneration {
             projectionGeneration = listState.projectionGeneration

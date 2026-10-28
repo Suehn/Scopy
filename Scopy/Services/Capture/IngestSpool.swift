@@ -108,7 +108,27 @@ enum IngestSpool {
             .map { $0.url }
     }
 
-    static func pendingPayloadURL(for envelope: Envelope, ingestDirectory: URL) -> URL? {
+    static func validatePendingSource(_ ingest: CapturedPayload.IngestReference) throws {
+        guard validateOwnedEnvelopeURL(
+            ingest.envelopeURL,
+            in: ingest.directory,
+            suffix: pendingEnvelopeSuffix,
+            requireExistingRegularFile: true
+        ) == ingest.id else {
+            throw ReadError.unsafeArtifact
+        }
+        try requireOwnedRegularFile(
+            ingest.payloadURL,
+            in: ingest.directory,
+            expectedFileName: "\(ingest.id.uuidString).payload"
+        )
+    }
+
+    static func validatePreparedFile(_ url: URL, in ingestDirectory: URL) throws {
+        try requireOwnedRegularFile(url, in: ingestDirectory, expectedFileName: url.lastPathComponent)
+    }
+
+    private static func pendingPayloadURL(for envelope: Envelope, ingestDirectory: URL) -> URL? {
         guard let payloadFileName = envelope.payloadFileName else { return nil }
         guard payloadFileName == "\(envelope.id.uuidString).payload" else { return nil }
         let url = ingestDirectory.appendingPathComponent(payloadFileName)
@@ -189,7 +209,7 @@ enum IngestSpool {
         }
     }
 
-    fileprivate static func validateOwnedEnvelopeURL(
+    private static func validateOwnedEnvelopeURL(
         _ url: URL,
         in ingestDirectory: URL,
         suffix: String,
@@ -211,7 +231,7 @@ enum IngestSpool {
         return id
     }
 
-    fileprivate static func validateOwnedRegularFile(
+    private static func validateOwnedRegularFile(
         _ url: URL,
         in directory: URL,
         expectedFileName: String
@@ -605,45 +625,5 @@ enum IngestSpool {
                 atPath: directory.appendingPathComponent(name).path
             )
         }
-    }
-}
-
-// Referenced by ClipboardBackend as `ClipboardMonitor.createTransientWorkCopy`.
-extension ClipboardMonitor {
-    /// Copies a durable spool payload to a transient work file in the same directory, after
-    /// re-validating that the envelope and payload are still owned spool files.
-    nonisolated static func createTransientWorkCopy(
-        for content: ClipboardContent,
-        preferredExtension: String = "png"
-    ) throws -> URL {
-        guard content.fileOwnership == .durableSpool,
-              case .file(let sourceURL) = content.payload,
-              let ingestID = content.ingestID,
-              let envelopeURL = content.ingestEnvelopeURL else {
-            throw CocoaError(.fileReadInvalidFileName)
-        }
-        let directory = envelopeURL.deletingLastPathComponent()
-        guard IngestSpool.validateOwnedEnvelopeURL(
-            envelopeURL,
-            in: directory,
-            suffix: IngestSpool.pendingEnvelopeSuffix,
-            requireExistingRegularFile: true
-        ) == ingestID,
-        IngestSpool.validateOwnedRegularFile(
-            sourceURL,
-            in: directory,
-            expectedFileName: "\(ingestID.uuidString).payload"
-        ) else {
-            throw CocoaError(.fileReadNoPermission)
-        }
-
-        let safeExtension = preferredExtension.lowercased().allSatisfy { $0.isLetter || $0.isNumber }
-            ? preferredExtension.lowercased()
-            : "dat"
-        let workURL = directory.appendingPathComponent(
-            "\(IngestSpool.transientWorkPrefix)\(UUID().uuidString).\(safeExtension)"
-        )
-        try FileManager.default.copyItem(at: sourceURL, to: workURL)
-        return workURL
     }
 }

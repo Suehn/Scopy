@@ -70,7 +70,8 @@ final class HistoryProfileDatasetFingerprintTests: XCTestCase {
             sizeBytes: resolvedText.utf8.count,
             fileSizeBytes: item.fileSizeBytes,
             thumbnailPath: item.thumbnailPath,
-            storageRef: item.storageRef
+            storageRef: item.storageRef,
+            useCount: item.useCount
         )
     }
 }

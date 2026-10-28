@@ -14,7 +14,10 @@ final class SettingsConcurrencyMergeTests: XCTestCase {
         let suitePath = settingsDirectory.appendingPathComponent("settings").path
 
         let store = SettingsStore(suiteName: suitePath)
-        let service = ClipboardServiceFactory.createForTesting(settingsStore: store)
+        let service = ClipboardServiceFactory.create(
+            databasePath: "file:scopy_settings_merge_\(UUID().uuidString)?mode=memory&cache=shared",
+            settingsStore: store
+        )
         let viewModel = SettingsViewModel(service: service)
         await viewModel.loadSettings()
         let baseline = viewModel.settings

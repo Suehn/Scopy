@@ -124,8 +124,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
             Self.snapshot(deleted: [item.id]),
             Self.snapshot(knownRevisions: [item.id: ClipboardItemContentRevision(
                 item: Self.makeItem(id: item.id, contentHash: "replacement")
-            )]),
-            Self.snapshot(clearGeneration: 1, clearSurvivingItemIDs: [])
+            )])
         ]
         for snapshot in invalidations {
             let presented = expectation(description: "invalidated pin must not present")
@@ -259,7 +258,8 @@ final class PinnedPreviewControllerTests: XCTestCase {
             sizeBytes: 11,
             fileSizeBytes: nil,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: item.useCount
         )
         controller.reconcile(
             snapshot: Self.snapshot(knownRevisions: [item.id: ClipboardItemContentRevision(item: replaced)])
@@ -273,7 +273,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
         pin(item: item)
 
         controller.reconcile(
-            snapshot: Self.snapshot(clearGeneration: 1, clearSurvivingItemIDs: [], survivorSetIsAuthoritative: true)
+            snapshot: Self.snapshot(deleted: [item.id])
         )
 
         XCTAssertFalse(controller.isPinned(itemID: item.id))
@@ -284,11 +284,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
         pin(item: item)
 
         controller.reconcile(
-            snapshot: Self.snapshot(
-                clearGeneration: 1,
-                clearSurvivingItemIDs: [item.id],
-                survivorSetIsAuthoritative: true
-            )
+            snapshot: Self.snapshot(deleted: [UUID()])
         )
 
         XCTAssertTrue(controller.isPinned(itemID: item.id), "A pinned item that survived Clear All keeps its window")
@@ -297,7 +293,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
     /// With history at its max-items limit every capture deletes a row, so once the tombstone
     /// registry is full each deletion evicts its oldest tombstone. Evicting tombstones this window
     /// already applied hides nothing from it and must not close it.
-    func testPinnedPreviewSurvivesEvictionOfTombstonesItAlreadyApplied() async {
+    func testPinnedPreviewSurvivesUnrelatedTombstoneEviction() async {
         let service = TestMockClipboardService()
         service.setItemCount(2)
         let appState = AppState.forTesting(service: service)
@@ -309,17 +305,17 @@ final class PinnedPreviewControllerTests: XCTestCase {
         controller.reconcile(snapshot: viewModel.contentRevisionReconciliationSnapshot)
 
         let fullRegistry = (0..<HistoryViewModel.knownContentRevisionCapacity).map { _ in UUID() }
-        await viewModel.handleEvent(.itemsRemoved(fullRegistry))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved(fullRegistry)))
         controller.reconcile(snapshot: viewModel.contentRevisionReconciliationSnapshot)
         for _ in 0..<3 {
-            await viewModel.handleEvent(.itemDeleted(UUID()))
+            await viewModel.handleEvent(service.historyEvent(.itemsRemoved([UUID()])))
             let snapshot = viewModel.contentRevisionReconciliationSnapshot
-            XCTAssertGreaterThan(snapshot.newestEvictedDeletionStamp, 0, "The deletion evicted a tombstone")
+            XCTAssertLessThanOrEqual(snapshot.deletedItemIDs.count, HistoryViewModel.knownContentRevisionCapacity)
             controller.reconcile(snapshot: snapshot)
             XCTAssertTrue(controller.isPinned(itemID: item.id))
         }
 
-        await viewModel.handleEvent(.itemDeleted(item.id))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved([item.id])))
         controller.reconcile(snapshot: viewModel.contentRevisionReconciliationSnapshot)
         XCTAssertFalse(controller.isPinned(itemID: item.id), "Deleting the item itself still closes it")
     }
@@ -359,7 +355,8 @@ final class PinnedPreviewControllerTests: XCTestCase {
             sizeBytes: 14,
             fileSizeBytes: nil,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 
@@ -369,19 +366,11 @@ final class PinnedPreviewControllerTests: XCTestCase {
 
     private static func snapshot(
         knownRevisions: [UUID: ClipboardItemContentRevision] = [:],
-        deleted: Set<UUID> = [],
-        clearGeneration: UInt64 = 0,
-        clearSurvivingItemIDs: Set<UUID> = [],
-        survivorSetIsAuthoritative: Bool = true
+        deleted: Set<UUID> = []
     ) -> HistoryContentRevisionReconciliationSnapshot {
         HistoryContentRevisionReconciliationSnapshot(
             knownRevisionsByItemID: knownRevisions,
-            deletedItemIDs: deleted,
-            clearGeneration: clearGeneration,
-            clearSurvivingItemIDs: clearSurvivingItemIDs,
-            clearSurvivorSetIsAuthoritative: survivorSetIsAuthoritative,
-            stamp: 0,
-            newestEvictedDeletionStamp: 0
+            deletedItemIDs: deleted
         )
     }
 }

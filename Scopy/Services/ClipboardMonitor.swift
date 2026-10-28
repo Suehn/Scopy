@@ -33,41 +33,24 @@ public final class ClipboardMonitor {
     }
 
     public struct ClipboardContent: Sendable {
-        public enum Payload: Sendable {
-            case none
-            case data(Data)
-            case file(URL)
-        }
-
-        public enum FileOwnership: Sendable, Equatable {
-            case transient
-            case durableSpool
-        }
-
         public let type: ClipboardItemType
         public let plainText: String
-        public let payload: Payload
+        public let payload: CapturedPayload
         public let note: String?
         public let appBundleID: String?
         public let contentHash: String
         public let sizeBytes: Int
         public let fileSizeBytes: Int?
-        public let ingestEnvelopeURL: URL?
-        public let ingestID: UUID?
-        public let fileOwnership: FileOwnership
 
         public init(
             type: ClipboardItemType,
             plainText: String,
-            payload: Payload,
+            payload: CapturedPayload,
             note: String? = nil,
             appBundleID: String?,
             contentHash: String,
             sizeBytes: Int,
-            fileSizeBytes: Int? = nil,
-            ingestEnvelopeURL: URL? = nil,
-            ingestID: UUID? = nil,
-            fileOwnership: FileOwnership = .transient
+            fileSizeBytes: Int? = nil
         ) {
             self.type = type
             self.plainText = plainText
@@ -77,23 +60,15 @@ public final class ClipboardMonitor {
             self.contentHash = contentHash
             self.sizeBytes = sizeBytes
             self.fileSizeBytes = fileSizeBytes
-            self.ingestEnvelopeURL = ingestEnvelopeURL
-            self.ingestID = ingestID
-            self.fileOwnership = fileOwnership
         }
 
         public var rawData: Data? {
-            guard case .data(let data) = payload else { return nil }
+            guard case .data(let data) = payload.storage else { return nil }
             return data
         }
 
-        public var ingestFileURL: URL? {
-            guard case .file(let url) = payload else { return nil }
-            return url
-        }
-
         public var isEmpty: Bool {
-            switch payload {
+            switch payload.storage {
             case .none:
                 return plainText.isEmpty
             case .data(let data):
@@ -476,7 +451,7 @@ public final class ClipboardMonitor {
         let content = ClipboardContent(
             type: rawData.type,
             plainText: rawData.plainText,
-            payload: rawData.rawData.map(ClipboardContent.Payload.data) ?? .none,
+            payload: rawData.rawData.map(CapturedPayload.data) ?? .none,
             appBundleID: rawData.appBundleID,
             contentHash: hash,
             sizeBytes: rawData.sizeBytes
@@ -602,9 +577,6 @@ public final class ClipboardMonitor {
 
             // Check every outcome, including invalid data, before touching any artifact.
             guard isMonitoring, monitoringSessionID == sessionID, !Task.isCancelled else {
-                if case .content(let content) = result {
-                    IngestEnvelopeProcessor.cleanupPayloadIfNeeded(content.payload, ownership: content.fileOwnership)
-                }
                 return
             }
             switch result {

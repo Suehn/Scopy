@@ -123,4 +123,5 @@ enum FullIndexSnapshotSource: String, Sendable {
 struct FullIndexSnapshot: Sendable {
     let index: FullFuzzyIndex
     let source: FullIndexSnapshotSource
+    let mutationSeq: Int64
 }

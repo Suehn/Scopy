@@ -38,10 +38,11 @@ final class HistoryListRowUpdateTests: XCTestCase {
         let captured = ClipboardItemDTO(
             id: UUID(), type: .text, contentHash: "captured", plainText: "Captured",
             appBundleID: "com.test.app", createdAt: Date(), lastUsedAt: first.lastUsedAt.addingTimeInterval(1),
-            isPinned: false, sizeBytes: 8, thumbnailPath: nil, storageRef: nil
+            isPinned: false, sizeBytes: 8, thumbnailPath: nil, storageRef: nil,
+            useCount: 1
         )
         let afterCapture = await rowsBuilt(in: host) {
-            await viewModel.handleEvent(.newItem(captured))
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([captured], kind: .inserted)))
         }
         XCTAssertEqual(viewModel.items.first?.id, captured.id)
         XCTAssertGreaterThanOrEqual(afterCapture, 1, "The captured row is built")
@@ -52,10 +53,11 @@ final class HistoryListRowUpdateTests: XCTestCase {
             id: target.id, type: target.type, contentHash: target.contentHash, plainText: target.plainText,
             note: "noted", appBundleID: target.appBundleID, createdAt: target.createdAt,
             lastUsedAt: target.lastUsedAt, isPinned: target.isPinned, sizeBytes: target.sizeBytes,
-            thumbnailPath: target.thumbnailPath, storageRef: target.storageRef
+            thumbnailPath: target.thumbnailPath, storageRef: target.storageRef,
+            useCount: target.useCount
         )
         let afterNote = await rowsBuilt(in: host) {
-            await viewModel.handleEvent(.itemUpdated(noted))
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([noted], kind: .usage)))
         }
         XCTAssertEqual(viewModel.items[10].note, "noted")
         XCTAssertGreaterThanOrEqual(afterNote, 1, "The row whose note changed is rebuilt")

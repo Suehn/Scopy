@@ -1,11 +1,9 @@
 import XCTest
 @testable import ScopyKit
 
-/// Timers, tasks, event streams, and database connections are released correctly.
+/// Closing storage releases its database connection.
 @MainActor
 final class ResourceCleanupTests: XCTestCase {
-
-    // MARK: - Storage Cleanup Tests
 
     /// The database connection is released on close.
     func testDatabaseConnectionCleanup() async throws {
@@ -31,46 +29,10 @@ final class ResourceCleanupTests: XCTestCase {
             _ = try await storage.getItemCount()
             XCTFail("Expected databaseNotOpen after close")
         } catch {
-            // Expected
-        }
-    }
-
-    /// A consumer owns cancellation; stopping the service need not finish its event stream.
-    func testEventStreamCleanup() async throws {
-        let service = ClipboardServiceFactory.create(databasePath: Self.makeSharedInMemoryDatabasePath())
-
-        // Start the service.
-        try await service.start()
-
-        // A task that listens for events.
-        let eventTask = Task {
-            var eventCount = 0
-            for await _ in service.eventStream {
-                eventCount += 1
-                if eventCount >= 1 {
-                    break
-                }
+            guard case SQLiteClipboardRepository.RepositoryError.databaseNotOpen = error else {
+                return XCTFail("Expected databaseNotOpen after close, received \(error)")
             }
-            return eventCount
         }
-
-        // Give the listener a chance to subscribe.
-        await Task.yield()
-
-        // Stop the service and wait for its cleanup.
-        await service.stopAndWait()
-
-        // Cancel the event task.
-        eventTask.cancel()
-
-        // The task finishes.
-        let _ = await eventTask.value
     }
-
-    private static func makeSharedInMemoryDatabasePath() -> String {
-        "file:scopy_test_\(UUID().uuidString)?mode=memory&cache=shared"
-    }
-
-    // MARK: - Task Cancellation Tests
 
 }

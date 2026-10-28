@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 @testable import ScopyKit
 import XCTest
@@ -23,7 +24,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await waitUntil(timeout: 2.0) { !service.items.contains { $0.id == target.id } }
         XCTAssertFalse(service.items.contains { $0.id == target.id })
         XCTAssertNil(viewModel.undoableDeletionID)
-        await viewModel.handleEvent(.itemDeleted(target.id))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved([target.id])))
         await waitUntil(timeout: 1) { viewModel.totalCount == 2 }
         XCTAssertEqual(viewModel.totalCount, 2)
     }
@@ -56,7 +57,9 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let target = viewModel.items[1]
 
         await viewModel.delete(target)
-        await viewModel.handleEvent(.itemUpdated(target))
+        let recaptured = recordingUse(of: target)
+        service.items[1] = recaptured
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([recaptured], kind: .usage)))
 
         XCTAssertTrue(viewModel.items.contains { $0.id == target.id }, "The republished row is back")
         XCTAssertNil(viewModel.undoableDeletionID)
@@ -151,8 +154,8 @@ final class HistoryViewModelRegressionTests: XCTestCase {
             XCTAssertEqual(viewModel.items.map(\.id), [fourth.id])
 
             // The backend publishes the two deletions; the third row must still be undoable in place.
-            await viewModel.handleEvent(.itemDeleted(first.id))
-            await viewModel.handleEvent(.itemDeleted(second.id))
+            await viewModel.handleEvent(service.historyEvent(.itemsRemoved([first.id])))
+            await viewModel.handleEvent(service.historyEvent(.itemsRemoved([second.id])))
             await waitUntil(timeout: 1.0) { !viewModel.isLoading }
             await viewModel.undoPendingDeletion()
             XCTAssertEqual(viewModel.items.map(\.id), [third.id, fourth.id], "Undo after real deletion events puts the row back")
@@ -192,7 +195,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
             await viewModel.delete(viewModel.items[0])
             await viewModel.delete(viewModel.items[0])
             // The first delete was committed by the second; its backend event arrives before paging.
-            await viewModel.handleEvent(.itemDeleted(all[0].id))
+            await viewModel.handleEvent(service.historyEvent(.itemsRemoved([all[0].id])))
             await waitUntil(timeout: 1.0) { !viewModel.isLoading }
             await viewModel.loadMore()
             if searches {
@@ -217,7 +220,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await viewModel.delete(target)
         let newest = makeItem(text: "captured meanwhile", age: -1)
         service.items.insert(newest, at: 0)
-        await viewModel.handleEvent(.newItem(newest))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([newest], kind: .inserted)))
         await viewModel.undoPendingDeletion()
 
         XCTAssertEqual(viewModel.items.map(\.id), [newest.id] + all.map(\.id), "Undo puts the row back between its neighbours without dropping the loaded pages")
@@ -241,7 +244,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
         let newest = makeItem(text: "newest", age: -1)
         service.items.insert(newest, at: 0)
-        await viewModel.handleEvent(.newItem(newest))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([newest], kind: .inserted)))
         XCTAssertEqual(viewModel.rowLiveState.state(for: newest.id).quickSlot, 1, "A new front row takes slot 1")
         XCTAssertEqual(viewModel.rowLiveState.state(for: items[1].id).quickSlot, 2)
 
@@ -360,7 +363,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         } onChange: {
             invalidated.fulfill()
         }
-        await viewModel.handleEvent(.itemPinned(target.withPinned(true)))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([target.withPinned(true)], kind: .pin)))
         await fulfillment(of: [invalidated], timeout: 1)
         XCTAssertEqual(viewModel.pinnedItems.map(\.id), items.prefix(31).map(\.id))
         XCTAssertEqual(viewModel.unpinnedItems.map(\.id), items.dropFirst(31).map(\.id))
@@ -378,16 +381,38 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let deletedIDs = [items[3].id, items[31].id, items[370].id]
         service.items.removeAll { deletedIDs.contains($0.id) }
 
-        await viewModel.handleEvent(.itemsRemoved(deletedIDs))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved(deletedIDs)))
 
         XCTAssertEqual(viewModel.items.map(\.id), loadedIDs.filter { !deletedIDs.contains($0) })
         XCTAssertEqual(viewModel.loadedCount, 348)
         XCTAssertEqual(viewModel.totalCount, 397)
         XCTAssertTrue(viewModel.canLoadMore)
         await viewModel.load()
-        await viewModel.handleEvent(.itemsRemoved(deletedIDs))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved(deletedIDs)))
         XCTAssertEqual(viewModel.totalCount, 397)
         XCTAssertEqual(viewModel.items.map(\.id), service.items.prefix(HistoryViewModel.initialPageSize).map(\.id))
+    }
+
+    func testClearUpdatesACompleteFilteredTotalWithoutUsingTheGlobalSurvivorCount() async {
+        let matchingPinned = makeItem(text: "needle pinned", age: 1).withPinned(true)
+        let unrelatedPinned = makeItem(text: "unrelated pinned", age: 2).withPinned(true)
+        let removed = makeItem(text: "needle removed", age: 0)
+        let service = HistoryViewModelRegressionService(items: [matchingPinned, unrelatedPinned, removed])
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        viewModel.searchMode = .exact
+        viewModel.searchQuery = "needle"
+        viewModel.search()
+        await waitForSearchToFinish(in: viewModel)
+        XCTAssertEqual(viewModel.totalCount, 2)
+
+        service.items = [matchingPinned, unrelatedPinned]
+        await viewModel.handleEvent(service.historyEvent(.itemsCleared(deletedItemIDs: [removed.id])))
+
+        XCTAssertEqual(viewModel.items.map(\.id), [matchingPinned.id])
+        XCTAssertEqual(viewModel.totalCount, 1, "Only one of the two global survivors matches the query")
+        XCTAssertFalse(viewModel.canLoadMore)
     }
 
     func testEmptyStagedPrefilterIsNotPublishedWhileRefineIsPending() async {
@@ -459,7 +484,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
             refreshed.fulfill()
         }
 
-        await viewModel.handleEvent(.newItem(newItem))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([newItem], kind: .inserted)))
         await fulfillment(of: [refreshed], timeout: 1.0)
 
         XCTAssertEqual(Set(viewModel.items.map(\.id)), [original.id, newItem.id])
@@ -482,8 +507,8 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
         let newItem = makeItem(text: "new", age: -1)
         service.items.insert(newItem, at: 0)
-        await viewModel.handleEvent(.newItem(newItem))
-        await viewModel.handleEvent(.newItem(newItem))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([newItem], kind: .inserted)))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([newItem], kind: .inserted)))
 
         XCTAssertEqual(viewModel.items.first?.id, newItem.id)
         XCTAssertEqual(viewModel.totalCount, items.count + 1)
@@ -512,7 +537,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         service.onRefineStarted = { refreshStarted.fulfill() }
         let captured = makeItem(text: "needle captured", age: -1)
         service.items.insert(captured, at: 0)
-        await viewModel.handleEvent(.newItem(captured))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([captured], kind: .inserted)))
         await fulfillment(of: [refreshStarted], timeout: 1.0)
         service.onRefineStarted = nil
         // Without a held refresh, the next forced page must not be held instead (and hang).
@@ -531,7 +556,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
         let deleted = viewModel.items[pageDepth - 10]
         service.items.removeAll { $0.id == deleted.id }
-        await viewModel.handleEvent(.itemDeleted(deleted.id))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved([deleted.id])))
         await viewModel.loadMore()
         await waitForSearchToFinish(in: viewModel)
 
@@ -570,7 +595,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
             coverageChanged.fulfill()
         }
 
-        await viewModel.handleEvent(.newItem(newItem))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([newItem], kind: .inserted)))
         await fulfillment(of: [coverageChanged], timeout: 1.0)
 
         XCTAssertEqual(viewModel.items.map(\.id), [original.id])
@@ -614,7 +639,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
             coverageChanged.fulfill()
         }
 
-        await viewModel.handleEvent(.newItem(newItem))
+        await viewModel.handleEvent(service.historyEvent(.itemsChanged([newItem], kind: .inserted)))
         await fulfillment(of: [coverageChanged], timeout: 1.0)
 
         XCTAssertEqual(viewModel.searchCoverage, .incomplete)
@@ -676,87 +701,370 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertTrue(viewModel.isScrolling)
     }
 
-    func testLoadReadsAgainUntilNoEventArrivesDuringTheRead() async {
-        let original = makeItem(text: "original", age: 2)
+    func testLoadMergesCommittedChangesAndFinishesAfterOneRead() async {
+        let original = makeItem(text: "original", age: 100)
         let service = HistoryViewModelRegressionService(items: [original])
-        let viewModel = HistoryViewModel(
-            service: service,
-            settingsViewModel: SettingsViewModel(service: service)
-        )
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
         viewModel.configureTiming(.immediateRegressionTests)
-        defer {
-            service.resumeInitialFetch()
-            viewModel.stop()
+        defer { viewModel.stop() }
+        let edited = replacingText(of: original, with: "changed during the read")
+        let removed = makeItem(text: "insert then remove", age: 5)
+        let newest = makeItem(text: "newest", age: 0)
+        service.onHistoryPageRead = {
+            service.items.insert(removed, at: 0)
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([removed], kind: .inserted)))
+            service.items.removeAll { $0.id == removed.id }
+            await viewModel.handleEvent(service.historyEvent(.itemsRemoved([removed.id])))
+            service.items = [newest, edited]
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([newest], kind: .inserted)))
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([edited], kind: .content)))
+            await Task.yield()
         }
 
-        service.suspendNextInitialFetch = true
-        let firstFetchStarted = expectation(description: "First read started")
-        service.onInitialFetchStarted = { firstFetchStarted.fulfill() }
-        let load = Task { await viewModel.load() }
-        await fulfillment(of: [firstFetchStarted], timeout: 1.0)
-        let inserted = makeItem(text: "inserted during the first read", age: 1)
-        service.items.insert(inserted, at: 0)
-        await viewModel.handleEvent(.newItem(inserted))
+        await viewModel.load()
 
-        service.suspendNextInitialFetch = true
-        let secondFetchStarted = expectation(description: "Second read started")
-        service.onInitialFetchStarted = { secondFetchStarted.fulfill() }
-        service.resumeInitialFetch()
-        await fulfillment(of: [secondFetchStarted], timeout: 1.0)
-        // The second snapshot predates these: applied, it would keep the deleted row and miss the new one.
-        service.items.removeAll { $0.id == inserted.id }
-        await viewModel.handleEvent(.itemDeleted(inserted.id))
-        let newest = makeItem(text: "inserted during the second read", age: 0)
-        service.items.insert(newest, at: 0)
-        await viewModel.handleEvent(.newItem(newest))
-        service.resumeInitialFetch()
-        await load.value
-
+        XCTAssertEqual(service.historyPageFetchCallCount, 1)
         XCTAssertEqual(viewModel.items.map(\.id), [newest.id, original.id])
-        XCTAssertEqual(service.historyPageFetchCallCount, 3)
+        XCTAssertEqual(viewModel.items.last?.plainText, edited.plainText)
+        XCTAssertEqual(viewModel.totalCount, 2)
         XCTAssertFalse(viewModel.isLoading)
     }
 
-    func testLoadFinishesWhenEveryReadOverlapsAnEventAndKeepsWhatTheEventsDid() async {
-        let original = makeItem(text: "original", age: 100)
-        let service = HistoryViewModelRegressionService(items: [original])
-        let viewModel = HistoryViewModel(
-            service: service,
-            settingsViewModel: SettingsViewModel(service: service)
-        )
-        var timing = HistoryViewModel.Timing.immediateRegressionTests
-        timing.staleLoadRetryDelayNs = 10_000_000
-        viewModel.configureTiming(timing)
+    func testRecentSnapshotKeepsThumbnailWhenANewerPinIsMerged() async {
+        let item = makeItem(text: "thumbnail identity", age: 0)
+        let service = HistoryViewModelRegressionService(items: [item])
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
         defer { viewModel.stop() }
-
-        // Every read returns a snapshot taken before the event committed during it, as during
-        // ingest replay. The last read also misses a content change of a row it returns.
-        var inserted: [ClipboardItemDTO] = []
-        let editedOriginal = replacingText(of: original, with: "edited during the last read")
+        await viewModel.load()
+        let path = "/tmp/scopy-preserved-thumbnail.png"
+        await viewModel.handleEvent(.thumbnailUpdated(
+            itemID: item.id, expectedType: item.type,
+            expectedContentHash: item.contentHash, thumbnailPath: path
+        ))
         service.onHistoryPageRead = {
-            let item = self.makeItem(text: "inserted during read \(inserted.count)", age: 50 - inserted.count)
-            inserted.append(item)
-            service.items.insert(item, at: 0)
-            await viewModel.handleEvent(.newItem(item))
-            if service.historyPageFetchCallCount == HistoryViewModel.settledRecentReadAttempts {
-                if let index = service.items.firstIndex(where: { $0.id == original.id }) {
-                    service.items[index] = editedOriginal
-                }
-                await viewModel.handleEvent(.itemContentUpdated(editedOriginal))
-            }
-            await Task.yield()
+            let pinned = item.withPinned(true)
+            service.items = [pinned]
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([pinned], kind: .pin)))
         }
-        let loaded = expectation(description: "load returned")
-        Task {
-            await viewModel.load()
-            loaded.fulfill()
-        }
-        await fulfillment(of: [loaded], timeout: 2.0)
 
-        XCTAssertEqual(service.historyPageFetchCallCount, HistoryViewModel.settledRecentReadAttempts)
-        XCTAssertEqual(viewModel.items.map(\.id), inserted.reversed().map(\.id) + [original.id])
-        XCTAssertEqual(viewModel.items.last?.plainText, editedOriginal.plainText)
-        XCTAssertFalse(viewModel.isLoading)
+        await viewModel.load()
+
+        XCTAssertEqual(viewModel.items.first?.isPinned, true)
+        XCTAssertEqual(viewModel.items.first?.thumbnailPath, path)
+        XCTAssertEqual(viewModel.items.first?.useCount, item.useCount)
+    }
+
+    func testTailSnapshotDoesNotAdvanceLoadedPrefixOrHideDelayedDeletion() async {
+        let original = makeItems(count: 400)
+        let service = HistoryViewModelRegressionService(items: original)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.longUndoWindowRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let changed = replacingText(of: original[3], with: "prefix changed before tail read")
+        service.items[3] = changed
+        let prefixChange = service.historyEvent(.itemsChanged([changed], kind: .content))
+        service.items.removeAll { $0.id == original[4].id }
+        let prefixDeletion = service.historyEvent(.itemsRemoved([original[4].id]))
+        await viewModel.loadMore()
+
+        await viewModel.handleEvent(prefixChange)
+        await viewModel.handleEvent(prefixDeletion)
+
+        XCTAssertEqual(viewModel.items.first { $0.id == changed.id }?.plainText, changed.plainText)
+        XCTAssertFalse(viewModel.items.contains { $0.id == original[4].id })
+        XCTAssertEqual(viewModel.totalCount, 399)
+    }
+
+    func testGapResnapshotsRetainedIdentitiesAndPreservesUnknownOnFailedRead() async {
+        let original = makeItems(count: 80)
+        let service = HistoryViewModelRegressionService(items: original)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.longUndoWindowRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let surviving = original[3], removed = original[4]
+        viewModel.retainedContentItemIDs = { [surviving.id, removed.id] }
+        viewModel.replaceItemsForTesting([original[0]])
+        let changed = replacingText(of: surviving, with: "changed while offscreen")
+        service.items[3] = changed
+        service.items.removeAll { $0.id == removed.id }
+        _ = service.historyEvent(.itemsChanged([changed], kind: .content))
+        _ = service.historyEvent(.itemsRemoved([removed.id]))
+        service.historyItemsShouldFail = true
+
+        await viewModel.handleEvent(.historyResnapshotRequired(mutationSeq: 2))
+
+        XCTAssertFalse(viewModel.contentRevisionReconciliationSnapshot.wasDeleted(removed.id))
+        XCTAssertNotNil(viewModel.fetchFailureMessage)
+        service.historyItemsShouldFail = false
+        await viewModel.handleEvent(.historyResnapshotRequired(mutationSeq: 2))
+        let snapshot = viewModel.contentRevisionReconciliationSnapshot
+        XCTAssertEqual(service.requestedHistoryItemIDs.last, [original[0].id, surviving.id, removed.id])
+        XCTAssertEqual(snapshot.revision(for: surviving.id), ClipboardItemContentRevision(item: changed))
+        XCTAssertTrue(snapshot.wasDeleted(removed.id))
+        XCTAssertFalse(snapshot.wasDeleted(original[79].id), "Outside the point-read scope is unknown")
+        XCTAssertEqual(viewModel.totalCount, 79)
+    }
+
+    func testGapCoversAResourceOwnerAdmittedFromOldRowsAndDoesNotReplaceANewQuery() async {
+        let original = makeItems(count: 80)
+        let service = HistoryViewModelRegressionService(items: original)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        let originalLoadedIDs = Set(viewModel.items.map(\.id))
+        let removed = original[4]
+        let store = HistoryItemInteractionSessionStore()
+        viewModel.retainedContentItemIDs = { store.retainedItemIDs }
+        let state = HistoryItemInteractionState(revision: ClipboardItemContentRevision(item: removed))
+        service.items.removeAll { $0.id == removed.id }
+        _ = service.historyEvent(.itemsRemoved([removed.id]))
+        service.onHistoryItemsRead = {
+            XCTAssertTrue(viewModel.items.contains { $0.id == removed.id }, "The old row is still actionable during the read")
+            state.rowController.presentNoteEditor(note: "opened during the gap")
+            let attachment = store.makeAttachmentToken()
+            state.activateViewAttachment(attachment)
+            XCTAssertTrue(store.registerExplicitWork(state, attachmentToken: attachment))
+            viewModel.searchMode = .exact
+            viewModel.searchQuery = "item"
+            viewModel.search()
+            await self.waitForSearchToFinish(in: viewModel)
+        }
+
+        await viewModel.handleEvent(.historyResnapshotRequired(mutationSeq: 1))
+        store.reconcile(snapshot: viewModel.contentRevisionReconciliationSnapshot)
+
+        XCTAssertEqual(service.requestedHistoryItemIDs.last, originalLoadedIDs)
+        XCTAssertTrue(state.isTornDown)
+        XCTAssertFalse(store.contains(state))
+        XCTAssertEqual(service.historyPageFetchCallCount, 1, "The user's newer search owns the projection")
+        XCTAssertEqual(viewModel.searchQuery, "item")
+        XCTAssertFalse(viewModel.items.contains { $0.id == removed.id })
+    }
+
+    func testGapUpdatesUndoItemAndNeverRevivesAnAuthoritativelyMissingItem() async {
+        let original = makeItems(count: 3)
+        let service = HistoryViewModelRegressionService(items: original)
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.longUndoWindowRegressionTests)
+        defer { viewModel.stop() }
+        await viewModel.load()
+        await viewModel.delete(original[0])
+        let changed = replacingText(of: original[0], with: "new content retained by Undo")
+        service.items[0] = changed
+        _ = service.historyEvent(.itemsChanged([changed], kind: .content))
+
+        await viewModel.handleEvent(.historyResnapshotRequired(mutationSeq: 1))
+        XCTAssertEqual(viewModel.undoableDeletionID, original[0].id)
+        XCTAssertFalse(viewModel.items.contains { $0.id == original[0].id })
+        await viewModel.undoPendingDeletion()
+        XCTAssertEqual(viewModel.items.first?.plainText, changed.plainText)
+
+        await viewModel.delete(changed)
+        service.items.removeAll { $0.id == changed.id }
+        _ = service.historyEvent(.itemsRemoved([changed.id]))
+        await viewModel.handleEvent(.historyResnapshotRequired(mutationSeq: 2))
+        await viewModel.undoPendingDeletion()
+        XCTAssertNil(viewModel.undoableDeletionID)
+        XCTAssertFalse(viewModel.items.contains { $0.id == changed.id })
+    }
+
+    func testUsageCounterRecoversRecaptureWithoutARecencyChangeThroughGapOrMetadata() async {
+        for deliversGap in [true, false] {
+            let original = makeItem(text: "repeated content", age: 1)
+            let service = HistoryViewModelRegressionService(items: [original])
+            let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+            viewModel.configureTiming(.longUndoWindowRegressionTests)
+            defer { viewModel.stop() }
+            await viewModel.load()
+            await viewModel.delete(original)
+            let metadata = ClipboardItemDTO(
+                id: original.id, type: original.type, contentHash: original.contentHash,
+                plainText: original.plainText, note: original.note, appBundleID: original.appBundleID,
+                createdAt: original.createdAt, lastUsedAt: original.lastUsedAt, isPinned: original.isPinned,
+                sizeBytes: original.sizeBytes + 1, fileSizeBytes: original.fileSizeBytes,
+                thumbnailPath: original.thumbnailPath, storageRef: original.storageRef,
+                useCount: original.useCount
+            )
+            service.items = [metadata]
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([metadata], kind: .metadata)))
+            XCTAssertEqual(viewModel.undoableDeletionID, original.id, "Metadata alone does not undo the user's delete")
+
+            let recaptured = recordingUse(of: metadata)
+            service.items = [recaptured]
+            _ = service.historyEvent(.itemsChanged([recaptured], kind: .usage))
+            if deliversGap {
+                await viewModel.handleEvent(.historyResnapshotRequired(mutationSeq: 2))
+            } else {
+                await viewModel.handleEvent(service.historyEvent(.itemsChanged([recaptured], kind: .metadata)))
+            }
+
+            XCTAssertEqual(recaptured.lastUsedAt, original.lastUsedAt)
+            XCTAssertNil(viewModel.undoableDeletionID)
+            XCTAssertEqual(viewModel.items.first?.useCount, original.useCount + 1)
+            await viewModel.commitPendingDeletionNow()
+            XCTAssertEqual(service.items.map(\.id), [original.id])
+        }
+    }
+
+    func testOversizedRecaptureSurvivesConditionalDeleteBeforeItsGapIsConsumed() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scopy-history-oversized-undo-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let pasteboard = NSPasteboard.withUniqueName()
+        let privatePasteboardName = pasteboard.name.rawValue
+        let service = RealClipboardService(
+            databasePath: directory.appendingPathComponent("clipboard.db").path,
+            settingsStore: SettingsStore(suiteName: directory.appendingPathComponent("settings").path),
+            monitorPasteboardName: privatePasteboardName,
+            monitorPollingInterval: 0.01
+        )
+        addTeardownBlock {
+            await service.stopAndWait()
+            await MainActor.run {
+                NSPasteboard(name: NSPasteboard.Name(privatePasteboardName)).releaseGlobally()
+            }
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await service.start()
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.longUndoWindowRegressionTests)
+        await viewModel.load()
+        let captured = expectation(description: "large capture gap applied to history")
+        let recaptured = expectation(description: "large usage gap held before UI consumption")
+        var gapCount = 0
+        var deferredGap: ClipboardEvent?
+        let events = Task { @MainActor in
+            for await event in service.eventStream {
+                if case .historyResnapshotRequired = event {
+                    gapCount += 1
+                    if gapCount == 2 {
+                        deferredGap = event
+                        recaptured.fulfill()
+                        continue
+                    }
+                }
+                await viewModel.handleEvent(event)
+                if case .historyResnapshotRequired = event, gapCount == 1 { captured.fulfill() }
+            }
+        }
+        defer {
+            events.cancel()
+            viewModel.stop()
+        }
+        let sentinel = " oversized recapture undo sentinel"
+        let text = String(repeating: "x", count: 8_650_772 - sentinel.utf8.count) + sentinel
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString(text, forType: .string))
+        await fulfillment(of: [captured], timeout: 15)
+        let item = try XCTUnwrap(viewModel.items.first { $0.plainText.hasSuffix(sentinel) })
+        XCTAssertEqual(item.plainText.utf8.count, 8_650_772)
+        await viewModel.delete(item)
+        XCTAssertEqual(viewModel.undoableDeletionID, item.id)
+
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString(text, forType: .string))
+        await fulfillment(of: [recaptured], timeout: 15)
+
+        XCTAssertEqual(gapCount, 2)
+        XCTAssertEqual(viewModel.undoableDeletionID, item.id, "The UI has not learned about the newer copy")
+        await viewModel.commitPendingDeletionNow()
+        XCTAssertNil(viewModel.undoableDeletionID)
+        XCTAssertEqual(viewModel.items.map(\.id), [item.id])
+        XCTAssertEqual(viewModel.items.first?.useCount, item.useCount + 1)
+        XCTAssertNil(viewModel.actionErrorMessage, "A newer copy winning the transaction is not a failed user action")
+        await viewModel.handleEvent(try XCTUnwrap(deferredGap))
+        let remaining = try await service.fetchHistoryItems(itemIDs: [item.id])
+        XCTAssertTrue(remaining.missingItemIDs.isEmpty)
+        XCTAssertEqual(remaining.items.first?.useCount, item.useCount + 1)
+    }
+
+    func testDeclinedDeletionRestoresLaterFactsAndRefreshesTheCurrentQuery() async {
+        for searching in [false, true] {
+            let original = makeItem(text: "needle original", age: 1)
+            let service = HistoryViewModelRegressionService(items: [original])
+            let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+            viewModel.configureTiming(.longUndoWindowRegressionTests)
+            defer { viewModel.stop() }
+            await viewModel.load()
+            if searching {
+                viewModel.searchMode = .exact
+                viewModel.searchQuery = "needle"
+                viewModel.search()
+                await waitForSearchToFinish(in: viewModel)
+            }
+            await viewModel.delete(original)
+            let recaptured = recordingUse(of: original)
+            service.items = [recaptured]
+            _ = service.historyEvent(.itemsChanged([recaptured], kind: .usage))
+            let newer = replacingText(of: recaptured, with: "newer content")
+            if searching {
+                viewModel.searchQuery = "newer"
+                viewModel.search()
+                await waitForSearchToFinish(in: viewModel)
+            }
+            service.onDeleteDecision = { _ in
+                service.items = [newer]
+                await viewModel.handleEvent(service.historyEvent(.itemsChanged([newer], kind: .content)))
+                if searching {
+                    await self.waitForSearchToFinish(in: viewModel)
+                    XCTAssertTrue(viewModel.items.isEmpty, "The old deletion still suppresses this ID during the command")
+                }
+            }
+
+            await viewModel.commitPendingDeletionNow()
+            if searching { await waitForSearchToFinish(in: viewModel) }
+
+            XCTAssertNil(viewModel.undoableDeletionID)
+            XCTAssertNil(viewModel.actionErrorMessage)
+            XCTAssertEqual(viewModel.items.map(\.id), [original.id])
+            XCTAssertEqual(viewModel.items.first?.plainText, newer.plainText)
+            XCTAssertEqual(viewModel.items.first?.useCount, original.useCount + 1)
+            XCTAssertEqual(service.items.map(\.id), [original.id])
+            let canQuit = await viewModel.prepareForTermination()
+            XCTAssertTrue(canQuit, "A declined stale deletion does not veto Quit")
+        }
+    }
+
+    func testSearchSnapshotKeepsACommitReceivedDuringItsReadAtItsActualVersion() async {
+        let item = makeItem(text: "needle", age: 10)
+        let service = HistoryViewModelRegressionService(items: [item])
+        let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
+        viewModel.configureTiming(.immediateRegressionTests)
+        defer { viewModel.stop() }
+        service.includesMatchEvidence = true
+        let pinned = item.withPinned(true)
+        let resized = ClipboardItemDTO(
+            id: pinned.id, type: pinned.type, contentHash: pinned.contentHash,
+            plainText: pinned.plainText, note: pinned.note, appBundleID: pinned.appBundleID,
+            createdAt: pinned.createdAt, lastUsedAt: pinned.lastUsedAt, isPinned: true,
+            sizeBytes: pinned.sizeBytes + 1, fileSizeBytes: pinned.fileSizeBytes,
+            thumbnailPath: pinned.thumbnailPath, storageRef: pinned.storageRef,
+            useCount: pinned.useCount
+        )
+        service.onSearchPageRead = {
+            service.onSearchPageRead = nil
+            service.items = [pinned]
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([pinned], kind: .pin)))
+            service.items = [resized]
+            await viewModel.handleEvent(service.historyEvent(.itemsChanged([resized], kind: .metadata)))
+        }
+        viewModel.searchQuery = "needle"
+        viewModel.searchMode = .exact
+        viewModel.search()
+        await waitForSearchToFinish(in: viewModel)
+
+        XCTAssertEqual(viewModel.items.map(\.id), [item.id])
+        XCTAssertEqual(viewModel.items.first?.isPinned, true)
+        XCTAssertEqual(viewModel.items.first?.sizeBytes, resized.sizeBytes)
+        XCTAssertEqual(service.searchRequests.count, 1, "Storage metadata does not change search membership")
+        XCTAssertNotNil(viewModel.searchMatchContext(for: item.id), "Size changes leave searchable content and evidence intact")
+        await viewModel.handleEvent(.history(CommittedHistoryChange(
+            mutationSeq: 0, totalCount: 1, change: .itemsChanged([item], kind: .pin)
+        )))
+        XCTAssertEqual(viewModel.items.first?.isPinned, true)
     }
 
     func testSearchPageWithARepeatedHitShowsTheRowOnce() async {
@@ -793,7 +1101,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let applied = viewModel.rowLiveState.evidenceReplacementCountForTesting
 
         service.items.removeAll { removed.contains($0.id) }
-        await viewModel.handleEvent(.itemsRemoved(removed))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved(removed)))
 
         XCTAssertEqual(viewModel.rowLiveState.evidenceReplacementCountForTesting, applied + 1)
         XCTAssertEqual(viewModel.searchMatchContexts.count, results.count - removed.count)
@@ -849,7 +1157,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
 
         let selectedID = viewModel.items[1].id
         viewModel.selectedID = selectedID
-        await viewModel.handleEvent(.itemDeleted(selectedID))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved([selectedID])))
 
         XCTAssertNil(viewModel.selectedID)
         XCTAssertFalse(viewModel.items.contains { $0.id == selectedID })
@@ -1119,7 +1427,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await waitForNextItemsRevision(in: viewModel)
         let deletedID = results[90].id
         service.items.removeAll { $0.id == deletedID }
-        await viewModel.handleEvent(.itemDeleted(deletedID))
+        await viewModel.handleEvent(service.historyEvent(.itemsRemoved([deletedID])))
         await pagination.value
         await viewModel.loadMore() // waits for the refresh that holds the paging slot
         await viewModel.loadMore()
@@ -1183,7 +1491,7 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await viewModel.loadMore()
         XCTAssertEqual(viewModel.loadedCount, 1 + Self.firstTwoPages + HistoryViewModel.loadMorePageSize)
 
-        let firstPage = RecentHistoryPage(slicing: items, limit: HistoryViewModel.initialPageSize, after: nil)
+        let firstPage = RecentHistoryPage(slicing: items, limit: HistoryViewModel.initialPageSize, after: nil, mutationSeq: 0)
         let firstPageIDs = (firstPage.pinnedItems + firstPage.items).map(\.id)
         await reopenAfterTheStaleInterval(viewModel)
         XCTAssertEqual(viewModel.loadedCount, firstPageIDs.count)
@@ -1249,31 +1557,32 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         await fulfillment(of: [changed], timeout: 1.0)
     }
 
-    func testRealHistoryPagesContinueFromTheLastRowAcrossConcurrentChangesAndQuitPersistsDeletion() async throws {
+    func testRealHistoryPagesMergeDelayedCommitsAndQuitPersistsDeletion() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("scopy-history-contract-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let path = root.appendingPathComponent("clipboard.db").path
         let writer = StorageService(databasePath: path)
         try await writer.open()
-        func capture(_ index: Int) async throws -> UUID {
-            try await writer.upsertItem(ClipboardMonitor.ClipboardContent(
+        for index in 0..<700 {
+            _ = try await writer.upsertItem(ClipboardMonitor.ClipboardContent(
                 type: .text, plainText: "history contract \(index)", payload: .none,
                 appBundleID: nil, contentHash: "history-contract-\(index)", sizeBytes: 20
-            )).id
+            ))
         }
-        for index in 0..<700 { _ = try await capture(index) }
         let original = try await writer.fetchRecent(limit: 700, offset: 0)
+        await writer.close()
         let service = ClipboardServiceFactory.create(databasePath: path,
             settingsStore: SettingsStore(suiteName: root.appendingPathComponent("settings").path),
             monitorPasteboardName: "scopy-history-contract-\(UUID())", monitorPollingInterval: 60)
         try await service.start()
-        /// The changed rows as the backend publishes them; every change in this test moves its row
-        /// to the top or into the pinned group.
-        func published(_ ids: UUID...) async throws -> [ClipboardItemDTO] {
-            let top = try await service.fetchRecent(limit: 8, offset: 0)
-            return try ids.map { id in try XCTUnwrap(top.first { $0.id == id }) }
+        var commits: [CommittedHistoryChange] = []
+        let events = Task { @MainActor in
+            for await event in service.eventStream {
+                if case .history(let commit) = event { commits.append(commit) }
+            }
         }
+        defer { events.cancel() }
         let viewModel = HistoryViewModel(service: service, settingsViewModel: SettingsViewModel(service: service))
         viewModel.configureTiming(.longUndoWindowRegressionTests)
         await viewModel.load()
@@ -1281,42 +1590,29 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         let selected = original[10].id
         viewModel.selectedID = selected
 
-        // Committed before the next page is read and before their events arrive: an insert and an
-        // unloaded row bumped above the cursor, and a loaded row deleted above it.
-        let inserted = try await capture(700)
-        _ = try await writer.incrementUsage(id: original[200].id, at: Date().addingTimeInterval(1))
-        try await service.delete(itemID: original[3].id)
+        try await service.pin(itemID: original[200].id)
+        _ = try await service.delete(itemID: original[3].id, expectedUseCount: original[3].useCount)
+        await waitUntil(timeout: 2) { commits.count == 2 }
         await viewModel.loadMore()
-        let firstChanges = try await published(inserted, original[200].id)
-        await viewModel.handleEvent(.newItem(firstChanges[0]))
-        await viewModel.handleEvent(.newItem(firstChanges[0]))
-        await viewModel.handleEvent(.itemUpdated(firstChanges[1]))
-        await viewModel.handleEvent(.itemDeleted(original[3].id))
+        for commit in commits { await viewModel.handleEvent(.history(commit)) }
+        await viewModel.handleEvent(.history(commits[0]))
         let firstPages = try await service.fetchRecent(limit: viewModel.items.count, offset: 0)
-        XCTAssertEqual(viewModel.items.map(\.id), firstPages.map(\.id), "The page continued after the last row, not at a shifted offset")
-        XCTAssertEqual(viewModel.items.count, 351)
+        XCTAssertEqual(viewModel.items.map(\.id), firstPages.map(\.id))
 
-        // Committed while that page's chunks are still being applied, so the rest of its read may
-        // predate them: unloaded rows bumped to the top, pinned and deleted, and an insert.
         let loadedBeforePage = viewModel.items.count
         let pagination = Task { await viewModel.loadMore() }
         await waitUntil(timeout: 2) { viewModel.items.count >= loadedBeforePage + HistoryViewModel.loadMoreApplyChunkRows }
-        _ = try await writer.incrementUsage(id: original[500].id, at: Date().addingTimeInterval(2))
         try await service.pin(itemID: original[690].id)
-        try await service.delete(itemID: original[600].id)
-        let insertedDuringPage = try await capture(701)
-        let pageChanges = try await published(original[500].id, original[690].id, insertedDuringPage)
-        await viewModel.handleEvent(.itemUpdated(pageChanges[0]))
-        await viewModel.handleEvent(.itemPinned(pageChanges[1]))
-        await viewModel.handleEvent(.itemDeleted(original[600].id))
-        await viewModel.handleEvent(.newItem(pageChanges[2]))
+        _ = try await service.delete(itemID: original[600].id, expectedUseCount: original[600].useCount)
+        await waitUntil(timeout: 2) { commits.count == 4 }
+        for commit in commits.dropFirst(2) { await viewModel.handleEvent(.history(commit)) }
         await pagination.value
         for _ in 0..<3 where viewModel.canLoadMore { await viewModel.loadMore() }
 
         let authoritative = try await service.fetchRecent(limit: 1000, offset: 0)
-        XCTAssertEqual(viewModel.items.map(\.id), authoritative.map(\.id), "No duplicate, gap or misplaced row")
-        XCTAssertEqual(authoritative.count, 700)
-        XCTAssertEqual(viewModel.pinnedItems.map(\.id), [original[690].id])
+        XCTAssertEqual(viewModel.items.map(\.id), authoritative.map(\.id))
+        XCTAssertEqual(authoritative.count, 698)
+        XCTAssertEqual(Set(viewModel.pinnedItems.map(\.id)), [original[200].id, original[690].id])
         XCTAssertFalse(viewModel.canLoadMore)
         XCTAssertEqual(viewModel.selectedID, selected)
         let deleted = try XCTUnwrap(viewModel.items.first { $0.id == selected })
@@ -1325,17 +1621,26 @@ final class HistoryViewModelRegressionTests: XCTestCase {
         XCTAssertTrue(canQuit)
         viewModel.stop()
         await service.stopAndWait()
-        await writer.close()
         let reopened = StorageService(databasePath: path)
         try await reopened.open()
         let persisted = try await reopened.fetchRecent(limit: 1000, offset: 0)
-        XCTAssertEqual(persisted.count, 699)
         XCTAssertFalse(persisted.contains { $0.id == selected })
+        XCTAssertEqual(persisted.count, 697)
         await reopened.close()
     }
 
     private func makeItems(count: Int) -> [ClipboardItemDTO] {
         (0..<count).map { makeItem(text: "item \($0)", age: $0) }
+    }
+
+    private func recordingUse(of item: ClipboardItemDTO) -> ClipboardItemDTO {
+        ClipboardItemDTO(
+            id: item.id, type: item.type, contentHash: item.contentHash, plainText: item.plainText,
+            note: item.note, appBundleID: item.appBundleID, createdAt: item.createdAt,
+            lastUsedAt: item.lastUsedAt, isPinned: item.isPinned, sizeBytes: item.sizeBytes,
+            fileSizeBytes: item.fileSizeBytes, thumbnailPath: item.thumbnailPath,
+            storageRef: item.storageRef, useCount: item.useCount + 1
+        )
     }
 
     private func replacingText(of item: ClipboardItemDTO, with text: String) -> ClipboardItemDTO {
@@ -1350,7 +1655,8 @@ final class HistoryViewModelRegressionTests: XCTestCase {
             isPinned: item.isPinned,
             sizeBytes: text.utf8.count,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: item.useCount
         )
     }
 
@@ -1366,7 +1672,8 @@ final class HistoryViewModelRegressionTests: XCTestCase {
             isPinned: false,
             sizeBytes: text.utf8.count,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 }
@@ -1377,7 +1684,7 @@ private extension HistoryViewModel.Timing {
         refineShortQueryDelayNs: 0,
         refineLongQueryDelayNs: 0,
         recentAppsRefreshDelayNs: 0,
-        staleLoadRetryDelayNs: 0,
+
         undoDeletionWindowNs: 50_000_000
     )
 
@@ -1387,7 +1694,7 @@ private extension HistoryViewModel.Timing {
         refineShortQueryDelayNs: 0,
         refineLongQueryDelayNs: 0,
         recentAppsRefreshDelayNs: 0,
-        staleLoadRetryDelayNs: 0,
+
         undoDeletionWindowNs: 60_000_000_000
     )
 }
@@ -1402,6 +1709,7 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
     var deleteShouldFail = false
     var suspendNextDelete = false
     var onDeleteStarted: (() -> Void)?
+    var onDeleteDecision: ((HistoryItemsSnapshot) async -> Void)?
     private var deleteContinuation: CheckedContinuation<Void, Never>?
     var searchShouldFail = false
     var returnsStagedFirstPage = false
@@ -1412,12 +1720,16 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
     var suspendNextInitialFetch = false
     var suspendNextPaginationFetch = false
     var includesMatchEvidence = false
+    var historyItemsShouldFail = false
+    private(set) var requestedHistoryItemIDs: [Set<UUID>] = []
     var onRefineStarted: (() -> Void)?
     var onDetailedStorageStatsStarted: (() -> Void)?
     var onInitialFetchStarted: (() -> Void)?
     var onPaginationFetchStarted: (() -> Void)?
     /// Runs during every history page read, after its snapshot was taken.
     var onHistoryPageRead: (() async -> Void)?
+    var onSearchPageRead: (() async -> Void)?
+    var onHistoryItemsRead: (() async -> Void)?
     private(set) var searchRequests: [SearchRequest] = []
     private(set) var historyPageFetchCallCount = 0
 
@@ -1446,9 +1758,16 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
         items.filter(\.isPinned)
     }
 
+    private var mutationSeq: Int64 = 0
+
+    func historyEvent(_ change: HistoryChange) -> ClipboardEvent {
+        mutationSeq += 1
+        return .history(CommittedHistoryChange(mutationSeq: mutationSeq, totalCount: items.count, change: change))
+    }
+
     func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
         historyPageFetchCallCount += 1
-        let snapshot = RecentHistoryPage(slicing: items, limit: limit, after: cursor)
+        let snapshot = RecentHistoryPage(slicing: items, limit: limit, after: cursor, mutationSeq: mutationSeq)
         if cursor == nil, suspendNextInitialFetch {
             suspendNextInitialFetch = false
             await withCheckedContinuation { continuation in
@@ -1463,6 +1782,14 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
             }
         }
         await onHistoryPageRead?()
+        return snapshot
+    }
+
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+        requestedHistoryItemIDs.append(itemIDs)
+        if historyItemsShouldFail { throw TestError.expectedFailure }
+        let snapshot = HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: items.filter { itemIDs.contains($0.id) }, mutationSeq: mutationSeq)
+        await onHistoryItemsRead?()
         return snapshot
     }
 
@@ -1503,7 +1830,7 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
         }
         let start = min(query.offset, matches.count)
         let end = min(start + query.limit, matches.count)
-        return SearchResultPage(
+        let page = SearchResultPage(
             hits: matches[start..<end].map { item in
                 let context: SearchMatchContext? = includesMatchEvidence ? SearchMatchContext(
                     mode: query.mode,
@@ -1520,8 +1847,11 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
             },
             total: isStaged ? -1 : matches.count,
             hasMore: end < matches.count,
-            coverage: isStaged ? .stagedRefine : .complete
+            coverage: isStaged ? .stagedRefine : .complete,
+            mutationSeq: mutationSeq
         )
+        await onSearchPageRead?()
+        return page
     }
 
     func resumeRefine() {
@@ -1533,7 +1863,7 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
     func unpin(itemID: UUID) async throws {}
     func updateNote(itemID: UUID, note: String?) async throws {}
 
-    func delete(itemID: UUID) async throws {
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
         if deleteShouldFail {
             throw TestError.expectedFailure
         }
@@ -1544,7 +1874,13 @@ private final class HistoryViewModelRegressionService: ClipboardServiceProtocol 
                 onDeleteStarted?()
             }
         }
-        items.removeAll { $0.id == itemID }
+        if let item = items.first(where: { $0.id == itemID }), item.useCount == expectedUseCount {
+            items.removeAll { $0.id == itemID }
+            mutationSeq += 1
+        }
+        let snapshot = HistoryItemsSnapshot(requestedItemIDs: [itemID], items: items.filter { $0.id == itemID }, mutationSeq: mutationSeq)
+        await onDeleteDecision?(snapshot)
+        return snapshot
     }
 
     func resumeDelete() {

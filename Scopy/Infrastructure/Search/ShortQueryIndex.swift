@@ -8,6 +8,7 @@ enum ShortQueryIndexSnapshotSource: String, Sendable {
 struct ShortQueryIndexSnapshot: Sendable {
     let index: ShortQueryIndex
     let source: ShortQueryIndexSnapshotSource
+    let mutationSeq: Int64
 }
 
 struct ShortQueryIndex: Sendable {

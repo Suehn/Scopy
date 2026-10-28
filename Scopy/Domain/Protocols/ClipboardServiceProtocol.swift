@@ -24,6 +24,9 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// The recent page after `cursor`, or the first page with every pinned row when it is `nil`.
     func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage
 
+    /// Authoritative states for explicitly retained rows, from one read snapshot.
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot
+
     /// Searches the clipboard history.
     func search(query: SearchRequest) async throws -> SearchResultPage
 
@@ -34,10 +37,11 @@ public protocol ClipboardServiceProtocol: AnyObject {
     /// Updates an item's note (used for file items).
     func updateNote(itemID: UUID, note: String?) async throws
 
-    /// Deletes an item.
-    func delete(itemID: UUID) async throws
+    /// Deletes only the usage the user selected. A newer copy retains the row; the returned
+    /// snapshot records that decision and its exact requested identity in the same transaction.
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot
 
-    /// Clears the history. Must publish or forward `.itemsCleared` before returning; view state follows that event.
+    /// Clears the history. Publishes the committed clear before returning; view state follows it.
     func clearAll() async throws
 
     /// Copies an item to the system pasteboard.

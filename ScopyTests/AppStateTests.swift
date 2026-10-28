@@ -98,7 +98,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(pasteRequestCount, 1)
     }
 
-    func testClearAllRefreshesOnceFromPublishedEvent() async throws {
+    func testClearAllAppliesPublishedDeletionSetWithoutReloading() async throws {
         mockService.setItemCount(3, pinnedCount: 1)
         let subscribed = expectation(description: "Event listener subscribed")
         mockService.onEventStreamSubscribed = { subscribed.fulfill() }
@@ -117,7 +117,7 @@ final class AppStateTests: XCTestCase {
         await fulfillment(of: [clearHandled], timeout: 1.0)
 
         XCTAssertEqual(mockService.clearAllCallCount, 1)
-        XCTAssertEqual(mockService.historyPageFetchCallCount, refreshCountBeforeClear + 1)
+        XCTAssertEqual(mockService.historyPageFetchCallCount, refreshCountBeforeClear, "Exact committed IDs need no survivor reload")
         XCTAssertEqual(appState.historyViewModel.items.map(\.id), [pinnedID])
     }
 
@@ -209,7 +209,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
                 isPinned: i < pinnedCount,
                 sizeBytes: 20 + i,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         }
     }
@@ -254,6 +255,13 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         return items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
+    private var mutationSeq: Int64 = 0
+
+    func historyEvent(_ change: HistoryChange) -> ClipboardEvent {
+        mutationSeq += 1
+        return .history(CommittedHistoryChange(mutationSeq: mutationSeq, totalCount: items.count, change: change))
+    }
+
     func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
         if cursor == nil { _ = try await fetchPinned() }
         fetchRecentCallCount += 1
@@ -261,7 +269,11 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
         if fetchRecentDelayNs > 0 {
             try await Task.sleep(nanoseconds: fetchRecentDelayNs)
         }
-        return RecentHistoryPage(slicing: items, limit: limit, after: cursor)
+        return RecentHistoryPage(slicing: items, limit: limit, after: cursor, mutationSeq: mutationSeq)
+    }
+
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+        HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: items.filter { itemIDs.contains($0.id) }, mutationSeq: mutationSeq)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -278,7 +290,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
                         hits: [],
                         total: 0,
                         hasMore: false,
-                        coverage: .complete
+                        coverage: .complete,
+                        mutationSeq: mutationSeq
                     )
                 }
             }
@@ -302,7 +315,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
             },
             total: filtered.count,
             hasMore: end < filtered.count,
-            coverage: .complete
+            coverage: .complete,
+            mutationSeq: mutationSeq
         )
     }
 
@@ -325,7 +339,8 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
                 plainText: item.plainText, appBundleID: item.appBundleID,
                 createdAt: item.createdAt, lastUsedAt: item.lastUsedAt,
                 isPinned: true, sizeBytes: item.sizeBytes,
-                thumbnailPath: item.thumbnailPath, storageRef: item.storageRef
+                thumbnailPath: item.thumbnailPath, storageRef: item.storageRef,
+                useCount: item.useCount
             )
         }
     }
@@ -338,21 +353,27 @@ final class TestMockClipboardService: ClipboardServiceProtocol {
                 plainText: item.plainText, appBundleID: item.appBundleID,
                 createdAt: item.createdAt, lastUsedAt: item.lastUsedAt,
                 isPinned: false, sizeBytes: item.sizeBytes,
-                thumbnailPath: item.thumbnailPath, storageRef: item.storageRef
+                thumbnailPath: item.thumbnailPath, storageRef: item.storageRef,
+                useCount: item.useCount
             )
         }
     }
 
     func updateNote(itemID _: UUID, note _: String?) async throws {}
 
-    func delete(itemID: UUID) async throws {
-        items.removeAll { $0.id == itemID }
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+        if let item = items.first(where: { $0.id == itemID }), item.useCount == expectedUseCount {
+            items.removeAll { $0.id == itemID }
+            mutationSeq += 1
+        }
+        return HistoryItemsSnapshot(requestedItemIDs: [itemID], items: items.filter { $0.id == itemID }, mutationSeq: mutationSeq)
     }
 
     func clearAll() async throws {
         clearAllCallCount += 1
-        items = items.filter { $0.isPinned }
-        eventContinuation?.yield(.itemsCleared(keepPinned: true))
+        let removedIDs = items.filter { !$0.isPinned }.map(\.id)
+        items = items.filter(\.isPinned)
+        eventContinuation?.yield(historyEvent(.itemsCleared(deletedItemIDs: removedIDs)))
     }
 
     func copyToClipboard(itemID: UUID) async throws {
@@ -443,15 +464,21 @@ final class FailingMockService: ClipboardServiceProtocol {
     func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
     func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
     func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-        RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
+        RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil, mutationSeq: 0)
+    }
+
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+        HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: [], mutationSeq: 0)
     }
     func search(query: SearchRequest) async throws -> SearchResultPage {
-        SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
+        SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete, mutationSeq: 0)
     }
     func pin(itemID: UUID) async throws {}
     func unpin(itemID: UUID) async throws {}
     func updateNote(itemID: UUID, note: String?) async throws {}
-    func delete(itemID: UUID) async throws {}
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+        HistoryItemsSnapshot(requestedItemIDs: [itemID], items: [], mutationSeq: 0)
+    }
     func clearAll() async throws {}
     func copyToClipboard(itemID: UUID) async throws {}
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {}
@@ -765,7 +792,7 @@ final class AppStateFallbackTests: XCTestCase {
         )
         // A following event is the ordering sentinel: once pinning is visible, the stale thumbnail
         // event ahead of it in the stream has also been handled.
-        mockService.emitEvent(.itemPinned(target.withPinned(true)))
+        mockService.emitEvent(mockService.historyEvent(.itemsChanged([target.withPinned(true)], kind: .pin)))
         await assertEventually(timeout: 1.0, pollInterval: 0.01, {
             state.historyViewModel.items.first(where: { $0.id == target.id })?.isPinned == true
         }, message: "Sentinel event should be processed")
@@ -774,6 +801,22 @@ final class AppStateFallbackTests: XCTestCase {
             state.historyViewModel.items.first(where: { $0.id == target.id })?.thumbnailPath,
             validPath,
             "A thumbnail generated for an older content hash must not attach to the replacement"
+        )
+
+        let replacement = ClipboardItemDTO(
+            id: target.id, type: target.type, contentHash: "replacement-\(target.contentHash)",
+            plainText: "replacement payload", note: target.note, appBundleID: target.appBundleID,
+            createdAt: target.createdAt, lastUsedAt: target.lastUsedAt, isPinned: true,
+            sizeBytes: 19, fileSizeBytes: target.fileSizeBytes, thumbnailPath: nil,
+            storageRef: target.storageRef, useCount: target.useCount
+        )
+        mockService.emitEvent(mockService.historyEvent(.itemsChanged([replacement], kind: .content)))
+        await assertEventually(timeout: 1.0, pollInterval: 0.01, {
+            state.historyViewModel.items.first(where: { $0.id == target.id })?.contentHash == replacement.contentHash
+        }, message: "Replacement content should be applied")
+        XCTAssertNil(
+            state.historyViewModel.items.first(where: { $0.id == target.id })?.thumbnailPath,
+            "A changed content identity must not inherit the old thumbnail"
         )
     }
 }

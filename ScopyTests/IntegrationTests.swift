@@ -233,15 +233,21 @@ final class SearchHintTests: XCTestCase {
         func fetchRecent(limit: Int, offset: Int) async throws -> [ClipboardItemDTO] { [] }
         func fetchPinned() async throws -> [ClipboardItemDTO] { [] }
         func fetchHistoryPage(limit _: Int, after _: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil)
+            RecentHistoryPage(pinnedItems: [], items: [], total: 0, nextCursor: nil, mutationSeq: 0)
+        }
+
+        func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: [], mutationSeq: 0)
         }
         func search(query: SearchRequest) async throws -> SearchResultPage {
-            SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete)
+            SearchResultPage(hits: [], total: 0, hasMore: false, coverage: .complete, mutationSeq: 0)
         }
         func pin(itemID: UUID) async throws {}
         func unpin(itemID: UUID) async throws {}
         func updateNote(itemID: UUID, note: String?) async throws {}
-        func delete(itemID: UUID) async throws {}
+        func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+            HistoryItemsSnapshot(requestedItemIDs: [itemID], items: [], mutationSeq: 0)
+        }
         func clearAll() async throws {}
         func copyToClipboard(itemID: UUID) async throws {}
         func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {}

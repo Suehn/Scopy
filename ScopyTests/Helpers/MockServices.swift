@@ -79,7 +79,8 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
                 isPinned: true,
                 sizeBytes: item.sizeBytes,
                 thumbnailPath: item.thumbnailPath,
-                storageRef: item.storageRef
+                storageRef: item.storageRef,
+                useCount: item.useCount
             )
         }
     }
@@ -105,8 +106,19 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
         items.filter(\.isPinned).sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
+    private var mutationSeq: Int64 = 0
+
+    func historyEvent(_ change: HistoryChange) -> ClipboardEvent {
+        mutationSeq += 1
+        return .history(CommittedHistoryChange(mutationSeq: mutationSeq, totalCount: items.count, change: change))
+    }
+
     func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
-        RecentHistoryPage(slicing: items, limit: limit, after: cursor)
+        RecentHistoryPage(slicing: items, limit: limit, after: cursor, mutationSeq: mutationSeq)
+    }
+
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+        HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: items.filter { itemIDs.contains($0.id) }, mutationSeq: mutationSeq)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -129,7 +141,8 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
                 },
                 total: customResults.count,
                 hasMore: customResults.count > query.limit,
-                coverage: .complete
+                coverage: .complete,
+                mutationSeq: mutationSeq
             )
         }
 
@@ -150,7 +163,8 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
             hits: pageItems.map { SearchResultHit(item: $0, matchContext: nil) },
             total: filtered.count,
             hasMore: endIndex < filtered.count,
-            coverage: .complete
+            coverage: .complete,
+            mutationSeq: mutationSeq
         )
     }
 
@@ -169,7 +183,8 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
                 isPinned: true,
                 sizeBytes: item.sizeBytes,
                 thumbnailPath: item.thumbnailPath,
-                storageRef: item.storageRef
+                storageRef: item.storageRef,
+                useCount: item.useCount
             )
         }
     }
@@ -189,16 +204,21 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
                 isPinned: false,
                 sizeBytes: item.sizeBytes,
                 thumbnailPath: item.thumbnailPath,
-                storageRef: item.storageRef
+                storageRef: item.storageRef,
+                useCount: item.useCount
             )
         }
     }
 
     func updateNote(itemID _: UUID, note _: String?) async throws {}
 
-    func delete(itemID: UUID) async throws {
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
         deleteCallCount += 1
-        items.removeAll { $0.id == itemID }
+        if let item = items.first(where: { $0.id == itemID }), item.useCount == expectedUseCount {
+            items.removeAll { $0.id == itemID }
+            mutationSeq += 1
+        }
+        return HistoryItemsSnapshot(requestedItemIDs: [itemID], items: items.filter { $0.id == itemID }, mutationSeq: mutationSeq)
     }
 
     func clearAll() async throws {
@@ -270,10 +290,11 @@ final class ReusableMockClipboardService: ClipboardServiceProtocol {
             isPinned: item.isPinned,
             sizeBytes: optimized,
             thumbnailPath: item.thumbnailPath,
-            storageRef: item.storageRef
+            storageRef: item.storageRef,
+            useCount: item.useCount
         )
         items[index] = updated
-        emitEvent(.itemContentUpdated(updated))
+        emitEvent(historyEvent(.itemsChanged([updated], kind: .content)))
         return ImageOptimizationOutcomeDTO(
             result: .optimized,
             originalBytes: original,
@@ -341,7 +362,8 @@ final class MockInMemorySearchService {
             hits: searchResults.map { SearchResultHit(item: $0, matchContext: nil) },
             total: searchResults.count,
             hasMore: false,
-            coverage: .complete
+            coverage: .complete,
+            mutationSeq: 0
         )
     }
 }

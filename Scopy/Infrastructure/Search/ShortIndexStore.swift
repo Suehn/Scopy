@@ -1,16 +1,14 @@
 import Foundation
 import os
 
-/// The one- and two-character query index's lifecycle: the installed index, the detached build
-/// and the commits that land while it runs, tombstone rebuilds, and disk-cache persists. Not
+/// The one- and two-character query index's lifecycle: the installed snapshot, detached build,
+/// tombstone rebuilds, and disk-cache persists. Not
 /// Sendable: the search engine owns it, calls it only on its actor, and routes each task's
 /// completion back through the actor.
 final class ShortIndexStore {
     private struct Build {
         let task: Task<Void, Never>
         let generation: UInt64
-        var pendingUpserts: [ClipboardStoredItem] = []
-        var pendingDeletions: [UUID] = []
     }
 
     private static let tombstoneRatioRebuildThreshold = 0.25
@@ -22,7 +20,9 @@ final class ShortIndexStore {
     private let minimumItemCount: Int
 
     private(set) var index: ShortQueryIndex?
+    private(set) var mutationSeq: Int64?
     private var build: Build?
+    private var cancelledBuilds: [UInt64: Task<Void, Never>] = [:]
     private var buildGeneration: UInt64 = 0
     private(set) var persistTask: Task<Void, Never>?
 #if DEBUG
@@ -57,7 +57,6 @@ final class ShortIndexStore {
             let loadMs = (ProcessInfo.processInfo.systemUptime - loadStart) * 1000
             ScopyLog.search.info("Short index disk cache load \(cached == nil ? "miss" : "hit", privacy: .public) in \(loadMs, format: .fixed(precision: 0), privacy: .public) ms")
             let snapshot = cached ?? SearchReadStore.loadShortQueryIndex(dbPath: dbPath, reserveSlots: estimatedCount)
-                .map { ShortQueryIndexSnapshot(index: $0, source: .database) }
             await finish(generation, snapshot)
         }
         build = Build(task: task, generation: generation)
@@ -67,23 +66,13 @@ final class ShortIndexStore {
         build?.generation == generation
     }
 
-    /// Installs the landed build with the commits it missed replayed on top; returns whether it
-    /// came from the database and should be written to the disk cache. The caller has checked
-    /// `isCurrentBuild` and synchronized with committed changes first.
+    /// Installs the build at its own read position. Queries replay the shared journal from
+    /// there before using any candidates; this store holds no second copy of commit history.
     func finishBuild(snapshot: ShortQueryIndexSnapshot?) -> Bool {
-        let pendingDeletions = build?.pendingDeletions ?? []
-        let pendingUpserts = build?.pendingUpserts ?? []
         build = nil
-
         guard let snapshot else { return false }
-        var index = snapshot.index
-        for id in pendingDeletions {
-            index.markDeleted(id: id)
-        }
-        for item in pendingUpserts {
-            index.upsert(item)
-        }
-        self.index = index
+        index = snapshot.index
+        mutationSeq = snapshot.mutationSeq
 #if DEBUG
         lastSnapshotSource = snapshot.source
 #endif
@@ -92,60 +81,66 @@ final class ShortIndexStore {
 
     /// Stops the running build; its completion is ignored.
     func cancelBuild() {
-        build?.task.cancel()
+        if let build {
+            build.task.cancel()
+            cancelledBuilds[build.generation] = build.task
+        }
         build = nil
         buildGeneration &+= 1
+    }
+
+    func buildFinished(generation: UInt64) {
+        cancelledBuilds.removeValue(forKey: generation)
+    }
+
+    func takeBuildTasksForShutdown() -> [Task<Void, Never>] {
+        cancelBuild()
+        let tasks = Array(cancelledBuilds.values)
+        cancelledBuilds.removeAll()
+        return tasks
     }
 
     /// Drops the index and any running build.
     func reset() {
         cancelBuild()
         index = nil
+        mutationSeq = nil
     }
 
     // MARK: - Committed changes
 
-    /// Returns whether the index was dropped for tombstones and should be built again.
-    func applyUpsert(_ item: ClipboardStoredItem) -> Bool {
-        if build != nil {
-            build?.pendingUpserts.append(item)
-            return false
-        }
-        guard var index else { return false }
-        // Release the property's reference so the upsert mutates the existing buffers instead of
-        // copying the whole index on every clipboard write.
+    func apply(_ entry: StorageCommitJournal.Entry) {
+        guard var index, let mutationSeq, entry.mutationSeq > mutationSeq else { return }
         self.index = nil
-        index.upsert(item)
-        return install(index)
-    }
-
-    /// Returns whether the index was dropped for tombstones and should be built again.
-    func applyDeletions(_ ids: [UUID]) -> Bool {
-        if build != nil {
-            build?.pendingDeletions.append(contentsOf: ids)
-            return false
+        switch entry.change {
+        case .upserted(let item, let kind):
+            switch kind {
+            case .inserted, .content:
+                index.upsert(item)
+            case .usage, .metadata, .pin:
+                break
+            }
+        case .deleted(let ids), .clearedUnpinned(let ids):
+            for id in ids { index.markDeleted(id: id) }
+        case .storageSizesUpdated:
+            break
         }
-        guard var index else { return false }
-        self.index = nil
-        for id in ids {
-            index.markDeleted(id: id)
-        }
-        return install(index)
+        self.mutationSeq = entry.mutationSeq
+        install(index)
     }
 
     /// Keeps `index` unless tombstones dominate it; a dropped index is rebuilt only while the
     /// corpus stays large enough to keep one.
-    private func install(_ index: ShortQueryIndex) -> Bool {
+    private func install(_ index: ShortQueryIndex) {
         let stats = index.healthStats()
         let needsRebuild = stats.slots >= Self.tombstoneMinSlotsForRebuild
             && stats.tombstones >= Self.tombstoneMinCountForRebuild
             && Double(stats.tombstones) / Double(stats.slots) >= Self.tombstoneRatioRebuildThreshold
         guard needsRebuild else {
             self.index = index
-            return false
+            return
         }
         reset()
-        return stats.live >= minimumItemCount
     }
 
     // MARK: - Candidates
@@ -163,8 +158,8 @@ final class ShortIndexStore {
 
     /// Writes the index to the disk cache stamped with `mutationSeq` unless a write is running.
     /// `finish` runs on the engine actor.
-    func startPersistIfNeeded(mutationSeq: Int64, finish: @escaping @Sendable () async -> Void) {
-        guard persistTask == nil, let index else { return }
+    func startPersistIfNeeded(finish: @escaping @Sendable () async -> Void) {
+        guard persistTask == nil, let index, let mutationSeq else { return }
         guard let request = SearchIndexDiskCache.makeShortPersistRequest(
             index: index,
             dbPath: dbPath,

@@ -180,6 +180,10 @@ struct HistoryListView: View {
             relativeTimeClock.start(
                 pausedForScrolling: ScrollPerformanceProfile.shared.usesFixedDriverAnimationSampler
             )
+            historyViewModel.retainedContentItemIDs = { [weak interactionSessionStore, weak pinnedPreviewController] in
+                (interactionSessionStore?.retainedItemIDs ?? [])
+                    .union(pinnedPreviewController?.retainedItemIDs ?? [])
+            }
             reconcileRetainedPreviewState()
             updateProfileWorkloadMetadata()
         }

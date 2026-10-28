@@ -655,7 +655,8 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             sizeBytes: plainText.utf8.count,
             fileSizeBytes: nil,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 

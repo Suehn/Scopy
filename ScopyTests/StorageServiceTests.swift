@@ -73,12 +73,10 @@ private actor StorageIntBox {
 }
 
 private actor CleanupFailureProbe {
-    private var committedBatches: [[UUID]] = []
     private var didInstallFailureTrigger = false
     private var triggerError: String?
 
-    func recordAndInstallFailure(after result: StorageService.CleanupResult, dbPath: String) {
-        committedBatches.append(result.deletedItemIDs)
+    func installFailure(dbPath: String) {
         guard !didInstallFailureTrigger else { return }
         didInstallFailureTrigger = true
         do {
@@ -99,8 +97,8 @@ private actor CleanupFailureProbe {
         }
     }
 
-    func snapshot() -> (batches: [[UUID]], triggerError: String?) {
-        (committedBatches, triggerError)
+    func failure() -> String? {
+        triggerError
     }
 }
 
@@ -258,11 +256,62 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertNotNil(existing)
 
         // Delete
-        try await storage.deleteItem(item.id)
+        let deletion = try await storage.deleteItem(item.id, expectedUseCount: item.useCount)
+        XCTAssertNil(deletion.item)
+        XCTAssertEqual(deletion.mutationSeq, 2)
 
         // Verify deleted
         let missing = try await storage.findByID(item.id)
         XCTAssertNil(missing)
+    }
+
+    func testDeleteRetainsRecopiedItemAtTheSameTimestampButAcceptsMetadataChanges() async throws {
+        let (primary, competing) = try await makeCompetingDiskStorages(prefix: "delete-recopy")
+        let content = makeLargeTestContent()
+        let originalBytes = try XCTUnwrap(content.rawData)
+        let inserted = try await primary.upsertItem(content)
+        let capturedResult = try await primary.findByID(inserted.id)
+        let captured = try XCTUnwrap(capturedResult)
+        let payloadURL = URL(fileURLWithPath: try XCTUnwrap(captured.storageRef))
+        let publishedBeforeRecopy = primary.commitJournal.currentMutationSeq
+
+        let recopiedResult = try await competing.incrementUsage(id: captured.id, at: captured.lastUsedAt)
+        let recopied = try XCTUnwrap(recopiedResult)
+        XCTAssertEqual(recopied.useCount, captured.useCount + 1)
+        XCTAssertEqual(recopied.lastUsedAt, captured.lastUsedAt)
+        let recopySequence = competing.commitJournal.currentMutationSeq
+        XCTAssertGreaterThan(recopySequence, publishedBeforeRecopy)
+
+        let retained = try await primary.deleteItem(captured.id, expectedUseCount: captured.useCount)
+        let retainedItem = try XCTUnwrap(retained.item)
+        XCTAssertEqual(retainedItem.id, captured.id)
+        XCTAssertEqual(retainedItem.useCount, recopied.useCount)
+        XCTAssertEqual(retained.mutationSeq, recopySequence, "The response must use SQLite's position, not this connection's older journal")
+        XCTAssertEqual(primary.commitJournal.currentMutationSeq, publishedBeforeRecopy)
+        guard case .changes(let unchangedEntries, _) = primary.commitJournal.read(after: publishedBeforeRecopy) else {
+            return XCTFail("A rejected delete must append no fact")
+        }
+        XCTAssertTrue(unchangedEntries.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: payloadURL), originalBytes)
+
+        _ = try await primary.updateNote(id: captured.id, note: "metadata changed after the delete intent")
+        let metadataSequence = primary.commitJournal.currentMutationSeq
+        let deletion = try await primary.deleteItem(captured.id, expectedUseCount: retainedItem.useCount)
+        XCTAssertNil(deletion.item)
+        XCTAssertEqual(deletion.mutationSeq, metadataSequence + 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: payloadURL.path))
+        guard case .changes(let deletedEntries, let through) = primary.commitJournal.read(after: metadataSequence),
+              case .deleted(let deletedIDs) = try XCTUnwrap(deletedEntries.first).change else {
+            return XCTFail("A successful conditional delete must append its exact fact")
+        }
+        XCTAssertEqual(deletedEntries.count, 1)
+        XCTAssertEqual(deletedIDs, [captured.id])
+        XCTAssertEqual(through, deletion.mutationSeq)
+
+        let missing = try await primary.deleteItem(captured.id, expectedUseCount: retainedItem.useCount)
+        XCTAssertNil(missing.item)
+        XCTAssertEqual(missing.mutationSeq, deletion.mutationSeq)
+        XCTAssertEqual(primary.commitJournal.currentMutationSeq, deletion.mutationSeq)
     }
 
     func testAtomicNoteUpdateReturnsPayloadReplacementThatWonBeforeTransaction() async throws {
@@ -323,7 +372,8 @@ final class StorageServiceTests: XCTestCase {
         }
         await gate.waitUntilPaused()
         do {
-            try await competing.deleteItem(item.id)
+            let deletion = try await competing.deleteItem(item.id, expectedUseCount: item.useCount)
+            XCTAssertNil(deletion.item)
         } catch {
             await gate.release()
             throw error
@@ -390,7 +440,8 @@ final class StorageServiceTests: XCTestCase {
         }
         await gate.waitUntilPaused()
         do {
-            try await competing.deleteItem(item.id)
+            let deletion = try await competing.deleteItem(item.id, expectedUseCount: item.useCount)
+            XCTAssertNil(deletion.item)
         } catch {
             await gate.release()
             throw error
@@ -867,6 +918,34 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertNil(FilePreviewSupport.checkedTotalFileSizeBytes([Int.max, 1]))
     }
 
+    func testWorkFilePublicationCopiesWhenRenameIsDeniedAndPreservesExistingDestination() throws {
+        let directory = try makeTemporaryDirectory(prefix: "scopy-work-file-placement")
+        let sourceDirectory = directory.appendingPathComponent("read-only", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sourceDirectory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let source = sourceDirectory.appendingPathComponent("prepared.dat")
+        let destination = directory.appendingPathComponent("published.dat")
+        let bytes = Data(repeating: 0x5A, count: StorageService.externalStorageThreshold + 1)
+        try bytes.write(to: source)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: sourceDirectory.path)
+        XCTAssertFalse(FileManager.default.isWritableFile(atPath: sourceDirectory.path))
+
+        try StorageService.moveOrCopyFile(from: source, to: destination.path)
+        XCTAssertEqual(try Data(contentsOf: destination), bytes)
+        XCTAssertEqual(try Data(contentsOf: source), bytes, "Only the payload owner reclaims the copy source")
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .allSatisfy { !$0.hasPrefix(".scopy-ingest-") })
+
+        let replacement = directory.appendingPathComponent("replacement.dat")
+        try Data([0x01]).write(to: replacement)
+        XCTAssertThrowsError(try StorageService.moveOrCopyFile(from: replacement, to: destination.path))
+        XCTAssertEqual(try Data(contentsOf: destination), bytes)
+        XCTAssertEqual(try Data(contentsOf: replacement), Data([0x01]))
+    }
+
     // MARK: - Cleanup Tests (v0.md 2.3)
 
     func testOptimizationStageCleanupPreservesRecentAndReclaimsOnlyStaleStages() throws {
@@ -1038,7 +1117,7 @@ final class StorageServiceTests: XCTestCase {
         XCTAssertEqual(probe.callCount, 0)
     }
 
-    func testCleanupReportsEarlierCommittedBatchBeforeLaterPhaseFails() async throws {
+    func testCleanupJournalsEarlierCommittedBatchBeforeLaterPhaseFails() async throws {
         var cleanupPolicy = StorageService.CleanupPolicy()
         let directory = try makeTemporaryDirectory(prefix: "cleanup-partial-result")
         let databasePath = directory.appendingPathComponent("clipboard.db").path
@@ -1059,22 +1138,32 @@ final class StorageServiceTests: XCTestCase {
         cleanupPolicy.maxExternalBytes = 800 * 1024 * 1024
 
         let probe = CleanupFailureProbe()
+        let cleanupCursor = diskStorage.commitJournal.currentMutationSeq
+        await diskStorage.setCleanupInterlockForTesting { point in
+            guard case .afterCommitBeforeFileCleanup = point else { return }
+            await probe.installFailure(dbPath: databasePath)
+        }
         do {
             _ = try await diskStorage.performCleanup(
                 mode: .light,
-                policy: cleanupPolicy,
-                onCommitted: { result in
-                    await probe.recordAndInstallFailure(after: result, dbPath: databasePath)
-                }
+                policy: cleanupPolicy
             )
             XCTFail("Expected the injected later cleanup phase to fail")
         } catch {
-            // The first count phase is already committed and must already have been reported.
+            // The first count phase is already committed and must remain observable.
         }
 
-        let snapshot = await probe.snapshot()
-        XCTAssertNil(snapshot.triggerError)
-        XCTAssertEqual(snapshot.batches, [[oldest.id]])
+        let triggerError = await probe.failure()
+        XCTAssertNil(triggerError)
+        guard case .changes(let entries, let through) = diskStorage.commitJournal.read(after: cleanupCursor) else {
+            return XCTFail("The committed deletion must remain in the journal")
+        }
+        XCTAssertEqual(through, cleanupCursor + 1)
+        XCTAssertEqual(entries.count, 1)
+        guard case .deleted(let ids) = try XCTUnwrap(entries.first).change else {
+            return XCTFail("Expected the committed deletion fact")
+        }
+        XCTAssertEqual(ids, [oldest.id])
         let deletedItem = try await diskStorage.findByID(oldest.id)
         let remainingCount = try await diskStorage.getItemCount()
         XCTAssertNil(deletedItem)
@@ -1418,7 +1507,8 @@ final class StorageServiceTests: XCTestCase {
             "Expected test external storage to live under temporaryDirectory: \(storageRef)"
         )
 
-        try await storage.deleteItem(item.id)
+        let deletion = try await storage.deleteItem(item.id, expectedUseCount: item.useCount)
+        XCTAssertNil(deletion.item)
     }
 
     func testDiskDatabaseUsesDatabaseDirectoryForExternalStorageInTests() async throws {
@@ -1442,7 +1532,8 @@ final class StorageServiceTests: XCTestCase {
             "Expected external storage to be colocated with database: \(storageRef)"
         )
 
-        try await diskStorage.deleteItem(item.id)
+        let deletion = try await diskStorage.deleteItem(item.id, expectedUseCount: item.useCount)
+        XCTAssertNil(deletion.item)
         await diskStorage.close()
         try? FileManager.default.removeItem(at: baseURL)
     }
@@ -1483,7 +1574,7 @@ final class StorageServiceTests: XCTestCase {
         }
 
         do {
-            try await diskStorage.deleteItem(item.id)
+            _ = try await diskStorage.deleteItem(item.id, expectedUseCount: item.useCount)
             XCTFail("Expected deleteItem to fail while DB is busy")
         } catch {
             // Expected

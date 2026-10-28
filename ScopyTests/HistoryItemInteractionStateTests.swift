@@ -289,12 +289,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         store.reconcile(
             snapshot: HistoryContentRevisionReconciliationSnapshot(
                 knownRevisionsByItemID: [:],
-                deletedItemIDs: [],
-                clearGeneration: 0,
-                clearSurvivingItemIDs: [],
-                clearSurvivorSetIsAuthoritative: true,
-                stamp: 0,
-                newestEvictedDeletionStamp: 0
+                deletedItemIDs: []
             )
         )
 
@@ -304,12 +299,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         store.reconcile(
             snapshot: HistoryContentRevisionReconciliationSnapshot(
                 knownRevisionsByItemID: [id: updated],
-                deletedItemIDs: [],
-                clearGeneration: 0,
-                clearSurvivingItemIDs: [],
-                clearSurvivorSetIsAuthoritative: true,
-                stamp: 0,
-                newestEvictedDeletionStamp: 0
+                deletedItemIDs: []
             )
         )
 
@@ -318,7 +308,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         XCTAssertEqual(state.rowController.noteDraft, "keep this draft")
     }
 
-    func testExplicitDeleteAndClearGenerationTearDownRetainedSessions() {
+    func testExactDeletionSetsTearDownRetainedSessions() {
         let deletedID = UUID()
         let deletedState = HistoryItemInteractionState(
             revision: revision(id: deletedID, hash: "deleted", text: "deleted", sizeBytes: 7)
@@ -331,24 +321,14 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         store.reconcile(
             snapshot: HistoryContentRevisionReconciliationSnapshot(
                 knownRevisionsByItemID: [deletedID: deletedState.revision],
-                deletedItemIDs: [],
-                clearGeneration: 0,
-                clearSurvivingItemIDs: [],
-                clearSurvivorSetIsAuthoritative: true,
-                stamp: 0,
-                newestEvictedDeletionStamp: 0
+                deletedItemIDs: []
             )
         )
 
         store.reconcile(
             snapshot: HistoryContentRevisionReconciliationSnapshot(
                 knownRevisionsByItemID: [:],
-                deletedItemIDs: [deletedID],
-                clearGeneration: 0,
-                clearSurvivingItemIDs: [],
-                clearSurvivorSetIsAuthoritative: true,
-                stamp: 0,
-                newestEvictedDeletionStamp: 0
+                deletedItemIDs: [deletedID]
             )
         )
 
@@ -366,13 +346,8 @@ final class HistoryItemInteractionStateTests: XCTestCase {
 
         store.reconcile(
             snapshot: HistoryContentRevisionReconciliationSnapshot(
-                knownRevisionsByItemID: [clearID: clearState.revision],
-                deletedItemIDs: [],
-                clearGeneration: 1,
-                clearSurvivingItemIDs: [],
-                clearSurvivorSetIsAuthoritative: true,
-                stamp: 0,
-                newestEvictedDeletionStamp: 0
+                knownRevisionsByItemID: [:],
+                deletedItemIDs: [clearID]
             )
         )
 
@@ -400,7 +375,8 @@ final class HistoryItemInteractionStateTests: XCTestCase {
                 sizeBytes: sizeBytes,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
-                storageRef: "/tmp/image.png"
+                storageRef: "/tmp/image.png",
+                useCount: 1
             )
         )
     }

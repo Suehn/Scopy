@@ -48,6 +48,10 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await backend.fetchHistoryPage(limit: limit, after: cursor)
     }
 
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+        try await backend.fetchHistoryItems(itemIDs: itemIDs)
+    }
+
     func search(query: SearchRequest) async throws -> SearchResultPage {
         try await backend.search(query: query)
     }
@@ -64,8 +68,8 @@ final class RealClipboardService: ClipboardServiceProtocol {
         try await backend.updateNote(itemID: itemID, note: note)
     }
 
-    func delete(itemID: UUID) async throws {
-        try await backend.delete(itemID: itemID)
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+        try await backend.delete(itemID: itemID, expectedUseCount: expectedUseCount)
     }
 
     func clearAll() async throws {
@@ -135,24 +139,4 @@ public enum ClipboardServiceFactory {
         )
     }
 
-    /// Create service for testing with shared in-memory database.
-    ///
-    /// Notes:
-    /// - Search reads through its own connection, so `:memory:` would give it a different database.
-    /// - A shared-cache in-memory URI lets every connection open the same database.
-    @MainActor
-    public static func createForTesting(
-        settingsStore: SettingsStore = .shared,
-        monitorPasteboardName: String? = nil,
-        monitorPollingInterval: TimeInterval? = nil
-    ) -> ClipboardServiceProtocol {
-        let unique = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        let sharedMemoryURI = "file:scopy_test_\(unique)?mode=memory&cache=shared"
-        return RealClipboardService(
-            databasePath: sharedMemoryURI,
-            settingsStore: settingsStore,
-            monitorPasteboardName: monitorPasteboardName,
-            monitorPollingInterval: monitorPollingInterval
-        )
-    }
 }

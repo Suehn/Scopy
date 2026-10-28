@@ -194,7 +194,8 @@ final class HistoryRelativeTimeClockTests: XCTestCase {
             sizeBytes: 4,
             fileSizeBytes: nil,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 }

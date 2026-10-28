@@ -55,7 +55,8 @@ enum TestDataFactory {
             isPinned: isPinned,
             sizeBytes: plainText.utf8.count,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
     }
 

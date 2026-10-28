@@ -215,7 +215,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 sizeBytes: text.utf8.count,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
             items.append(item)
         }
@@ -238,7 +239,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                     sizeBytes: 0,
                     fileSizeBytes: nil,
                     thumbnailPath: path,
-                    storageRef: nil
+                    storageRef: nil,
+                    useCount: 1
                 )
                 items.append(item)
             } else {
@@ -255,7 +257,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                     sizeBytes: 100,
                     fileSizeBytes: nil,
                     thumbnailPath: nil,
-                    storageRef: nil
+                    storageRef: nil,
+                    useCount: 1
                 )
                 items.append(item)
             }
@@ -356,7 +359,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                     sizeBytes: plainText.utf8.count,
                     fileSizeBytes: nil,
                     thumbnailPath: nil,
-                    storageRef: nil
+                    storageRef: nil,
+                    useCount: 1
                 )
             )
         }
@@ -380,7 +384,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 sizeBytes: 4_096,
                 fileSizeBytes: nil,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             ),
             ClipboardItemDTO(
                 id: historyListIntegrationFileTargetID,
@@ -395,7 +400,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                 sizeBytes: 1_024,
                 fileSizeBytes: 1_024,
                 thumbnailPath: nil,
-                storageRef: nil
+                storageRef: nil,
+                useCount: 1
             )
         ]
         result.reserveCapacity(historyListIntegrationItemCount)
@@ -417,7 +423,8 @@ final class MockClipboardService: ClipboardServiceProtocol {
                     sizeBytes: plainText.utf8.count,
                     fileSizeBytes: nil,
                     thumbnailPath: nil,
-                    storageRef: nil
+                    storageRef: nil,
+                    useCount: 1
                 )
             )
         }
@@ -475,10 +482,21 @@ final class MockClipboardService: ClipboardServiceProtocol {
             .sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
+    private var mutationSeq: Int64 = 0
+
+    func historyEvent(_ change: HistoryChange) -> ClipboardEvent {
+        mutationSeq += 1
+        return .history(CommittedHistoryChange(mutationSeq: mutationSeq, totalCount: items.count, change: change))
+    }
+
     func fetchHistoryPage(limit: Int, after cursor: RecentHistoryCursor?) async throws -> RecentHistoryPage {
         // Simulated backend latency; the first page also reads the pinned rows.
         try await Task.sleep(nanoseconds: cursor == nil ? 100_000_000 : 50_000_000)
-        return RecentHistoryPage(slicing: items, limit: limit, after: cursor)
+        return RecentHistoryPage(slicing: items, limit: limit, after: cursor, mutationSeq: mutationSeq)
+    }
+
+    func fetchHistoryItems(itemIDs: Set<UUID>) async throws -> HistoryItemsSnapshot {
+        HistoryItemsSnapshot(requestedItemIDs: itemIDs, items: items.filter { itemIDs.contains($0.id) }, mutationSeq: mutationSeq)
     }
 
     func search(query: SearchRequest) async throws -> SearchResultPage {
@@ -518,21 +536,22 @@ final class MockClipboardService: ClipboardServiceProtocol {
             hits: hits,
             total: total,
             hasMore: end < total,
-            coverage: .complete
+            coverage: .complete,
+            mutationSeq: mutationSeq
         )
     }
 
     func pin(itemID: UUID) async throws {
         if let index = items.firstIndex(where: { $0.id == itemID }) {
             items[index] = items[index].withPinned(true)
-            await yieldEvent(.itemPinned(items[index]))
+            await yieldEvent(historyEvent(.itemsChanged([items[index]], kind: .pin)))
         }
     }
 
     func unpin(itemID: UUID) async throws {
         if let index = items.firstIndex(where: { $0.id == itemID }) {
             items[index] = items[index].withPinned(false)
-            await yieldEvent(.itemUnpinned(items[index]))
+            await yieldEvent(historyEvent(.itemsChanged([items[index]], kind: .pin)))
         }
     }
 
@@ -559,28 +578,35 @@ final class MockClipboardService: ClipboardServiceProtocol {
             sizeBytes: item.sizeBytes,
             fileSizeBytes: item.fileSizeBytes,
             thumbnailPath: item.thumbnailPath,
-            storageRef: item.storageRef
+            storageRef: item.storageRef,
+            useCount: item.useCount
         )
         items[index] = updated
         postHistoryListIntegrationPersistedNoteIfNeeded(itemID: itemID, note: normalized)
-        await yieldEvent(.itemContentUpdated(updated))
+        await yieldEvent(historyEvent(.itemsChanged([updated], kind: .content)))
     }
 
-    func delete(itemID: UUID) async throws {
-        items.removeAll { $0.id == itemID }
-        await yieldEvent(.itemDeleted(itemID))
+    func delete(itemID: UUID, expectedUseCount: Int) async throws -> HistoryItemsSnapshot {
+        if let item = items.first(where: { $0.id == itemID }), item.useCount == expectedUseCount {
+            items.removeAll { $0.id == itemID }
+            let event = historyEvent(.itemsRemoved([itemID]))
+            let snapshot = HistoryItemsSnapshot(requestedItemIDs: [itemID], items: [], mutationSeq: mutationSeq)
+            await yieldEvent(event)
+            return snapshot
+        }
+        return HistoryItemsSnapshot(requestedItemIDs: [itemID], items: items.filter { $0.id == itemID }, mutationSeq: mutationSeq)
     }
 
     func clearAll() async throws {
-        let pinnedItems = items.filter { $0.isPinned }
-        items = pinnedItems
-        await yieldEvent(.itemsCleared(keepPinned: true))
+        let removedIDs = items.filter { !$0.isPinned }.map(\.id)
+        items = items.filter(\.isPinned)
+        await yieldEvent(historyEvent(.itemsCleared(deletedItemIDs: removedIDs)))
     }
 
     func copyToClipboard(itemID: UUID) async throws {
         guard let item = items.first(where: { $0.id == itemID }) else { return }
         // The real service writes to the system pasteboard here.
-        ScopyLog.app.info("Copied to clipboard: \(String(item.plainText.prefix(50)), privacy: .private)...")
+        ScopyLog.app.info("Mock clipboard copy requested for item \(item.id.uuidString, privacy: .private)")
     }
 
     func copyToClipboardOptimizedForCodex(itemID: UUID) async throws {
@@ -647,10 +673,11 @@ final class MockClipboardService: ClipboardServiceProtocol {
             sizeBytes: optimized,
             fileSizeBytes: item.fileSizeBytes,
             thumbnailPath: item.thumbnailPath,
-            storageRef: item.storageRef
+            storageRef: item.storageRef,
+            useCount: item.useCount
         )
         items[index] = updated
-        await yieldEvent(.itemContentUpdated(updated))
+        await yieldEvent(historyEvent(.itemsChanged([updated], kind: .content)))
         return ImageOptimizationOutcomeDTO(
             result: .optimized,
             originalBytes: original,
@@ -684,11 +711,13 @@ final class MockClipboardService: ClipboardServiceProtocol {
             sizeBytes: text.utf8.count,
             fileSizeBytes: nil,
             thumbnailPath: nil,
-            storageRef: nil
+            storageRef: nil,
+            useCount: 1
         )
         items.insert(item, at: 0)
+        let event = historyEvent(.itemsChanged([item], kind: .inserted))
         Task { [eventQueue] in
-            await eventQueue.enqueue(.newItem(item))
+            await eventQueue.enqueue(event)
         }
     }
 

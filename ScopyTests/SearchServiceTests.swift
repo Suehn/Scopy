@@ -480,7 +480,7 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(fullBeforeClose.items.map(\.id), [original.id])
 
         await search.close()
-        try await storage.deleteItem(original.id)
+        _ = try await storage.deleteItem(original.id, expectedUseCount: original.useCount)
         let replacement = try await storage.upsertItem(makeContent("alpha replacement"))
         try await search.open()
 
@@ -1057,8 +1057,8 @@ final class SearchServiceTests: XCTestCase {
         let toDelete = try await storage.fetchRecent(limit: 900, offset: 0)
         var startedRebuild = false
         for item in toDelete {
-            try await storage.deleteItem(item.id)
-            await search.applyCommittedChanges()
+            _ = try await storage.deleteItem(item.id, expectedUseCount: item.useCount)
+            _ = try await search.search(request: SearchRequest(query: "", mode: .exact, limit: 1))
 
             let health = await search.debugShortQueryIndexHealth()
             if health.isBuilding {
@@ -1184,7 +1184,6 @@ final class SearchServiceTests: XCTestCase {
             XCTFail("updateNote returned nil")
             return
         }
-        await search.applyCommittedChanges()
 
         let result = try await search.search(
             request: SearchRequest(query: "ab", mode: .fuzzy, sortMode: .relevance, limit: 10, offset: 0)

@@ -62,7 +62,7 @@ final class StorageCommitProtocolTests: XCTestCase {
     func testIngestReceiptMakesNewItemReplayExactlyOnce() async throws {
         let storage = try await makeStorage(prefix: "scopy-ingest-receipt-new")
         let ingestID = UUID()
-        let content = makeInlineContent(text: "exact-once-new", ingestID: ingestID)
+        let content = try makeInlineContent(text: "exact-once-new", ingestID: ingestID)
 
         let first = try await storage.upsertItemWithOutcome(content)
         guard case .inserted(let inserted) = first else {
@@ -71,6 +71,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         XCTAssertEqual(inserted.useCount, 1)
         let receiptCount = try await storage.repository.ingestReceiptCount()
         XCTAssertEqual(receiptCount, 1)
+        let committedSequence = storage.commitJournal.currentMutationSeq
 
         let replay = try await storage.upsertItemWithOutcome(content)
         guard case .alreadyApplied(let replayed) = replay else {
@@ -81,14 +82,15 @@ final class StorageCommitProtocolTests: XCTestCase {
         let itemCount = try await storage.getItemCount()
         XCTAssertEqual(replayedItem?.useCount, 1)
         XCTAssertEqual(itemCount, 1)
+        XCTAssertEqual(storage.commitJournal.currentMutationSeq, committedSequence)
     }
 
     func testIngestReceiptMakesExistingHashReplayIncrementOnlyOnce() async throws {
         let storage = try await makeStorage(prefix: "scopy-ingest-receipt-dedup")
-        let seed = makeInlineContent(text: "existing-hash", ingestID: nil)
+        let seed = try makeInlineContent(text: "existing-hash", ingestID: nil)
         let seeded = try await storage.upsertItem(seed)
         let ingestID = UUID()
-        let incoming = makeInlineContent(text: "existing-hash", ingestID: ingestID)
+        let incoming = try makeInlineContent(text: "existing-hash", ingestID: ingestID)
 
         let first = try await storage.upsertItemWithOutcome(incoming)
         guard case .updated(let updated) = first else {
@@ -96,6 +98,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         }
         XCTAssertEqual(updated.id, seeded.id)
         XCTAssertEqual(updated.useCount, 2)
+        let committedSequence = storage.commitJournal.currentMutationSeq
 
         let replay = try await storage.upsertItemWithOutcome(incoming)
         guard case .alreadyApplied(let replayed) = replay else {
@@ -104,14 +107,17 @@ final class StorageCommitProtocolTests: XCTestCase {
         XCTAssertEqual(replayed?.useCount, 2)
         let current = try await storage.findByID(seeded.id)
         XCTAssertEqual(current?.useCount, 2)
+        XCTAssertEqual(storage.commitJournal.currentMutationSeq, committedSequence)
     }
 
     func testReceiptPreventsDeletedItemResurrection() async throws {
         let storage = try await makeStorage(prefix: "scopy-ingest-receipt-delete")
         let ingestID = UUID()
-        let content = makeInlineContent(text: "delete-before-replay", ingestID: ingestID)
+        let content = try makeInlineContent(text: "delete-before-replay", ingestID: ingestID)
         let inserted = try await storage.upsertItem(content)
-        try await storage.deleteItem(inserted.id)
+        let deletion = try await storage.deleteItem(inserted.id, expectedUseCount: inserted.useCount)
+        XCTAssertNil(deletion.item)
+        let committedSequence = deletion.mutationSeq
 
         let replay = try await storage.upsertItemWithOutcome(content)
         guard case .alreadyApplied(let item) = replay else {
@@ -120,6 +126,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         XCTAssertNil(item)
         let count = try await storage.getItemCount()
         XCTAssertEqual(count, 0)
+        XCTAssertEqual(storage.commitJournal.currentMutationSeq, committedSequence)
     }
 
     func testInsertFailureRetainsDurableSpoolSource() async throws {
@@ -143,20 +150,9 @@ final class StorageCommitProtocolTests: XCTestCase {
             """
         )
 
-        let ingestID = UUID()
-        let sourceURL = directory.appendingPathComponent("\(ingestID.uuidString).payload")
         let sourceData = Data(repeating: 0x5A, count: StorageService.externalStorageThreshold + 8_192)
-        try sourceData.write(to: sourceURL)
-        let content = ClipboardMonitor.ClipboardContent(
-            type: .image,
-            plainText: "retained source",
-            payload: .file(sourceURL),
-            appBundleID: "com.test.storage-commit",
-            contentHash: ClipboardMonitor.computeHashStatic(sourceData),
-            sizeBytes: sourceData.count,
-            ingestID: ingestID,
-            fileOwnership: .durableSpool
-        )
+        let content = try await makeDurableContent(sourceData, in: directory)
+        let sourceURL = try XCTUnwrap(content.payload.ingest).payloadURL
 
         do {
             _ = try await storage.upsertItemWithOutcome(content)
@@ -170,6 +166,7 @@ final class StorageCommitProtocolTests: XCTestCase {
         let receiptCount = try await storage.repository.ingestReceiptCount()
         XCTAssertEqual(itemCount, 0)
         XCTAssertEqual(receiptCount, 0)
+        XCTAssertEqual(storage.commitJournal.currentMutationSeq, 0)
         let contentDirectory = directory.appendingPathComponent("content", isDirectory: true)
         let managedFiles = try FileManager.default.contentsOfDirectory(atPath: contentDirectory.path)
         XCTAssertTrue(managedFiles.isEmpty, "Failed ingest candidate must be reclaimed")
@@ -196,20 +193,9 @@ final class StorageCommitProtocolTests: XCTestCase {
             """
         )
 
-        let ingestID = UUID()
-        let sourceURL = directory.appendingPathComponent("\(ingestID.uuidString).payload")
         let sourceData = Data(repeating: 0x6B, count: StorageService.externalStorageThreshold + 4_096)
-        try sourceData.write(to: sourceURL)
-        let content = ClipboardMonitor.ClipboardContent(
-            type: .image,
-            plainText: "guarded retained source",
-            payload: .file(sourceURL),
-            appBundleID: "com.test.storage-commit",
-            contentHash: ClipboardMonitor.computeHashStatic(sourceData),
-            sizeBytes: sourceData.count,
-            ingestID: ingestID,
-            fileOwnership: .durableSpool
-        )
+        let content = try await makeDurableContent(sourceData, in: directory)
+        let sourceURL = try XCTUnwrap(content.payload.ingest).payloadURL
 
         let gate = IngestReceiptResolutionGate()
         await storage.setIngestCommitInterlockForTesting { point in
@@ -446,44 +432,49 @@ final class StorageCommitProtocolTests: XCTestCase {
         )
     }
 
-    func testDurablePngquantWorkCopyNeverMutatesEnvelopePayload() throws {
-        let spool = try makeTemporaryDirectory(prefix: "scopy-ingest-work-copy")
-        let id = UUID()
-        let original = Data(repeating: 0x33, count: 2_048)
-        let envelopeURL = try writeEnvelope(id: id, payload: original, in: spool)
-        let payloadURL = spool.appendingPathComponent("\(id.uuidString).payload")
-        let content = ClipboardMonitor.ClipboardContent(
-            type: .image,
-            plainText: "work copy",
-            payload: .file(payloadURL),
-            appBundleID: nil,
-            contentHash: ClipboardMonitor.computeHashStatic(original),
-            sizeBytes: original.count,
-            ingestEnvelopeURL: envelopeURL,
-            ingestID: id,
-            fileOwnership: .durableSpool
-        )
-
-        let workURL = try ClipboardMonitor.createTransientWorkCopy(for: content)
-        defer { try? FileManager.default.removeItem(at: workURL) }
-        try Data([0x01]).write(to: workURL)
-        XCTAssertEqual(try Data(contentsOf: payloadURL), original)
-        XCTAssertTrue(workURL.lastPathComponent.hasPrefix(".ingest-work-"))
-    }
-
     private func makeInlineContent(
         text: String,
         ingestID: UUID?
-    ) -> ClipboardMonitor.ClipboardContent {
-        ClipboardMonitor.ClipboardContent(
+    ) throws -> ClipboardMonitor.ClipboardContent {
+        let hash = ClipboardMonitor.computeHashStatic(Data(text.utf8))
+        let payload: CapturedPayload
+        if let ingestID {
+            let directory = try makeTemporaryDirectory(prefix: "scopy-inline-receipt")
+            let envelope = IngestSpool.Envelope(
+                id: ingestID, typeRawValue: ClipboardItemType.text.rawValue, plainText: text,
+                appBundleID: "com.test.storage-commit", sizeBytes: text.utf8.count,
+                precomputedHash: hash, imageDataWasTIFF: false, payloadFileName: nil
+            )
+            payload = .original(nil, envelope: envelope, ingestDirectory: directory)
+        } else {
+            payload = .none
+        }
+        return ClipboardMonitor.ClipboardContent(
             type: .text,
             plainText: text,
-            payload: .none,
+            payload: payload,
             appBundleID: "com.test.storage-commit",
-            contentHash: ClipboardMonitor.computeHashStatic(Data(text.utf8)),
-            sizeBytes: text.utf8.count,
-            ingestID: ingestID
+            contentHash: hash,
+            sizeBytes: text.utf8.count
         )
+    }
+
+    private func makeDurableContent(_ bytes: Data, in directory: URL) async throws -> ClipboardMonitor.ClipboardContent {
+        let envelopeURL = try IngestSpool.persistPendingEnvelope(
+            for: ClipboardMonitor.RawClipboardData(
+                type: .image, plainText: "durable source", rawData: bytes,
+                appBundleID: "com.test.storage-commit", sizeBytes: bytes.count
+            ),
+            in: directory
+        )
+        let outcome = await IngestEnvelopeProcessor.buildContent(
+            from: envelopeURL, ingestDirectory: directory, delay: .zero
+        )
+        guard case .content(let content) = outcome else {
+            XCTFail("A persisted valid envelope must produce content")
+            throw CocoaError(.fileReadUnknown)
+        }
+        return content
     }
 
     private func makeStorage(prefix: String) async throws -> StorageService {

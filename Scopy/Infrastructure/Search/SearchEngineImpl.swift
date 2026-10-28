@@ -29,6 +29,7 @@ public actor SearchEngineImpl {
         public let searchTimeMs: Double
         public let perf: SearchPerfMetrics?
         public let matchContexts: [UUID: SearchMatchContext]
+        public let mutationSeq: Int64
 
         public init(
             items: [ClipboardStoredItem],
@@ -37,7 +38,8 @@ public actor SearchEngineImpl {
             coverage: SearchCoverage,
             searchTimeMs: Double,
             perf: SearchPerfMetrics? = nil,
-            matchContexts: [UUID: SearchMatchContext] = [:]
+            matchContexts: [UUID: SearchMatchContext] = [:],
+            mutationSeq: Int64
         ) {
             self.items = items
             self.total = total
@@ -46,8 +48,17 @@ public actor SearchEngineImpl {
             self.searchTimeMs = searchTimeMs
             self.perf = perf
             self.matchContexts = matchContexts
+            self.mutationSeq = mutationSeq
         }
 
+    }
+
+    /// Unversioned only while the synchronous query is inside its owning read transaction.
+    struct QueryPage {
+        let items: [ClipboardStoredItem]
+        let total: Int
+        let hasMore: Bool
+        let coverage: SearchCoverage
     }
 
     private struct CachedRecentItem {
@@ -68,7 +79,7 @@ public actor SearchEngineImpl {
     private let readStore: SearchReadStore
     private let fullIndexStore: FullIndexStore
     private let shortIndexStore: ShortIndexStore
-    /// The `mutation_seq` the in-memory indexes correspond to.
+    /// The read position used to invalidate row and corpus caches. Each index owns its cursor.
     private var knownMutationSeq: Int64?
 
     private var recentItemsCache: [CachedRecentItem] = []
@@ -82,7 +93,8 @@ public actor SearchEngineImpl {
     /// Indexes and caches built for a search session are released once searching has been idle
     /// this long; the next session loads them back from the disk cache or the database.
     private static let sessionIdleTrimDelay: TimeInterval = 60
-    private var activeSearchCount = 0
+    private var activeSearches: [UUID: Task<SearchResult, Error>] = [:]
+    private var closeTask: Task<Void, Never>?
     private var lastSearchUptime: TimeInterval = 0
     private var idleTrimTask: Task<Void, Never>?
 
@@ -122,6 +134,9 @@ public actor SearchEngineImpl {
     /// require steady-state readiness before issuing latency-sensitive work.
     public func prepareShortQueryIndex() async throws {
         try openIfNeeded()
+        try readStore.withReadSnapshot { mutationSeq in
+            _ = synchronizeWithCommittedChanges(through: mutationSeq)
+        }
         startShortQueryIndexBuildIfNeeded(force: true)
         if let task = shortIndexStore.buildTask {
             await task.value
@@ -132,20 +147,34 @@ public actor SearchEngineImpl {
     }
 
     public func close() async {
+        if let closeTask {
+            await closeTask.value
+            return
+        }
+        let task = Task { await self.finishClose() }
+        closeTask = task
+        await task.value
+    }
+
+    private func finishClose() async {
+        defer { closeTask = nil }
         idleTrimTask?.cancel()
         idleTrimTask = nil
-        fullIndexStore.cancelBuild()
-        shortIndexStore.cancelBuild()
+        let searches = Array(activeSearches.values)
+        searches.forEach { $0.cancel() }
+        for task in searches { _ = try? await task.value }
+        let builds = fullIndexStore.takeBuildTasksForShutdown() + shortIndexStore.takeBuildTasksForShutdown()
+        for task in builds { await task.value }
 
         scheduleShortQueryIndexDiskCachePersistIfPossible()
         if let task = shortIndexStore.persistTask {
-            _ = try? await withTimeout(timeout: 0.25) { await task.value }
+            await task.value
         }
         shortIndexStore.reset()
 
         scheduleFullIndexDiskCachePersistIfPossible()
         if let task = fullIndexStore.persistTask {
-            _ = try? await withTimeout(timeout: 2.0) { await task.value }
+            await task.value
         }
 
         resetRecentCache()
@@ -158,114 +187,68 @@ public actor SearchEngineImpl {
 
     // MARK: - Cache / Index Updates
 
-    /// Drops every in-memory index and resynchronizes from the database; journaled commits up to
-    /// that point are covered by the rebuild.
+    /// Drops this engine's snapshots. Each journal reader keeps its own position.
     public func invalidateCache() {
-        _ = commitJournal?.drain()
-        resetRecentCache()
-        fullIndexStore.reset()
-        shortIndexStore.reset()
-        markCorpusMetricsStale()
-        refreshKnownMutationSeqIfPossible()
-        startShortQueryIndexBuildIfNeeded()
-    }
-
-    /// Applies every storage commit journaled since the last call, in commit order.
-    func applyCommittedChanges() {
-        synchronizeWithCommittedChanges()
-    }
-
-    /// Brings the indexes up to the database. Journaled commits are applied in `mutation_seq`
-    /// order; a commit missing from the journal (another process, or an overflowed journal) is a
-    /// gap that no in-memory index can reproduce, so every index is reset and rebuilt.
-    private func synchronizeWithCommittedChanges() {
-        guard readStore.isOpen else { return }
-        // Read the database position before draining: every in-process commit up to it has been
-        // journaled by then, so a position beyond the journal means an unobserved commit.
-        let current = try? readStore.fetchMutationSeq()
-        if let commitJournal {
-            let drained = commitJournal.drain()
-            if drained.overflowed {
-                resetIndexesForUnobservedCommits()
-                return
-            }
-            for entry in drained.entries {
-                guard let known = knownMutationSeq else {
-                    refreshKnownMutationSeqIfPossible()
-                    continue
-                }
-                if entry.mutationSeq <= known { continue }
-                guard entry.mutationSeq == known + 1 else {
-                    resetIndexesForUnobservedCommits()
-                    return
-                }
-                knownMutationSeq = entry.mutationSeq
-                apply(entry.change)
-            }
-        }
-        guard let current else { return }
-        guard let known = knownMutationSeq else {
-            knownMutationSeq = current
-            return
-        }
-        if known < current {
-            resetIndexesForUnobservedCommits()
-        }
-    }
-
-    private func resetIndexesForUnobservedCommits() {
         resetQueryCaches()
         fullIndexStore.reset()
         shortIndexStore.reset()
         markCorpusMetricsStale()
-        refreshKnownMutationSeqIfPossible()
-        startShortQueryIndexBuildIfNeeded()
+        knownMutationSeq = nil
     }
 
-    private func apply(_ change: StorageCommittedChange) {
-        switch change {
-        case .upserted(let item):
-            applyUpsert(item)
-        case .pinChanged(let id, let isPinned):
-            resetQueryCaches()
-            fullIndexStore.applyPinChange(id: id, pinned: isPinned)
-        case .deleted(let ids):
-            applyDeletions(ids)
-        case .clearedUnpinned:
+    /// Every installed index must reach the query's SQLite snapshot before it can contribute
+    /// candidates. A gap discards only that derived index; builds retain their own read positions.
+    @discardableResult
+    private func synchronizeWithCommittedChanges(through mutationSeq: Int64) -> Bool {
+        if knownMutationSeq != mutationSeq {
             resetRecentCache()
-            fullIndexStore.reset()
-            shortIndexStore.reset()
-            markCorpusMetricsStale()
-            startShortQueryIndexBuildIfNeeded()
-        case .unindexedFields:
-            break
+            if let knownMutationSeq,
+               let changes = committedChanges(after: knownMutationSeq, through: mutationSeq) {
+                for entry in changes {
+                    switch entry.change {
+                    case .upserted(_, let kind):
+                        if kind == .inserted || kind == .content { markCorpusMetricsStale() }
+                    case .deleted, .clearedUnpinned:
+                        markCorpusMetricsStale()
+                    case .storageSizesUpdated:
+                        break
+                    }
+                }
+            } else {
+                markCorpusMetricsStale()
+            }
+            knownMutationSeq = mutationSeq
         }
-    }
 
-    private func applyUpsert(_ item: ClipboardStoredItem) {
-        resetQueryCaches()
-        if shortIndexStore.applyUpsert(item) {
-            startShortQueryIndexBuildIfNeeded()
+        var fullSnapshotRequired = false
+        if let cursor = fullIndexStore.mutationSeq, cursor != mutationSeq {
+            if let changes = committedChanges(after: cursor, through: mutationSeq) {
+                for entry in changes { fullIndexStore.apply(entry) }
+            } else {
+                fullIndexStore.reset()
+                fullSnapshotRequired = true
+            }
         }
-        let full = fullIndexStore.applyUpsert(item)
-        if full.needsRebuild {
+        if let cursor = shortIndexStore.mutationSeq, cursor != mutationSeq {
+            if let changes = committedChanges(after: cursor, through: mutationSeq) {
+                for entry in changes { shortIndexStore.apply(entry) }
+            } else {
+                shortIndexStore.reset()
+            }
+        }
+        if fullIndexStore.index != nil, fullIndexStore.isStale {
             startFullIndexBuildIfNeeded(force: true)
         }
-        if full.corpusChanged {
-            markCorpusMetricsStale()
-        }
+        startShortQueryIndexBuildIfNeeded()
+        return fullSnapshotRequired
     }
 
-    /// Tombstones one committed delete set in both indexes, checking the rebuild threshold once.
-    private func applyDeletions(_ ids: [UUID]) {
-        guard !ids.isEmpty else { return }
-        markCorpusMetricsStale()
-        resetQueryCaches()
-        if shortIndexStore.applyDeletions(ids) {
-            startShortQueryIndexBuildIfNeeded()
-        }
-        if fullIndexStore.applyDeletions(ids) {
-            startFullIndexBuildIfNeeded(force: true)
+    private func committedChanges(after cursor: Int64, through mutationSeq: Int64) -> [StorageCommitJournal.Entry]? {
+        if cursor == mutationSeq { return [] }
+        guard let commitJournal else { return nil }
+        switch commitJournal.read(after: cursor, through: mutationSeq) {
+        case .changes(let entries, _): return entries
+        case .resnapshotRequired: return nil
         }
     }
 
@@ -282,14 +265,14 @@ public actor SearchEngineImpl {
     // MARK: - Index Builds
 
     private func startShortQueryIndexBuildIfNeeded(force: Bool = false) {
+        guard closeTask == nil else { return }
         shortIndexStore.startBuildIfNeeded(force: force, estimatedCount: corpusMetrics?.itemCount ?? 0) { generation, snapshot in
             await self.finishShortQueryIndexBuild(generation: generation, snapshot: snapshot)
         }
     }
 
     private func finishShortQueryIndexBuild(generation: UInt64, snapshot: ShortQueryIndexSnapshot?) {
-        guard shortIndexStore.isCurrentBuild(generation) else { return }
-        synchronizeWithCommittedChanges()
+        defer { shortIndexStore.buildFinished(generation: generation) }
         guard shortIndexStore.isCurrentBuild(generation) else { return }
         if shortIndexStore.finishBuild(snapshot: snapshot) {
             scheduleShortQueryIndexDiskCachePersistIfPossible()
@@ -314,6 +297,7 @@ public actor SearchEngineImpl {
     }
 
     private func startFullIndexBuildIfNeeded(force: Bool = false, trigger: FullIndexStore.BuildTrigger = .forced) {
+        guard closeTask == nil else { return }
         fullIndexStore.startBuildIfNeeded(
             force: force,
             trigger: trigger,
@@ -328,23 +312,11 @@ public actor SearchEngineImpl {
         snapshot: FullIndexSnapshot?,
         warmLoadMetrics: SearchWarmLoadMetrics
     ) {
-        guard fullIndexStore.isCurrentBuild(generation) else { return }
-        // Collect every commit made during the build as pending events; an unobserved commit
-        // resets the indexes, which also supersedes this build.
-        synchronizeWithCommittedChanges()
+        defer { fullIndexStore.buildFinished(generation: generation) }
         guard fullIndexStore.isCurrentBuild(generation) else { return }
 
-        switch fullIndexStore.finishBuild(
-            snapshot: snapshot,
-            warmLoadMetrics: warmLoadMetrics,
-            knownMutationSeq: knownMutationSeq
-        ) {
-        case .none:
-            break
-        case .persist:
+        if fullIndexStore.finishBuild(snapshot: snapshot, warmLoadMetrics: warmLoadMetrics) {
             scheduleFullIndexDiskCachePersistIfPossible()
-        case .rebuild:
-            startFullIndexBuildIfNeeded(force: true)
         }
 
         if let snapshot, !warmLoadMetrics.summary.isEmpty {
@@ -357,12 +329,7 @@ public actor SearchEngineImpl {
     // MARK: - Disk Cache Persists
 
     private func scheduleShortQueryIndexDiskCachePersistIfPossible() {
-        guard shortIndexStore.persistTask == nil else { return }
-        synchronizeWithCommittedChanges()
-        // `knownMutationSeq` is the mutation_seq the in-memory index content corresponds to;
-        // stamping the cache with it (rather than re-reading the DB) keeps the two atomic.
-        guard let mutationSeq = knownMutationSeq else { return }
-        shortIndexStore.startPersistIfNeeded(mutationSeq: mutationSeq) {
+        shortIndexStore.startPersistIfNeeded {
             await self.finishShortQueryIndexDiskCachePersist()
         }
     }
@@ -372,23 +339,13 @@ public actor SearchEngineImpl {
     }
 
     private func scheduleFullIndexDiskCachePersistIfPossible() {
-        guard fullIndexStore.persistTask == nil else { return }
-        synchronizeWithCommittedChanges()
-        guard let mutationSeq = knownMutationSeq else { return }
-        fullIndexStore.startPersistIfNeeded(mutationSeq: mutationSeq) { persisted in
+        fullIndexStore.startPersistIfNeeded { persisted in
             await self.finishFullIndexDiskCachePersist(mutationSeq: persisted)
         }
     }
 
     private func finishFullIndexDiskCachePersist(mutationSeq: Int64?) {
         fullIndexStore.finishPersist(mutationSeq: mutationSeq)
-    }
-
-    private func refreshKnownMutationSeqIfPossible() {
-        guard readStore.isOpen else { return }
-        if let v = try? readStore.fetchMutationSeq() {
-            knownMutationSeq = v
-        }
     }
 
     // MARK: - Session Memory
@@ -405,6 +362,7 @@ public actor SearchEngineImpl {
     /// Releases per-session search memory. Released indexes come back through the normal
     /// disk-cache load or database build on the next search that needs them.
     func trimSessionMemory(_ trim: SessionMemoryTrim) {
+        guard closeTask == nil else { return }
         resetQueryCaches()
         readStore.trimMemory()
 
@@ -425,7 +383,7 @@ public actor SearchEngineImpl {
     /// At most one timer task per session; it trims after the last search has been idle for
     /// `sessionIdleTrimDelay` and no search is running.
     private func armIdleTrim() {
-        guard idleTrimTask == nil else { return }
+        guard idleTrimTask == nil, closeTask == nil, readStore.isOpen else { return }
         idleTrimTask = Task { [weak self] in
             var delay = Self.sessionIdleTrimDelay
             while !Task.isCancelled {
@@ -440,7 +398,7 @@ public actor SearchEngineImpl {
     /// Trims and returns nil once the session is idle; otherwise returns the seconds left to wait.
     private func trimIfSessionIdle() -> TimeInterval? {
         let idle = ProcessInfo.processInfo.systemUptime - lastSearchUptime
-        guard activeSearchCount == 0, idle >= Self.sessionIdleTrimDelay else {
+        guard activeSearches.isEmpty, idle >= Self.sessionIdleTrimDelay else {
             return max(1, Self.sessionIdleTrimDelay - idle)
         }
         idleTrimTask = nil
@@ -454,10 +412,10 @@ public actor SearchEngineImpl {
         try Task.checkCancellation()
         let startTime = CFAbsoluteTimeGetCurrent()
         let perfContext = SearchPerfContext.metricsEnabled ? SearchPerfContext() : nil
-        activeSearchCount += 1
+        let searchID = UUID()
         lastSearchUptime = ProcessInfo.processInfo.systemUptime
         defer {
-            activeSearchCount -= 1
+            activeSearches.removeValue(forKey: searchID)
             lastSearchUptime = ProcessInfo.processInfo.systemUptime
             armIdleTrim()
         }
@@ -473,17 +431,22 @@ public actor SearchEngineImpl {
         }
 
         try openIfNeeded()
-        let result = try await withTimeout(timeout: timeout) {
-            let rawResult = try await self.searchInternal(
-                request: request,
-                perf: perfContext
-            )
-            if let perfContext {
-                return try perfContext.measure("match_evidence") {
-                    try SearchMatchContextBuilder.attach(to: rawResult, request: request)
+        let task = Task {
+            try await withTimeout(timeout: timeout) {
+                let rawResult = try await self.searchInternal(request: request, perf: perfContext)
+                if let perfContext {
+                    return try perfContext.measure("match_evidence") {
+                        try SearchMatchContextBuilder.attach(to: rawResult, request: request)
+                    }
                 }
+                return try SearchMatchContextBuilder.attach(to: rawResult, request: request)
             }
-            return try SearchMatchContextBuilder.attach(to: rawResult, request: request)
+        }
+        activeSearches[searchID] = task
+        let result = try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
         }
 
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
@@ -506,7 +469,8 @@ public actor SearchEngineImpl {
             coverage: result.coverage,
             searchTimeMs: elapsedMs,
             perf: perfContext?.snapshot(),
-            matchContexts: result.matchContexts
+            matchContexts: result.matchContexts,
+            mutationSeq: result.mutationSeq
         )
     }
 
@@ -514,32 +478,46 @@ public actor SearchEngineImpl {
 
     private func searchInternal(request: SearchRequest, perf: SearchPerfContext?) async throws -> SearchResult {
         try openIfNeeded()
-        if let perf {
-            perf.measure("refresh_corpus_metrics") { refreshCorpusMetricsIfNeeded() }
-        } else {
-            refreshCorpusMetricsIfNeeded()
-        }
-
-        if let perf {
-            perf.measure("invalidate_external_db_change") { synchronizeWithCommittedChanges() }
-        } else {
-            synchronizeWithCommittedChanges()
-        }
-        try Task.checkCancellation()
-
-        switch request.mode {
-        case .exact:
-            return try await searchExact(request: request)
-        case .fuzzy:
-            return try await searchFuzzy(request: request, perf: perf)
-        case .fuzzyPlus:
-            return try await searchFuzzyPlus(request: request, perf: perf)
-        case .regex:
-            return try await searchRegex(request: request)
+        var awaitedBuild = false
+        while true {
+            guard closeTask == nil else { throw SearchError.databaseNotOpen }
+            let attempt = try readStore.withReadSnapshot { mutationSeq -> (result: SearchResult?, requiresSnapshot: Bool) in
+                let requiresSnapshot: Bool
+                if let perf {
+                    requiresSnapshot = perf.measure("invalidate_external_db_change") {
+                        synchronizeWithCommittedChanges(through: mutationSeq)
+                    }
+                    perf.measure("refresh_corpus_metrics") { refreshCorpusMetricsIfNeeded() }
+                } else {
+                    requiresSnapshot = synchronizeWithCommittedChanges(through: mutationSeq)
+                    refreshCorpusMetricsIfNeeded()
+                }
+                try Task.checkCancellation()
+                let page: QueryPage?
+                switch request.mode {
+                case .exact: page = try searchExact(request: request)
+                case .fuzzy: page = try searchFuzzy(request: request, perf: perf)
+                case .fuzzyPlus: page = try searchFuzzyPlus(request: request, perf: perf)
+                case .regex: page = try searchRegex(request: request)
+                }
+                let result = page.map {
+                    SearchResult(items: $0.items, total: $0.total, hasMore: $0.hasMore,
+                                 coverage: $0.coverage, searchTimeMs: 0, mutationSeq: mutationSeq)
+                }
+                return (result, requiresSnapshot)
+            }
+            if let result = attempt.result { return result }
+            if attempt.requiresSnapshot || awaitedBuild {
+                // A finite snapshot query makes progress even when writers outpace the bounded
+                // journal. It uses the same ranker and hydration transaction as an indexed query.
+                return try await FullIndexQuery.readSnapshot(dbPath: dbPath, request: request, perf: perf)
+            }
+            awaitedBuild = true
+            try await prepareFullIndexForSearch(perf: perf)
         }
     }
 
-    private func searchExact(request: SearchRequest) async throws -> SearchResult {
+    private func searchExact(request: SearchRequest) throws -> QueryPage {
         let normalizedQuery = SearchQueryNormalization.normalizedExactQuery(request.query)
         if normalizedQuery.isEmpty {
             return try searchAllWithFilters(request: request)
@@ -553,12 +531,11 @@ public actor SearchEngineImpl {
         }
 
         guard let ftsQuery = FTSQueryBuilder.build(userQuery: normalizedQuery) else {
-            return SearchResult(
+            return QueryPage(
                 items: [],
                 total: 0,
                 hasMore: false,
-                coverage: .complete,
-                searchTimeMs: 0
+                coverage: .complete
             )
         }
 
@@ -572,28 +549,28 @@ public actor SearchEngineImpl {
                 filters: .init(request),
                 window: .init(request)
             ), !page.items.isEmpty {
-                return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
+                return QueryPage(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete)
             }
         }
 
         return fts
     }
 
-    private func searchFuzzy(request: SearchRequest, perf: SearchPerfContext?) async throws -> SearchResult {
+    private func searchFuzzy(request: SearchRequest, perf: SearchPerfContext?) throws -> QueryPage? {
         if request.query.isEmpty {
             return try searchAllWithFilters(request: request)
         }
-        return try await searchFullFuzzy(request: request, mode: .fuzzy, perf: perf)
+        return try searchFullFuzzy(request: request, mode: .fuzzy, perf: perf)
     }
 
-    private func searchFuzzyPlus(request: SearchRequest, perf: SearchPerfContext?) async throws -> SearchResult {
+    private func searchFuzzyPlus(request: SearchRequest, perf: SearchPerfContext?) throws -> QueryPage? {
         if request.query.isEmpty {
             return try searchAllWithFilters(request: request)
         }
-        return try await searchFullFuzzy(request: request, mode: .fuzzyPlus, perf: perf)
+        return try searchFullFuzzy(request: request, mode: .fuzzyPlus, perf: perf)
     }
 
-    private func searchRegex(request: SearchRequest) async throws -> SearchResult {
+    private func searchRegex(request: SearchRequest) throws -> QueryPage {
         guard let regex = try? NSRegularExpression(pattern: request.query, options: [.caseInsensitive]) else {
             throw SearchError.invalidQuery("Invalid regex pattern")
         }
@@ -643,14 +620,14 @@ public actor SearchEngineImpl {
         query: String,
         request: SearchRequest,
         coverage: SearchCoverage
-    ) throws -> SearchResult {
+    ) throws -> QueryPage {
         let page = try readStore.searchFTS(
             ftsQuery: query,
             sortMode: request.sortMode,
             filters: .init(request),
             window: .init(request)
         )
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: coverage, searchTimeMs: 0)
+        return QueryPage(items: page.items, total: page.total, hasMore: page.hasMore, coverage: coverage)
     }
 
     private func substringSearchTokens(_ query: String) -> [String] {
@@ -681,7 +658,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         coverage: SearchCoverage,
         filter: @escaping (ClipboardStoredItem) throws -> Bool
-    ) throws -> SearchResult {
+    ) throws -> QueryPage {
         try refreshCacheIfNeeded()
 
         var filtered: [ClipboardStoredItem] = []
@@ -714,23 +691,23 @@ public actor SearchEngineImpl {
         }
 
         let total = hasMore ? -1 : request.offset + items.count
-        return SearchResult(items: items, total: total, hasMore: hasMore, coverage: coverage, searchTimeMs: 0)
+        return QueryPage(items: items, total: total, hasMore: hasMore, coverage: coverage)
     }
 
-    private func makeZeroTimeSearchResult(
+    private func makeQueryPage(
         items: [ClipboardStoredItem],
         total: Int,
         hasMore: Bool,
         coverage: SearchCoverage = .complete
-    ) -> SearchResult {
-        SearchResult(items: items, total: total, hasMore: hasMore, coverage: coverage, searchTimeMs: 0)
+    ) -> QueryPage {
+        QueryPage(items: items, total: total, hasMore: hasMore, coverage: coverage)
     }
 
-    private func makeZeroTimeSearchResult(
+    private func makeQueryPage(
         page: SearchReadStore.Page,
         coverage: SearchCoverage = .complete
-    ) -> SearchResult {
-        makeZeroTimeSearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: coverage)
+    ) -> QueryPage {
+        makeQueryPage(items: page.items, total: page.total, hasMore: page.hasMore, coverage: coverage)
     }
 
     private func refreshCacheIfNeeded() throws {
@@ -745,7 +722,7 @@ public actor SearchEngineImpl {
 
     // MARK: - Full-History Fuzzy Search
 
-    private func searchFullFuzzy(request: SearchRequest, mode: SearchMode, perf: SearchPerfContext?) async throws -> SearchResult {
+    private func searchFullFuzzy(request: SearchRequest, mode: SearchMode, perf: SearchPerfContext?) throws -> QueryPage? {
         let trimmedQuery = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedQuery.isEmpty {
             return try searchAllWithFilters(request: request)
@@ -781,22 +758,16 @@ public actor SearchEngineImpl {
 
         let normalizedRequest = normalizedSearchRequest(for: request, trimmedQuery: trimmedQuery, mode: mode)
 
-        let index = try await fullIndexForSearch(perf: perf)
-        let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
-        return SearchResult(
-            items: result.items,
-            total: result.total,
-            hasMore: result.hasMore,
-            coverage: result.coverage,
-            searchTimeMs: 0
-        )
+        guard let index = fullIndexStore.usableIndex else { return nil }
+        perf?.addCounter("full_index_source_memory", value: 1)
+        return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
     }
 
     private func searchForcedFuzzyPlusSubstringFallbackIfNeeded(
         request: SearchRequest,
         trimmedQuery: String,
         mode: SearchMode
-    ) throws -> SearchResult? {
+    ) throws -> QueryPage? {
         guard request.forceFullFuzzy, mode == .fuzzyPlus else { return nil }
         let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
         guard shouldUseSubstringOnlyFallbackForFuzzyPlus(tokens: tokens) else { return nil }
@@ -806,7 +777,7 @@ public actor SearchEngineImpl {
             filters: .init(request),
             window: .init(request)
         )
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
+        return QueryPage(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete)
     }
 
     private func searchInteractiveFuzzyPrefilterIfNeeded(
@@ -814,7 +785,7 @@ public actor SearchEngineImpl {
         trimmedQuery: String,
         mode: SearchMode,
         perf: SearchPerfContext?
-    ) throws -> SearchResult? {
+    ) throws -> QueryPage? {
         guard !request.forceFullFuzzy,
               trimmedQuery.count >= 3,
               shouldPreferFTSForFuzzy(query: trimmedQuery),
@@ -854,15 +825,15 @@ public actor SearchEngineImpl {
 
         // Keep the initial (non-forceFullFuzzy) stage fast: even if no prefilter match is found,
         // return an empty prefilter result quickly and allow UI to refine with a full scan.
-        return SearchResult(items: [], total: 0, hasMore: false, coverage: .stagedRefine, searchTimeMs: 0)
+        return QueryPage(items: [], total: 0, hasMore: false, coverage: .stagedRefine)
     }
 
     private func searchInteractiveFTSPrefilter(
         request: SearchRequest,
         ftsQuery: String,
         perf: SearchPerfContext?
-    ) throws -> SearchResult? {
-        let fts: SearchResult
+    ) throws -> QueryPage? {
+        let fts: QueryPage
         if let perf {
             fts = try perf.measure("fts_prefilter") {
                 try searchWithFTS(query: ftsQuery, request: request, coverage: .stagedRefine)
@@ -882,7 +853,7 @@ public actor SearchEngineImpl {
         trimmedQuery: String,
         mode: SearchMode,
         perf: SearchPerfContext?
-    ) throws -> SearchResult? {
+    ) throws -> QueryPage? {
         guard mode == .fuzzyPlus else { return nil }
 
         let tokens = fuzzyPlusTokens(trimmedQuery.lowercased())
@@ -906,14 +877,14 @@ public actor SearchEngineImpl {
                 window: .init(request)
             )
         }
-        return makeZeroTimeSearchResult(page: page)
+        return makeQueryPage(page: page)
     }
 
     private func searchInteractiveNonASCIISubstringFallback(
         request: SearchRequest,
         trimmedQuery: String,
         perf: SearchPerfContext?
-    ) throws -> SearchResult? {
+    ) throws -> QueryPage? {
         guard !trimmedQuery.canBeConverted(to: .ascii) else { return nil }
 
         let tokens = substringSearchTokens(trimmedQuery)
@@ -939,14 +910,14 @@ public actor SearchEngineImpl {
         guard let page, !page.items.isEmpty else { return nil }
         startInteractiveFullIndexBuildIfNeeded(for: request)
         perf?.addCounter("substring_fallback_items", value: page.items.count)
-        return makeZeroTimeSearchResult(page: page, coverage: .stagedRefine)
+        return makeQueryPage(page: page, coverage: .stagedRefine)
     }
 
     private func searchInteractiveRecentCacheFallback(
         request: SearchRequest,
         trimmedQuery: String,
         mode: SearchMode
-    ) throws -> SearchResult? {
+    ) throws -> QueryPage? {
         guard trimmedQuery.count <= 6 else { return nil }
         let fallback = try searchFuzzyInRecentCache(request: request, mode: mode, query: trimmedQuery)
         guard !fallback.items.isEmpty else { return nil }
@@ -959,7 +930,7 @@ public actor SearchEngineImpl {
         trimmedQuery: String,
         mode: SearchMode,
         perf: SearchPerfContext?
-    ) throws -> SearchResult {
+    ) throws -> QueryPage {
         let tokenLower = trimmedQuery.lowercased()
 
         if let result = try searchShortFuzzyInFullIndexIfReady(
@@ -993,32 +964,26 @@ public actor SearchEngineImpl {
         trimmedQuery: String,
         mode: SearchMode,
         perf: SearchPerfContext?
-    ) throws -> SearchResult? {
+    ) throws -> QueryPage? {
         guard let index = fullIndexStore.usableIndex else { return nil }
 
         perf?.addCounter("short_query_path_full_index", value: 1)
         let normalizedRequest = normalizedSearchRequest(for: request, trimmedQuery: trimmedQuery, mode: mode)
-        let result = try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
-        return makeZeroTimeSearchResult(
-            items: result.items,
-            total: result.total,
-            hasMore: result.hasMore,
-            coverage: result.coverage
-        )
+        return try searchInFullIndex(index: index, request: normalizedRequest, mode: mode, perf: perf)
     }
 
     private func searchShortFuzzyWithShortIndex(
         request: SearchRequest,
         tokenLower: String,
         perf: SearchPerfContext?
-    ) throws -> SearchResult? {
+    ) throws -> QueryPage? {
         let isASCII = tokenLower.canBeConverted(to: .ascii)
         let candidates = isASCII
             ? shortIndexStore.candidateIDStrings(for: tokenLower)
             : shortIndexStore.candidateIDStringsForNonASCIIBigram(tokenLower: tokenLower)
         guard let candidates else { return nil }
         if candidates.isEmpty {
-            return makeZeroTimeSearchResult(items: [], total: 0, hasMore: false)
+            return makeQueryPage(items: [], total: 0, hasMore: false)
         }
         guard !shouldFallbackFromShortQueryCandidates(candidates.count, sortMode: request.sortMode) else {
             return nil
@@ -1047,7 +1012,7 @@ public actor SearchEngineImpl {
                 window: .init(request)
             )
         }
-        return makeZeroTimeSearchResult(page: page)
+        return makeQueryPage(page: page)
     }
 
     /// Whether a scan of every row beats passing the candidates to SQL, whose id list costs about
@@ -1063,7 +1028,7 @@ public actor SearchEngineImpl {
         request: SearchRequest,
         tokenLower: String,
         perf: SearchPerfContext?
-    ) throws -> SearchResult {
+    ) throws -> QueryPage {
         perf?.addCounter("short_query_path_sql_scan", value: 1)
         let page: SearchReadStore.Page
         if let perf {
@@ -1083,39 +1048,21 @@ public actor SearchEngineImpl {
                 window: .init(request)
             )
         }
-        return makeZeroTimeSearchResult(page: page)
+        return makeQueryPage(page: page)
     }
 
-    /// The usable full index, awaiting a detached build (disk cache, then database) when there
-    /// is none; the engine actor stays free for other searches while the build runs.
-    private func fullIndexForSearch(perf: SearchPerfContext?) async throws -> FullFuzzyIndex {
-        if let index = fullIndexStore.usableIndex {
-            perf?.addCounter("full_index_source_memory", value: 1)
-            return index
-        }
-
-        while true {
-            try Task.checkCancellation()
-            startFullIndexBuildIfNeeded(force: true)
-            guard fullIndexStore.buildTask != nil else {
-                throw SearchError.searchFailed("Failed to start the full index build")
-            }
-            let generation = fullIndexStore.buildGeneration
-            let waitStart = CFAbsoluteTimeGetCurrent()
-            try await waitForFullIndexBuild()
-            perf?.addPhase("full_index_build_wait", ms: (CFAbsoluteTimeGetCurrent() - waitStart) * 1000)
-
-            if let index = fullIndexStore.usableIndex {
-                if let perf, let metrics = fullIndexStore.lastWarmLoadMetrics {
-                    perf.addFullIndexLoad(metrics, itemCount: index.items.count)
-                }
-                return index
-            }
-            // A build that ran to completion without an index failed; a superseded one (a reset
-            // or a tombstone rebuild moved the generation on) is retried.
-            guard fullIndexStore.buildGeneration != generation else {
-                throw SearchError.searchFailed("Failed to build the full index")
-            }
+    /// Waits once for the shared cold build without holding a SQLite transaction. Failure,
+    /// cancellation by another request, or a journal gap selects a complete snapshot query.
+    private func prepareFullIndexForSearch(perf: SearchPerfContext?) async throws {
+        try Task.checkCancellation()
+        startFullIndexBuildIfNeeded(force: true)
+        guard fullIndexStore.buildTask != nil else { return }
+        let waitStart = CFAbsoluteTimeGetCurrent()
+        try await waitForFullIndexBuild()
+        try Task.checkCancellation()
+        perf?.addPhase("full_index_build_wait", ms: (CFAbsoluteTimeGetCurrent() - waitStart) * 1000)
+        if let perf, let index = fullIndexStore.usableIndex, let metrics = fullIndexStore.lastWarmLoadMetrics {
+            perf.addFullIndexLoad(metrics, itemCount: index.items.count)
         }
     }
 
@@ -1154,102 +1101,17 @@ public actor SearchEngineImpl {
         )
     }
 
-    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode, perf: SearchPerfContext?) throws -> SearchResult {
-        let queryLower = request.query.lowercased()
-
-        var candidateSlots: [Int]
-        if let perf {
-            candidateSlots = perf.measure("full_index_candidate_intersection") {
-                FullIndexRanker.candidateSlots(index: index, queryLower: queryLower)
-            }
-        } else {
-            candidateSlots = FullIndexRanker.candidateSlots(index: index, queryLower: queryLower)
-        }
-
-        // The character postings barely narrow ASCII words; the short index's bigram postings do.
-        let bigrams = FullIndexRanker.requiredASCIIBigrams(queryLower: queryLower, mode: mode)
-        if !bigrams.isEmpty, !candidateSlots.isEmpty, let shortIndex = shortIndexStore.index {
-            let filterStart = perf == nil ? 0 : CFAbsoluteTimeGetCurrent()
-            let matches = shortIndex.items(containingASCIIBigrams: bigrams)
-            candidateSlots.removeAll { slot in
-                index.items[slot].map { !matches.mayContain($0.id) } ?? false
-            }
-            perf?.addPhase("full_index_bigram_filter", ms: (CFAbsoluteTimeGetCurrent() - filterStart) * 1000)
-            perf?.addCounter("full_index_bigram_candidate_slots", value: candidateSlots.count)
-        }
-
-        if candidateSlots.isEmpty {
-            return SearchResult(items: [], total: 0, hasMore: false, coverage: .complete, searchTimeMs: 0)
-        }
-        perf?.addCounter("full_index_candidate_slots", value: candidateSlots.count)
-
-        let scorer = FuzzyMatcher.Scorer(queryLower: queryLower, mode: mode)
-
-        // A large ASCII candidate set on the first interactive page is narrowed by FTS before
-        // scoring; the page is then staged (total unknown) and the UI refines it later.
-        var staged = false
-        if let prefilterLimit = FullIndexRanker.adaptivePrefilterLimit(
+    private func searchInFullIndex(index: FullFuzzyIndex, request: SearchRequest, mode: SearchMode, perf: SearchPerfContext?) throws -> QueryPage {
+        try FullIndexQuery.execute(
+            index: index,
+            shortIndex: shortIndexStore.index,
+            readStore: readStore,
             request: request,
             mode: mode,
-            queryLower: queryLower,
-            candidateCount: candidateSlots.count
-        ) {
-            perf?.addCounter("adaptive_prefilter_limit", value: prefilterLimit)
-            if let ftsQuery = FTSQueryBuilder.build(userQuery: queryLower) {
-                let ftsSlots: [Int]?
-                if let perf {
-                    ftsSlots = try? perf.measure("full_index_fts_prefilter_slots") {
-                        try ftsPrefilterSlots(index: index, ftsQuery: ftsQuery, limit: prefilterLimit)
-                    }
-                } else {
-                    ftsSlots = try? ftsPrefilterSlots(index: index, ftsQuery: ftsQuery, limit: prefilterLimit)
-                }
-
-                if let ftsSlots, !ftsSlots.isEmpty {
-                    candidateSlots = FullIndexRanker.mergePrefilter(
-                        candidateSlots: candidateSlots,
-                        ftsSlots: ftsSlots,
-                        index: index
-                    )
-                    perf?.addCounter("full_index_fts_prefilter_candidate_slots", value: candidateSlots.count)
-                    staged = true
-                }
-            }
-        }
-
-        let page: FullIndexRanker.Page
-        if staged {
-            page = try FullIndexRanker.rankStaged(
-                index: index,
-                request: request,
-                scorer: scorer,
-                candidateSlots: candidateSlots,
-                perf: perf
-            )
-        } else {
-            page = try FullIndexRanker.rankComplete(
-                index: index,
-                request: request,
-                mode: mode,
-                queryLower: queryLower,
-                scorer: scorer,
-                candidateSlots: candidateSlots,
-                indexContentVersion: fullIndexStore.contentGeneration,
-                cache: &fullIndexStore.sortedMatchesCache,
-                perf: perf
-            )
-        }
-
-        let pageIDs = page.slots.compactMap { index.items[$0]?.id }
-        let resultItems: [ClipboardStoredItem]
-        if staged, let perf {
-            resultItems = try perf.measure("full_index_prefilter_fetch_items") {
-                try readStore.fetchItemsByIDs(pageIDs)
-            }
-        } else {
-            resultItems = try readStore.fetchItemsByIDs(pageIDs)
-        }
-        return SearchResult(items: resultItems, total: page.total, hasMore: page.hasMore, coverage: page.coverage, searchTimeMs: 0)
+            contentGeneration: fullIndexStore.contentGeneration,
+            cache: &fullIndexStore.sortedMatchesCache,
+            perf: perf
+        )
     }
 
     private func shouldPreferFTSForFuzzy(query: String) -> Bool {
@@ -1258,7 +1120,7 @@ public actor SearchEngineImpl {
         return corpusMetrics.isHeavyPlainTextCorpus
     }
 
-    private func searchFuzzyInRecentCache(request: SearchRequest, mode: SearchMode, query: String) throws -> SearchResult {
+    private func searchFuzzyInRecentCache(request: SearchRequest, mode: SearchMode, query: String) throws -> QueryPage {
         try refreshCacheIfNeeded()
 
         let scorer = FuzzyMatcher.Scorer(queryLower: query.lowercased(), mode: mode)
@@ -1293,12 +1155,7 @@ public actor SearchEngineImpl {
         }
 
         let items = page.map(\.item)
-        return SearchResult(items: items, total: -1, hasMore: hasMore, coverage: .stagedRefine, searchTimeMs: 0)
-    }
-
-    private func ftsPrefilterSlots(index: FullFuzzyIndex, ftsQuery: String, limit: Int) throws -> [Int] {
-        let ids = try readStore.ftsPrefilterIDs(ftsQuery: ftsQuery, limit: limit)
-        return ids.compactMap { index.idToSlot[$0] }
+        return QueryPage(items: items, total: -1, hasMore: hasMore, coverage: .stagedRefine)
     }
 
     // MARK: - Timeout
@@ -1337,12 +1194,13 @@ public actor SearchEngineImpl {
     // MARK: - DB Access
 
     private func openIfNeeded() throws {
+        guard closeTask == nil else { throw SearchError.databaseNotOpen }
         guard !readStore.isOpen else { return }
         try readStore.open()
         fullIndexStore.sortedMatchesCache = nil
         SearchIndexDiskCache.removeStaleCacheFiles(dbPath: dbPath)
         refreshCorpusMetricsIfNeeded(force: true)
-        refreshKnownMutationSeqIfPossible()
+        knownMutationSeq = nil
         startShortQueryIndexBuildIfNeeded()
     }
 
@@ -1363,12 +1221,22 @@ public actor SearchEngineImpl {
         corpusMetricsUpdatedAt = Date()
     }
 
-    private func searchAllWithFilters(request: SearchRequest) throws -> SearchResult {
+    private func searchAllWithFilters(request: SearchRequest) throws -> QueryPage {
         let page = try readStore.fetchAll(filters: .init(request), window: .init(request))
-        return SearchResult(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete, searchTimeMs: 0)
+        return QueryPage(items: page.items, total: page.total, hasMore: page.hasMore, coverage: .complete)
     }
 
 #if DEBUG
+    /// Installs completed database snapshots at a controlled point relative to committed writes.
+    func installIndexSnapshotsForTesting(full: FullIndexSnapshot?, short: ShortQueryIndexSnapshot?) {
+        fullIndexStore.reset()
+        shortIndexStore.reset()
+        if let full {
+            _ = fullIndexStore.finishBuild(snapshot: full, warmLoadMetrics: SearchWarmLoadMetrics())
+        }
+        if let short { _ = shortIndexStore.finishBuild(snapshot: short) }
+    }
+
     func debugFullIndexHealth() -> (isBuilt: Bool, isStale: Bool, slots: Int, tombstones: Int) {
         guard let index = fullIndexStore.index else {
             return (false, fullIndexStore.isStale, 0, 0)
@@ -1384,8 +1252,8 @@ public actor SearchEngineImpl {
         fullIndexStore.lastDiskCacheLoadReason?.rawValue
     }
 
-    func debugFullIndexBuildHealth() -> (isBuilding: Bool, pendingEvents: Int) {
-        (fullIndexStore.buildTask != nil, fullIndexStore.pendingEventCount)
+    func debugFullIndexBuildHealth() -> Bool {
+        fullIndexStore.buildTask != nil
     }
 
     /// Cancels the build task only; its completion still lands through the normal path.

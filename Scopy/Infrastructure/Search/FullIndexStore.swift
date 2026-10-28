@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// The full-history fuzzy index's lifecycle: the installed index and whether it is stale, the
-/// detached build and the commits that land while it runs, tombstone rebuilds, disk-cache
+/// detached build, tombstone rebuilds, disk-cache
 /// persists, and session release. Not Sendable: the search engine owns it, calls it only on its
 /// actor, and routes each task's completion back through the actor.
 final class FullIndexStore {
@@ -13,26 +13,10 @@ final class FullIndexStore {
         case interactive
     }
 
-    /// What the engine must do after a build lands.
-    enum BuildOutcome {
-        case none
-        /// Built from the database: write it to the disk cache.
-        case persist
-        /// Commits during the build tombstoned too much of it: build again.
-        case rebuild
-    }
-
-    private enum PendingEvent {
-        case upsert(ClipboardStoredItem)
-        case delete(UUID)
-        case pin(UUID, Bool)
-    }
-
     private struct Build {
         let task: Task<Void, Never>
         let generation: UInt64
         let trigger: BuildTrigger
-        var pendingEvents: [PendingEvent] = []
         /// Searches suspended until this build lands or is superseded.
         var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
     }
@@ -46,12 +30,14 @@ final class FullIndexStore {
     private let warmupMinimumItemCount: Int
 
     private(set) var index: FullFuzzyIndex?
+    private(set) var mutationSeq: Int64?
     private(set) var isStale = true
     /// Advances on every content change; keys the ranker's sorted-matches cache.
     private(set) var contentGeneration: UInt64 = 0
     var sortedMatchesCache: FullIndexRanker.SortedMatchesCache?
 
     private var build: Build?
+    private var cancelledBuilds: [UInt64: Task<Void, Never>] = [:]
     private(set) var buildGeneration: UInt64 = 0
     private(set) var persistTask: Task<Void, Never>?
     /// `mutation_seq` stamped on the disk cache while it still matches memory.
@@ -70,9 +56,6 @@ final class FullIndexStore {
     /// The index when it is installed and not superseded.
     var usableIndex: FullFuzzyIndex? { isStale ? nil : index }
     var buildTask: Task<Void, Never>? { build?.task }
-#if DEBUG
-    var pendingEventCount: Int { build?.pendingEvents.count ?? 0 }
-#endif
 
     static func needsRebuild(itemCount: Int, tombstoneCount: Int) -> Bool {
         guard itemCount >= tombstoneMinSlotsForStale else { return false }
@@ -121,26 +104,24 @@ final class FullIndexStore {
         if let cached { return cached }
 
         metrics.addReason(.databaseRebuild)
-        let index = metrics.measure("full_index_build_from_db") {
+        let snapshot = metrics.measure("full_index_build_from_db") {
             SearchReadStore.loadFullIndex(dbPath: dbPath, reserveSlots: reserveSlots)
         }
-        guard let index else { return nil }
+        guard let snapshot else { return nil }
         metrics.markSource(.database)
-        return FullIndexSnapshot(index: index, source: .database)
+        return snapshot
     }
 
     func isCurrentBuild(_ generation: UInt64) -> Bool {
         build?.generation == generation
     }
 
-    /// Installs the landed build with the commits it missed replayed on top. The caller has
-    /// checked `isCurrentBuild` and synchronized with committed changes first.
+    /// Installs the build at its own read position. The engine advances it through the shared
+    /// journal inside the next query's read transaction before using its candidates.
     func finishBuild(
         snapshot: FullIndexSnapshot?,
-        warmLoadMetrics: SearchWarmLoadMetrics,
-        knownMutationSeq: Int64?
-    ) -> BuildOutcome {
-        let pending = build?.pendingEvents ?? []
+        warmLoadMetrics: SearchWarmLoadMetrics
+    ) -> Bool {
         endBuild()
         lastWarmLoadMetrics = warmLoadMetrics
 #if DEBUG
@@ -150,39 +131,43 @@ final class FullIndexStore {
         }
 #endif
 
-        guard let snapshot else { return .none }
-        var index = snapshot.index
+        guard let snapshot else { return false }
+        let index = snapshot.index
 #if DEBUG
         lastSnapshotSource = snapshot.source
 #endif
 
-        for event in pending {
-            switch event {
-            case .upsert(let item):
-                Self.upsert(item, into: &index)
-            case .delete(let id):
-                Self.remove(id, from: &index)
-            case .pin(let id, let pinned):
-                Self.setPinned(id, pinned, in: &index)
-            }
-        }
-
         self.index = index
-        isStale = Self.needsRebuild(index)
+        mutationSeq = snapshot.mutationSeq
+        isStale = false
         contentChanged()
 
-        if snapshot.source == .diskCache, pending.isEmpty {
-            persistedMutationSeq = knownMutationSeq
+        if snapshot.source == .diskCache {
+            persistedMutationSeq = snapshot.mutationSeq
         }
-        if isStale { return .rebuild }
-        return snapshot.source == .database ? .persist : .none
+        return snapshot.source == .database
     }
 
     /// Stops the running build; its completion is ignored.
     func cancelBuild() {
-        build?.task.cancel()
+        if let build {
+            build.task.cancel()
+            cancelledBuilds[build.generation] = build.task
+        }
         endBuild()
         buildGeneration &+= 1
+    }
+
+    func buildFinished(generation: UInt64) {
+        cancelledBuilds.removeValue(forKey: generation)
+    }
+
+    /// Cancellation requests do not end SQLite scans. Shutdown retains and joins every task.
+    func takeBuildTasksForShutdown() -> [Task<Void, Never>] {
+        cancelBuild()
+        let tasks = Array(cancelledBuilds.values)
+        cancelledBuilds.removeAll()
+        return tasks
     }
 
     /// Clears the build and resumes its waiters; they re-check the index on the engine actor.
@@ -215,6 +200,7 @@ final class FullIndexStore {
     func reset() {
         cancelBuild()
         index = nil
+        mutationSeq = nil
         isStale = true
         contentChanged()
     }
@@ -222,73 +208,48 @@ final class FullIndexStore {
     /// Releases the index between search sessions; the next search loads it back.
     func release() {
         index = nil
+        mutationSeq = nil
         isStale = true
         contentChanged()
     }
 
     // MARK: - Committed changes
 
-    /// Returns whether the corpus changed shape (the corpus metrics are stale) and whether the
-    /// tombstones now call for a rebuild.
-    func applyUpsert(_ item: ClipboardStoredItem) -> (corpusChanged: Bool, needsRebuild: Bool) {
-        if build != nil {
-            build?.pendingEvents.append(.upsert(item))
-            return (true, false)
-        }
-        // Not built yet: the upsert may still change the corpus before the first search.
-        guard var index, !isStale else { return (true, false) }
-
-        // Hand the storage over to the local copy before mutating it: while the property still
-        // referenced the same buffers, every touched array and dictionary was copied first.
+    /// Applies one fact after this snapshot's cursor. Usage and pin changes touch only ranking
+    /// metadata; searchable text is normalized only when the content actually changes.
+    func apply(_ entry: StorageCommitJournal.Entry) {
+        guard var index, let mutationSeq, entry.mutationSeq > mutationSeq else { return }
         self.index = nil
-        let beforeTombstones = index.tombstoneCount
-        let appended = Self.upsert(item, into: &index)
-        self.index = index
-        contentChanged()
-
-        let needsRebuild = index.tombstoneCount > beforeTombstones && Self.needsRebuild(index)
-        if needsRebuild { isStale = true }
-        return (appended, needsRebuild)
-    }
-
-    func applyPinChange(id: UUID, pinned: Bool) {
-        if build != nil {
-            build?.pendingEvents.append(.pin(id, pinned))
-            return
-        }
-        guard var index, !isStale,
-              let slot = index.idToSlot[id],
-              slot < index.items.count,
-              index.items[slot] != nil else { return }
-        self.index = nil
-        Self.setPinned(id, pinned, in: &index)
-        self.index = index
-        contentChanged()
-    }
-
-    /// Tombstones one committed delete set; returns whether the tombstones call for a rebuild.
-    func applyDeletions(_ ids: [UUID]) -> Bool {
-        if build != nil {
-            build?.pendingEvents.append(contentsOf: ids.map(PendingEvent.delete))
-            return false
-        }
-        guard var index, !isStale else { return false }
-        self.index = nil
-        for id in ids {
-            Self.remove(id, from: &index)
+        switch entry.change {
+        case .upserted(let item, let kind):
+            switch kind {
+            case .inserted, .content:
+                Self.upsert(item, into: &index)
+                contentChanged()
+            case .usage, .pin:
+                if let slot = index.idToSlot[item.id], var existing = index.items[slot] {
+                    existing.lastUsedAt = item.lastUsedAt
+                    existing.isPinned = item.isPinned
+                    index.items[slot] = existing
+                    contentChanged()
+                }
+            case .metadata:
+                break
+            }
+        case .deleted(let ids), .clearedUnpinned(let ids):
+            for id in ids { Self.remove(id, from: &index) }
+            contentChanged()
+        case .storageSizesUpdated:
+            break
         }
         self.index = index
-        contentChanged()
-
-        guard Self.needsRebuild(index) else { return false }
-        isStale = true
-        return true
+        self.mutationSeq = entry.mutationSeq
+        isStale = Self.needsRebuild(index)
     }
 
-    /// Metadata-only changes update the slot in place; changed text tombstones the old slot and
-    /// appends a new one, which avoids removing postings. Returns whether a slot was appended.
-    @discardableResult
-    private static func upsert(_ item: ClipboardStoredItem, into index: inout FullFuzzyIndex) -> Bool {
+    /// Content facts reuse a slot when normalized text is unchanged. Changed text tombstones
+    /// the old slot and appends a new one, avoiding removal from postings lists.
+    private static func upsert(_ item: ClipboardStoredItem, into index: inout FullFuzzyIndex) {
         let indexed = IndexedItem(from: item)
 
         if let slot = index.idToSlot[item.id],
@@ -296,14 +257,13 @@ final class FullIndexStore {
            let existing = index.items[slot] {
             if existing.plainTextLower == indexed.plainTextLower {
                 index.items[slot] = indexed
-                return false
+                return
             }
             index.items[slot] = nil
             index.tombstoneCount += 1
         }
 
         index.append(indexed)
-        return true
     }
 
     private static func remove(_ id: UUID, from index: inout FullFuzzyIndex) {
@@ -314,14 +274,6 @@ final class FullIndexStore {
         index.tombstoneCount += 1
     }
 
-    private static func setPinned(_ id: UUID, _ pinned: Bool, in index: inout FullFuzzyIndex) {
-        guard let slot = index.idToSlot[id],
-              slot < index.items.count,
-              var existing = index.items[slot] else { return }
-        existing.isPinned = pinned
-        index.items[slot] = existing
-    }
-
     private func contentChanged() {
         contentGeneration &+= 1
         sortedMatchesCache = nil
@@ -329,11 +281,11 @@ final class FullIndexStore {
 
     // MARK: - Disk cache
 
-    /// Writes the usable index to the disk cache stamped with `mutationSeq` unless that stamp is
-    /// already there or a write is running. `finish` runs on the engine actor with the stamp that
+    /// Writes the usable index at its own read position unless that stamp is already persisted
+    /// or a write is running. `finish` runs on the engine actor with the stamp that
     /// landed, or nil when the write failed.
-    func startPersistIfNeeded(mutationSeq: Int64, finish: @escaping @Sendable (Int64?) async -> Void) {
-        guard persistTask == nil, let index = usableIndex, persistedMutationSeq != mutationSeq else { return }
+    func startPersistIfNeeded(finish: @escaping @Sendable (Int64?) async -> Void) {
+        guard persistTask == nil, let index = usableIndex, let mutationSeq, persistedMutationSeq != mutationSeq else { return }
         guard let request = SearchIndexDiskCache.makeFullPersistRequest(
             index: index,
             dbPath: dbPath,

@@ -39,14 +39,18 @@ enum IngestEnvelopeProcessor {
         }
         guard !Task.isCancelled else { return .cancelled }
         var payloadData = originalPayloadData
+        var payload = CapturedPayload.original(
+            originalPayloadData,
+            envelope: envelope,
+            ingestDirectory: ingestDirectory
+        )
         var plainText = envelope.plainText
         var sizeBytes = envelope.sizeBytes
 
         if envelope.type == .image, let imageData = payloadData {
             if envelope.imageDataWasTIFF, let pngData = ClipboardMonitor.convertTIFFToPNG(imageData) {
                 payloadData = pngData
-            } else {
-                payloadData = imageData
+                payload = payload.replacingData(pngData, type: .image)
             }
             sizeBytes = payloadData?.count ?? imageData.count
             plainText = "[Image: \(formatBytes(sizeBytes))]"
@@ -59,91 +63,16 @@ enum IngestEnvelopeProcessor {
             precomputedHash: envelope.precomputedHash
         )
 
-        let preferredPayloadURL: URL? = {
-            guard payloadData == originalPayloadData else { return nil }
-            return IngestSpool.pendingPayloadURL(for: envelope, ingestDirectory: ingestDirectory)
-        }()
-
         guard !Task.isCancelled else { return .cancelled }
-
-        let builtPayload = buildPayload(
-            type: envelope.type,
-            data: payloadData,
-            sizeBytes: sizeBytes,
-            ingestDirectory: ingestDirectory,
-            spoolThresholdBytes: ScopyThresholds.ingestSpoolBytes,
-            preferredFileURL: preferredPayloadURL
-        )
-
-        guard !Task.isCancelled else {
-            cleanupPayloadIfNeeded(builtPayload.payload, ownership: builtPayload.ownership)
-            return .cancelled
-        }
 
         return .content(ClipboardMonitor.ClipboardContent(
             type: envelope.type,
             plainText: plainText,
-            payload: builtPayload.payload,
+            payload: payload,
             appBundleID: envelope.appBundleID,
             contentHash: hash,
-            sizeBytes: sizeBytes,
-            ingestEnvelopeURL: envelopeURL,
-            ingestID: envelope.id,
-            fileOwnership: builtPayload.ownership
+            sizeBytes: sizeBytes
         ))
-    }
-
-    /// Deletes a transient payload file of content that will not be delivered.
-    static func cleanupPayloadIfNeeded(
-        _ payload: ClipboardMonitor.ClipboardContent.Payload,
-        ownership: ClipboardMonitor.ClipboardContent.FileOwnership
-    ) {
-        guard ownership == .transient else { return }
-        guard case .file(let url) = payload else { return }
-        try? FileManager.default.removeItem(at: url)
-    }
-
-    private struct BuiltPayload: Sendable {
-        let payload: ClipboardMonitor.ClipboardContent.Payload
-        let ownership: ClipboardMonitor.ClipboardContent.FileOwnership
-    }
-
-    private static func buildPayload(
-        type: ClipboardItemType,
-        data: Data?,
-        sizeBytes: Int,
-        ingestDirectory: URL,
-        spoolThresholdBytes: Int,
-        preferredFileURL: URL?
-    ) -> BuiltPayload {
-        guard let data else { return BuiltPayload(payload: .none, ownership: .transient) }
-
-        guard sizeBytes >= spoolThresholdBytes else {
-            return BuiltPayload(payload: .data(data), ownership: .transient)
-        }
-
-        if let preferredFileURL, FileManager.default.fileExists(atPath: preferredFileURL.path) {
-            return BuiltPayload(payload: .file(preferredFileURL), ownership: .durableSpool)
-        }
-
-        let ext: String
-        switch type {
-        case .image: ext = ImageFileExtension.sniff(data)
-        case .rtf: ext = "rtf"
-        case .html: ext = "html"
-        default: ext = "dat"
-        }
-
-        let fileURL = ingestDirectory.appendingPathComponent(
-            "\(IngestSpool.transientWorkPrefix)\(UUID().uuidString).\(ext)"
-        )
-        do {
-            try StorageService.writeAtomically(data, to: fileURL.path)
-            return BuiltPayload(payload: .file(fileURL), ownership: .transient)
-        } catch {
-            ScopyLog.monitor.warning("Failed to spool ingest payload: \(error.localizedDescription, privacy: .private)")
-            return BuiltPayload(payload: .data(data), ownership: .transient)
-        }
     }
 
     private static func formatBytes(_ bytes: Int) -> String {

@@ -278,7 +278,8 @@ final class ClipboardItemContentRevisionTests: XCTestCase {
             sizeBytes: plainText.utf8.count,
             fileSizeBytes: nil,
             thumbnailPath: thumbnailPath,
-            storageRef: storageRef
+            storageRef: storageRef,
+            useCount: 1
         )
     }
 
