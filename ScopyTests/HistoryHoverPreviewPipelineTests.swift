@@ -159,16 +159,25 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertNotEqual(firstPlan.cacheKey, replacementPlan.cacheKey)
     }
 
-    func testTextRequestCapturesSameIDContentRevision() {
+    func testTextPreviewSeparatesSameIDMissingHashEqualLengthContent() async throws {
         let itemID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
-        let first = makeItem(id: itemID, type: .text, contentHash: "", plainText: "AB")
-        let replacement = makeItem(id: itemID, type: .text, contentHash: "", plainText: "CD")
+        let first = makeItem(id: itemID, type: .text, contentHash: "", plainText: "# AB")
+        let replacement = makeItem(id: itemID, type: .text, contentHash: "", plainText: "# CD")
+        var documents: [PreparedMarkdownDocument] = []
+        for item in [first, replacement] {
+            await HistoryHoverPreviewPipeline.run(
+                request: .text(HistoryHoverPreviewPipeline.textRequest(item: item, delay: 0)),
+                isCurrent: { true },
+                emit: { event in
+                    if case .text(let state) = event, let document = state.content?.document {
+                        documents.append(document)
+                    }
+                }
+            )
+        }
 
-        let firstRequest = HistoryHoverPreviewPipeline.textRequest(item: first, delay: 0)
-        let replacementRequest = HistoryHoverPreviewPipeline.textRequest(item: replacement, delay: 0)
-
-        XCTAssertEqual(firstRequest.revision, ClipboardItemContentRevision(item: first))
-        XCTAssertNotEqual(firstRequest.revision, replacementRequest.revision)
+        XCTAssertEqual(documents.map(\.source), [first.plainText, replacement.plainText])
+        XCTAssertNotEqual(try XCTUnwrap(documents.first).renderKey, try XCTUnwrap(documents.last).renderKey)
     }
 
     func testFilePlansPreserveKindSpecificCacheKeys() {
@@ -273,11 +282,11 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             return nil
         }
 
-        XCTAssertNil(textStates.first?.text)
-        XCTAssertTrue(textStates.first?.isMarkdown == true)
-        XCTAssertEqual(textStates.last?.text, "# File Title\n\nBody")
-        XCTAssertTrue(textStates.last?.isMarkdown == true)
-        XCTAssertNil(textStates.last?.markdownHTML)
+        XCTAssertNil(textStates.first?.content?.text)
+        XCTAssertTrue(textStates.first?.content?.isMarkdown == true)
+        XCTAssertEqual(textStates.last?.content?.text, "# File Title\n\nBody")
+        XCTAssertTrue(textStates.last?.content?.isMarkdown == true)
+        XCTAssertNil(textStates.last?.content?.document)
         XCTAssertEqual(presentedKinds(events), [.file])
         XCTAssertEqual(renderRequests.count, 1)
         XCTAssertEqual(renderRequests.first?.source, "# File Title\n\nBody")
@@ -317,8 +326,8 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             if case .text(let state) = event { return state }
             return nil
         }
-        XCTAssertNil(initialTextStates.first?.text)
-        XCTAssertTrue(initialTextStates.first?.isMarkdown == true)
+        XCTAssertNil(initialTextStates.first?.content?.text)
+        XCTAssertTrue(initialTextStates.first?.content?.isMarkdown == true)
         XCTAssertEqual(presentedKinds(events), [.file])
 
         releaseRead?.resume(returning: "# Delayed File\n\nBody")
@@ -328,19 +337,17 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             if case .text(let state) = event { return state }
             return nil
         }
-        XCTAssertEqual(finalTextStates.last?.text, "# Delayed File\n\nBody")
-        XCTAssertTrue(finalTextStates.last?.isMarkdown == true)
+        XCTAssertEqual(finalTextStates.last?.content?.text, "# Delayed File\n\nBody")
+        XCTAssertTrue(finalTextStates.last?.content?.isMarkdown == true)
         XCTAssertEqual(presentedKinds(events), [.file])
     }
 
     func testTextPreviewUsesCachedMarkdownCapabilityAndCachedHTMLMetrics() async {
         let item = makeItem(type: .text, contentHash: "cached-markdown", plainText: "# Title\n\nBody")
-        let renderCacheKey = MarkdownRenderCacheKey.make(
-            input: MarkdownRenderContextResolver.defaultContext(for: item.plainText),
-            itemKey: ClipboardItemContentRevision(item: item).cacheKey
-        )
+        let request = HistoryHoverPreviewPipeline.textRequest(item: item, delay: 0)
+        let document = await PreparedMarkdownDocument.prepare(source: item.plainText, layoutScale: request.markdownLayoutScale)
+        let renderCacheKey = document.renderKey
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
-        MarkdownPreviewCache.shared.setHTML("<h1>Title</h1>", forKey: renderCacheKey)
         MarkdownPreviewCache.shared.setMetrics(
             MarkdownContentMetrics(size: CGSize(width: 12, height: 80), hasHorizontalOverflow: true),
             forKey: renderCacheKey
@@ -359,9 +366,9 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         }
         // Cached HTML and metrics arrive in the single text state that precedes presentation.
         XCTAssertEqual(textStates.count, 1)
-        XCTAssertEqual(textStates.first?.text, "# Title\n\nBody")
-        XCTAssertTrue(textStates.first?.isMarkdown == true)
-        XCTAssertEqual(textStates.last?.markdownHTML, "<h1>Title</h1>")
+        XCTAssertEqual(textStates.first?.content?.text, "# Title\n\nBody")
+        XCTAssertTrue(textStates.first?.content?.isMarkdown == true)
+        XCTAssertEqual(textStates.last?.content?.document?.html, document.html)
         XCTAssertEqual(
             textStates.last?.markdownContentSize?.width ?? 0,
             HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints(),
@@ -370,8 +377,53 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         XCTAssertEqual(presentedKinds(events), [.text])
     }
 
+    func testExpiredMarkdownFileCacheKeepsEachSourceWithItsPreparedDocument() async throws {
+        let cacheKey = "file|\(UUID().uuidString)"
+        let old = await PreparedMarkdownDocument.prepare(source: "# Old file", layoutScale: .percent100)
+        MarkdownPreviewCache.shared.setFilePreview(
+            .init(text: old.source, document: old, fetchedAt: .distantPast),
+            forKey: cacheKey
+        )
+        let request = HistoryHoverPreviewPipeline.MarkdownFileRequest(
+            cacheKey: cacheKey,
+            url: FileManager.default.temporaryDirectory.appendingPathComponent("source.md"),
+            delay: 0,
+            markdownLayoutScale: .percent100
+        )
+        var events: [HistoryHoverPreviewPipeline.Event] = []
+        await HistoryHoverPreviewPipeline.run(
+            request: .markdownFile(request),
+            readTextFile: { _, _ in "# Changed file" },
+            isCurrent: { true },
+            emit: { events.append($0) }
+        )
+        let states = events.compactMap { event -> HistoryHoverPreviewPipeline.TextPreviewState? in
+            if case .text(let state) = event { return state }
+            return nil
+        }
+        XCTAssertEqual(states.first?.content?.document?.renderKey, old.renderKey)
+        XCTAssertEqual(states.first?.content?.text, old.source)
+        XCTAssertEqual(states.last?.content?.text, "# Changed file")
+        XCTAssertNil(states.last?.content?.document)
+
+        let render = try XCTUnwrap(events.compactMap { event -> HistoryHoverPreviewPipeline.MarkdownRenderRequest? in
+            if case .renderMarkdown(let request) = event { return request }
+            return nil
+        }.first)
+        let task = HistoryHoverPreviewPipeline.makeMarkdownRenderTask(
+            request: render,
+            isCurrent: { true },
+            emit: { events.append($0) }
+        )
+        await task.value
+        let updated = try XCTUnwrap(MarkdownPreviewCache.shared.filePreview(forKey: cacheKey)?.document)
+        XCTAssertEqual(updated.source, "# Changed file")
+        XCTAssertNotEqual(updated.renderKey, old.renderKey)
+        XCTAssertEqual(updated.html, MarkdownHTMLDocumentBuilder.document(source: updated.source, context: updated.context))
+    }
+
     func testMarkdownTextPreviewPresentsBeforeRenderMetricsArrive() async {
-        let item = makeItem(type: .text, contentHash: "fresh-markdown", plainText: "# Title\n\nBody")
+        let item = makeItem(type: .text, contentHash: "fresh-markdown", plainText: "# Fresh Title\n\nBody")
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(true, for: item)
 
         var events: [HistoryHoverPreviewPipeline.Event] = []
@@ -393,27 +445,27 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
         // The document is rendered during the delay and handed to the WebView (prewarm) before
         // the popover is requested; no on-demand render follows.
         let prewarms = events.compactMap { event -> String? in
-            if case .prewarmMarkdownHTML(let html, _) = event { return html }
+            if case .prewarmMarkdownDocument(let document) = event { return document.html }
             return nil
         }
         XCTAssertEqual(textStates.count, 1)
-        XCTAssertEqual(textStates.first?.text, "# Title\n\nBody")
-        XCTAssertTrue(textStates.first?.isMarkdown == true)
-        XCTAssertNotNil(textStates.first?.markdownHTML)
+        XCTAssertEqual(textStates.first?.content?.text, "# Fresh Title\n\nBody")
+        XCTAssertTrue(textStates.first?.content?.isMarkdown == true)
+        XCTAssertNotNil(textStates.first?.content?.document)
         XCTAssertNil(textStates.first?.markdownContentSize, "No metrics before the WebView reported any")
         XCTAssertEqual(prewarms.count, 1)
-        XCTAssertEqual(prewarms.first, textStates.first?.markdownHTML)
+        XCTAssertEqual(prewarms.first, textStates.first?.content?.document?.html)
         XCTAssertEqual(presentedKinds(events), [.text])
         XCTAssertEqual(renderRequests.count, 0)
-        XCTAssertEqual(events.firstIndex { if case .prewarmMarkdownHTML = $0 { return true } else { return false } } ?? -1 < (events.firstIndex { if case .present = $0 { return true } else { return false } } ?? -1), true)
+        XCTAssertEqual(events.firstIndex { if case .prewarmMarkdownDocument = $0 { return true } else { return false } } ?? -1 < (events.firstIndex { if case .present = $0 { return true } else { return false } } ?? -1), true)
     }
 
     func testMarkdownRenderTaskRendersBeforeFinalLivenessGate() async {
         let probe = RenderProbe()
         let request = HistoryHoverPreviewPipeline.MarkdownRenderRequest(
             source: "# Title\n\nBody",
-            context: MarkdownRenderContextResolver.defaultContext(for: "# Title\n\nBody"),
-            target: .text(cacheKey: "render-before-liveness")
+            layoutScale: .percent100,
+            target: .text
         )
         var emittedHTML: [String] = []
 
@@ -421,27 +473,29 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             request: request,
             isCurrent: { probe.hasRendered },
             emit: { event in
-                if case .markdownHTML(let html, _) = event {
-                    emittedHTML.append(html)
+                if case .markdownDocument(let document) = event {
+                    emittedHTML.append(document.html)
                 }
             },
-            renderMarkdownHTML: { _, _ in
+            prepareDocument: { source, layoutScale in
+                let document = await PreparedMarkdownDocument.prepare(source: source, layoutScale: layoutScale)
                 probe.markRendered()
-                return "<h1>Title</h1>"
+                return document
             }
         )
 
         await task.value
 
-        XCTAssertEqual(emittedHTML, ["<h1>Title</h1>"])
+        XCTAssertEqual(emittedHTML.count, 1)
+        XCTAssertTrue(emittedHTML.first?.contains("scopy-render-input") == true)
     }
 
     func testMarkdownRenderTaskDropsHTMLWhenFinalLivenessFails() async {
         let probe = RenderProbe()
         let request = HistoryHoverPreviewPipeline.MarkdownRenderRequest(
             source: "# Stale\n\nBody",
-            context: MarkdownRenderContextResolver.defaultContext(for: "# Stale\n\nBody"),
-            target: .text(cacheKey: "stale-markdown")
+            layoutScale: .percent100,
+            target: .text
         )
         var emittedHTML: [String] = []
 
@@ -449,13 +503,14 @@ final class HistoryHoverPreviewPipelineTests: XCTestCase {
             request: request,
             isCurrent: { false },
             emit: { event in
-                if case .markdownHTML(let html, _) = event {
-                    emittedHTML.append(html)
+                if case .markdownDocument(let document) = event {
+                    emittedHTML.append(document.html)
                 }
             },
-            renderMarkdownHTML: { _, _ in
+            prepareDocument: { source, layoutScale in
+                let document = await PreparedMarkdownDocument.prepare(source: source, layoutScale: layoutScale)
                 probe.markRendered()
-                return "<h1>Stale</h1>"
+                return document
             }
         )
 

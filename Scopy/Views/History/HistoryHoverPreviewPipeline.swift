@@ -45,8 +45,6 @@ enum HistoryHoverPreviewPipeline {
 
     struct TextRequest {
         let item: ClipboardItemDTO
-        /// Captured with `item` so cache identity and the later session guard share one snapshot.
-        let revision: ClipboardItemContentRevision
         let delay: TimeInterval
         let markdownLayoutScale: MarkdownChatGPTLayoutScalePercent
     }
@@ -83,39 +81,22 @@ enum HistoryHoverPreviewPipeline {
     }
 
     struct TextPreviewState {
-        let text: String?
-        let isMarkdown: Bool
-        let markdownHTML: String?
-        let markdownContentSize: CGSize?
-        let markdownHasHorizontalOverflow: Bool
-        /// Layout scale `markdownHTML` was rendered at.
-        var layoutScale: MarkdownChatGPTLayoutScalePercent? = nil
+        let content: HoverPreviewTextContent?
+        var markdownContentSize: CGSize? = nil
+        var markdownHasHorizontalOverflow = false
 
-        static let empty = TextPreviewState(
-            text: nil,
-            isMarkdown: false,
-            markdownHTML: nil,
-            markdownContentSize: nil,
-            markdownHasHorizontalOverflow: false
-        )
+        static let empty = TextPreviewState(content: nil)
     }
 
     struct MarkdownRenderRequest {
         enum Target {
-            case text(cacheKey: String)
+            case text
             case file(cacheKey: String)
         }
 
         let source: String
-        let context: MarkdownRenderContext
+        let layoutScale: MarkdownChatGPTLayoutScalePercent
         let target: Target
-
-        var renderCacheKey: String {
-            switch target {
-            case .text(let cacheKey), .file(let cacheKey):
-                return MarkdownRenderCacheKey.make(input: context, itemKey: cacheKey)
-            }
-        }
     }
 
     enum Event {
@@ -127,11 +108,11 @@ enum HistoryHoverPreviewPipeline {
         /// Whether the previewed file exists, resolved before the popover opens.
         case fileAvailability(Bool)
         case text(TextPreviewState)
-        case markdownHTML(String, MarkdownChatGPTLayoutScalePercent)
+        case markdownDocument(PreparedMarkdownDocument)
         case renderMarkdown(MarkdownRenderRequest)
         /// The document is ready before the preview delay elapsed; the shared WebView may load it
         /// offscreen so the popover opens with the final layout.
-        case prewarmMarkdownHTML(html: String, renderCacheKey: String)
+        case prewarmMarkdownDocument(PreparedMarkdownDocument)
     }
 
     /// Hovering starts preview work only after this long, so passing over rows costs nothing;
@@ -178,7 +159,6 @@ enum HistoryHoverPreviewPipeline {
     ) -> TextRequest {
         TextRequest(
             item: item,
-            revision: ClipboardItemContentRevision(item: item),
             delay: delay,
             markdownLayoutScale: MarkdownPreviewLayoutScalePreference.active(settings: settings)
         )
@@ -271,19 +251,26 @@ enum HistoryHoverPreviewPipeline {
         request: MarkdownRenderRequest,
         isCurrent: @escaping @MainActor () -> Bool,
         emit: @escaping @MainActor (Event) -> Void,
-        renderMarkdownHTML: @escaping @Sendable (String, MarkdownRenderContext) async -> String = { source, context in
-            await HistoryHoverPreviewPipeline.renderMarkdownHTML(source, context: context)
+        prepareDocument: @escaping @Sendable (String, MarkdownChatGPTLayoutScalePercent) async -> PreparedMarkdownDocument? = { source, layoutScale in
+            await HistoryHoverPreviewPipeline.prepareMarkdownDocument(source, layoutScale: layoutScale)
         }
     ) -> Task<Void, Never> {
         let callbacks = MarkdownRenderCallbacks(isCurrent: isCurrent, emit: emit)
         return Task(priority: .utility) { @MainActor in
             guard !Task.isCancelled else { return }
-            let html = await renderMarkdownHTML(request.source, request.context)
-            guard !Task.isCancelled, !html.isEmpty else { return }
-            logHoverStage("html rendered \(html.utf8.count) bytes")
-            updateMarkdownCache(html: html, request: request)
+            guard let document = await prepareDocument(request.source, request.layoutScale),
+                  !Task.isCancelled else { return }
+            logHoverStage("html rendered \(document.html.utf8.count) bytes")
+            if case .file(let cacheKey) = request.target,
+               let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
+               current.text == document.source {
+                MarkdownPreviewCache.shared.setFilePreview(
+                    .init(text: current.text, document: document, fetchedAt: current.fetchedAt),
+                    forKey: cacheKey
+                )
+            }
             guard callbacks.isCurrent() else { return }
-            callbacks.emit(.markdownHTML(html, request.context.layoutScale))
+            callbacks.emit(.markdownDocument(document))
         }
     }
 
@@ -469,60 +456,36 @@ enum HistoryHoverPreviewPipeline {
         let cachedEntry = MarkdownPreviewCache.shared.filePreview(forKey: request.cacheKey)
         if let cachedEntry,
            now.timeIntervalSince(cachedEntry.fetchedAt) < markdownFilePreviewCacheTTL {
-            let context = MarkdownRenderContextResolver.defaultContext(
-                for: cachedEntry.text,
-                layoutScale: request.markdownLayoutScale
-            )
-            let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: request.cacheKey)
-            let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
-            emitCachedFilePreview(cachedEntry, renderCacheKey: renderCacheKey, layoutScale: request.markdownLayoutScale, emit: emit)
-            if cachedHTML == nil, cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes {
-                emit(markdownRenderEvent(
+            let document = cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes
+                ? await prepareMarkdownDocument(cachedEntry.text, layoutScale: request.markdownLayoutScale)
+                : nil
+            guard !Task.isCancelled, isCurrent() else { return }
+            if let document {
+                MarkdownPreviewCache.shared.setFilePreview(
+                    .init(text: cachedEntry.text, document: document, fetchedAt: cachedEntry.fetchedAt),
+                    forKey: request.cacheKey
+                )
+            }
+            emit(.text(markdownTextState(source: cachedEntry.text, document: document)))
+            emit(.present(.file))
+            if document == nil, cachedEntry.text.utf16.count <= maxMarkdownPreviewBytes {
+                emit(.renderMarkdown(.init(
                     source: cachedEntry.text,
-                    target: .file(cacheKey: request.cacheKey),
-                    layoutScale: request.markdownLayoutScale
-                ))
+                    layoutScale: request.markdownLayoutScale,
+                    target: .file(cacheKey: request.cacheKey)
+                )))
             }
             return
-        } else if let cachedEntry {
-            let context = MarkdownRenderContextResolver.defaultContext(
-                for: cachedEntry.text,
-                layoutScale: request.markdownLayoutScale
-            )
-            let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: request.cacheKey)
-            let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
-            let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey)
-            emit(
-                .text(
-                    TextPreviewState(
-                        text: cachedEntry.text,
-                        isMarkdown: true,
-                        markdownHTML: cachedHTML,
-                        markdownContentSize: cachedMetrics?.size,
-                        markdownHasHorizontalOverflow: cachedMetrics?.hasHorizontalOverflow ?? false,
-                        layoutScale: request.markdownLayoutScale
-                    )
-                )
-            )
-            emit(.present(.file))
-        } else {
-            emit(
-                .text(
-                    TextPreviewState(
-                        text: nil,
-                        isMarkdown: true,
-                        markdownHTML: nil,
-                        markdownContentSize: nil,
-                        markdownHasHorizontalOverflow: false,
-                        layoutScale: request.markdownLayoutScale
-                    )
-                )
-            )
-            emit(.present(.file))
         }
 
-        let previewText = await readTextFile(request.url, maxMarkdownPreviewBytes)
+        if let cachedEntry {
+            emit(.text(markdownTextState(source: cachedEntry.text, document: cachedEntry.document)))
+        } else {
+            emit(.text(TextPreviewState(content: .markdownSource(nil))))
+        }
+        emit(.present(.file))
 
+        let previewText = await readTextFile(request.url, maxMarkdownPreviewBytes)
         guard !Task.isCancelled, isCurrent() else { return }
         guard let rawText = previewText else {
             if cachedEntry != nil {
@@ -534,59 +497,18 @@ enum HistoryHoverPreviewPipeline {
         }
 
         let preview = rawText.isEmpty ? "(Empty)" : rawText
-        emit(
-            .text(
-                TextPreviewState(
-                    text: preview,
-                    isMarkdown: true,
-                    markdownHTML: nil,
-                    markdownContentSize: nil,
-                    markdownHasHorizontalOverflow: false,
-                    layoutScale: request.markdownLayoutScale
-                )
-            )
-        )
-
-        guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
-
-        let context = MarkdownRenderContextResolver.defaultContext(
-            for: preview,
-            layoutScale: request.markdownLayoutScale
-        )
-        let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: request.cacheKey)
-        let cachedHTML: String? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.html(forKey: renderCacheKey) : nil
-        let cachedMetrics: MarkdownContentMetrics? = (cachedEntry?.text == preview) ? MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) : nil
+        let previousDocument = cachedEntry?.text == preview ? cachedEntry?.document : nil
         MarkdownPreviewCache.shared.setFilePreview(
-            MarkdownPreviewCache.FilePreviewEntry(text: preview, html: nil, metrics: nil, fetchedAt: now),
+            .init(text: preview, document: previousDocument, fetchedAt: now),
             forKey: request.cacheKey
         )
-
-        if let cachedHTML {
-            emit(.markdownHTML(cachedHTML, request.markdownLayoutScale))
-            if let cachedMetrics {
-                let stableMetrics = stableMetrics(from: cachedMetrics, text: preview)
-                emit(
-                    .text(
-                        TextPreviewState(
-                            text: preview,
-                            isMarkdown: true,
-                            markdownHTML: cachedHTML,
-                            markdownContentSize: stableMetrics.size,
-                            markdownHasHorizontalOverflow: stableMetrics.hasHorizontalOverflow,
-                            layoutScale: request.markdownLayoutScale
-                        )
-                    )
-                )
-                MarkdownPreviewCache.shared.setMetrics(stableMetrics, forKey: renderCacheKey)
-            }
-            return
-        }
-
-        emit(markdownRenderEvent(
+        emit(.text(markdownTextState(source: preview, document: previousDocument)))
+        guard preview.utf16.count <= maxMarkdownPreviewBytes else { return }
+        emit(.renderMarkdown(.init(
             source: preview,
-            target: .file(cacheKey: request.cacheKey),
-            layoutScale: request.markdownLayoutScale
-        ))
+            layoutScale: request.markdownLayoutScale,
+            target: .file(cacheKey: request.cacheKey)
+        )))
     }
 
     /// Uptime when the current text/Markdown hover started; the WebView logs its stages against it.
@@ -618,33 +540,14 @@ enum HistoryHoverPreviewPipeline {
         logHoverStage("detected markdown=\(isMarkdown)")
         HistoryItemPresentationCache.shared.storeMarkdownExportCapability(isMarkdown, for: item)
 
-        // Build the document during the remaining delay: context and render off the main actor,
-        // then let the shared WebView lay it out offscreen so the popover opens at its final size.
-        var preparedHTML: String?
-        var renderCacheKey = ""
-        let layoutScale = request.markdownLayoutScale
+        // Prepare the entire value during the delay. The eventual owner receives exactly this
+        // context and identity even if another preview enriches the same source meanwhile.
+        var document: PreparedMarkdownDocument?
         if isMarkdown, preview.utf16.count <= maxMarkdownPreviewBytes {
-            let contentHash = request.revision.cacheKey
-            let (context, key) = await Task.detached(priority: .userInitiated) {
-                let context = MarkdownRenderContextResolver.defaultContext(for: preview, layoutScale: layoutScale)
-                return (context, MarkdownRenderCacheKey.make(input: context, itemKey: contentHash))
-            }.value
+            document = await prepareMarkdownDocument(preview, layoutScale: request.markdownLayoutScale)
             guard !Task.isCancelled, isCurrent() else { return }
-            renderCacheKey = key
-            if !key.isEmpty, let cached = MarkdownPreviewCache.shared.html(forKey: key) {
-                logHoverStage("html cache hit")
-                preparedHTML = cached
-            } else {
-                let html = await renderMarkdownHTML(preview, context: context)
-                guard !Task.isCancelled, isCurrent() else { return }
-                if !html.isEmpty {
-                    logHoverStage("html rendered \(html.utf8.count) bytes")
-                    if !key.isEmpty { MarkdownPreviewCache.shared.setHTML(html, forKey: key) }
-                    preparedHTML = html
-                }
-            }
-            if let preparedHTML, !key.isEmpty, MarkdownPreviewCache.shared.metrics(forKey: key) == nil {
-                emit(.prewarmMarkdownHTML(html: preparedHTML, renderCacheKey: key))
+            if let document, MarkdownPreviewCache.shared.metrics(forKey: document.renderKey) == nil {
+                emit(.prewarmMarkdownDocument(document))
             }
         }
 
@@ -655,39 +558,20 @@ enum HistoryHoverPreviewPipeline {
         guard !Task.isCancelled, isCurrent() else { return }
         logHoverStage("delay elapsed")
 
-        var contentSize: CGSize?
-        var hasHorizontalOverflow = false
-        if preparedHTML != nil, !renderCacheKey.isEmpty,
-           let cachedMetrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) {
-            let stable = stableMetrics(from: cachedMetrics, text: preview)
-            contentSize = stable.size
-            hasHorizontalOverflow = stable.hasHorizontalOverflow
-            MarkdownPreviewCache.shared.setMetrics(stable, forKey: renderCacheKey)
-            logHoverStage("metrics ready height=\(Int(stable.size.height))")
-        }
-        emit(
-            .text(
-                TextPreviewState(
-                    text: preview,
-                    isMarkdown: isMarkdown,
-                    markdownHTML: preparedHTML,
-                    markdownContentSize: contentSize,
-                    markdownHasHorizontalOverflow: hasHorizontalOverflow,
-                    layoutScale: request.markdownLayoutScale
-                )
-            )
-        )
+        let state = isMarkdown
+            ? markdownTextState(source: preview, document: document)
+            : TextPreviewState(content: .plain(preview))
+        emit(.text(state))
         emit(.present(.text))
         logHoverStage("popover requested")
 
-        // The render pool was saturated during the delay: fall back to the on-demand render.
-        if isMarkdown, preparedHTML == nil, preview.utf16.count <= maxMarkdownPreviewBytes {
-            logHoverStage("render requested after present")
-            emit(markdownRenderEvent(
+        // The bounded pool may reject prefetch work. The visible preview gets another chance.
+        if isMarkdown, document == nil, preview.utf16.count <= maxMarkdownPreviewBytes {
+            emit(.renderMarkdown(.init(
                 source: preview,
-                target: .text(cacheKey: request.revision.cacheKey),
-                layoutScale: request.markdownLayoutScale
-            ))
+                layoutScale: request.markdownLayoutScale,
+                target: .text
+            )))
         }
     }
 
@@ -713,47 +597,32 @@ enum HistoryHoverPreviewPipeline {
     }
 
     @MainActor
-    private static func emitCachedFilePreview(
-        _ entry: MarkdownPreviewCache.FilePreviewEntry,
-        renderCacheKey: String,
-        layoutScale: MarkdownChatGPTLayoutScalePercent,
-        emit: @escaping @MainActor (Event) -> Void
-    ) {
-        let cachedHTML = MarkdownPreviewCache.shared.html(forKey: renderCacheKey)
-        let cachedStableMetrics: MarkdownContentMetrics?
-        if let metrics = MarkdownPreviewCache.shared.metrics(forKey: renderCacheKey) {
-            cachedStableMetrics = stableMetrics(from: metrics, text: entry.text)
-        } else {
-            cachedStableMetrics = nil
+    private static func markdownTextState(
+        source: String,
+        document: PreparedMarkdownDocument?
+    ) -> TextPreviewState {
+        guard let document else { return TextPreviewState(content: .markdownSource(source)) }
+        let metrics = MarkdownPreviewCache.shared.metrics(forKey: document.renderKey).map {
+            stableMetrics(from: $0, text: document.source)
         }
-        emit(
-            .text(
-                TextPreviewState(
-                    text: entry.text,
-                    isMarkdown: true,
-                    markdownHTML: cachedHTML,
-                    markdownContentSize: cachedStableMetrics?.size,
-                    markdownHasHorizontalOverflow: cachedStableMetrics?.hasHorizontalOverflow ?? false
-                )
-            )
+        return TextPreviewState(
+            content: .markdown(document),
+            markdownContentSize: metrics?.size,
+            markdownHasHorizontalOverflow: metrics?.hasHorizontalOverflow ?? false
         )
-        if let cachedStableMetrics {
-            MarkdownPreviewCache.shared.setMetrics(cachedStableMetrics, forKey: renderCacheKey)
-        }
-        emit(.present(.file))
     }
 
-    private static func renderMarkdownHTML(_ source: String, context: MarkdownRenderContext) async -> String {
+    private static func prepareMarkdownDocument(
+        _ source: String,
+        layoutScale: MarkdownChatGPTLayoutScalePercent
+    ) async -> PreparedMarkdownDocument? {
         await runBudgetedDetached(priority: .utility) {
-            if ScrollPerformanceProfile.isEnabled {
-                let start = CFAbsoluteTimeGetCurrent()
-                let html = MarkdownHTMLDocumentBuilder.document(source: source, context: context)
-                let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
-                ScrollPerformanceProfile.recordTiming(name: "hover.markdown_render_ms", elapsedMs: elapsed)
-                return html
+            await PreparedMarkdownDocument.prepare(source: source, layoutScale: layoutScale) { elapsedMs in
+                if ScrollPerformanceProfile.isEnabled {
+                    ScrollPerformanceProfile.recordTiming(name: "hover.markdown_render_ms", elapsedMs: elapsedMs)
+                }
             }
-            return MarkdownHTMLDocumentBuilder.document(source: source, context: context)
-        } ?? ""
+        }
     }
 
     private static func runBudgetedDetached<T: Sendable>(
@@ -787,36 +656,6 @@ enum HistoryHoverPreviewPipeline {
         // returns, including synchronous ImageIO work that cannot be interrupted mid-decode.
         await pool.release()
         return Task.isCancelled ? nil : result
-    }
-
-    private static func markdownRenderEvent(
-        source: String,
-        target: MarkdownRenderRequest.Target,
-        layoutScale: MarkdownChatGPTLayoutScalePercent
-    ) -> Event {
-        Event.renderMarkdown(
-            MarkdownRenderRequest(
-                source: source,
-                context: MarkdownRenderContextResolver.defaultContext(
-                    for: source,
-                    layoutScale: layoutScale
-                ),
-                target: target
-            )
-        )
-    }
-
-    private static func updateMarkdownCache(html: String, request: MarkdownRenderRequest) {
-        let renderCacheKey = request.renderCacheKey
-        guard !renderCacheKey.isEmpty else { return }
-        switch request.target {
-        case .text:
-            MarkdownPreviewCache.shared.setHTML(html, forKey: renderCacheKey)
-        case .file(let cacheKey):
-            guard let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
-                  current.text == request.source else { return }
-            MarkdownPreviewCache.shared.setHTML(html, forKey: renderCacheKey)
-        }
     }
 
     static func stableMetrics(from metrics: MarkdownContentMetrics, text _: String) -> MarkdownContentMetrics {

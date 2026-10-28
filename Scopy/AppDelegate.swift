@@ -573,9 +573,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let html = MarkdownHTMLDocumentBuilder.document(source: item.plainText)
+        let document = await PreparedMarkdownDocument.prepare(
+            source: item.plainText,
+            layoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
+        )
 
-        MarkdownExportService.exportToPNGClipboard(html: html, targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels) { result in
+        MarkdownExportService.exportToPNGClipboard(html: document.html, targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels) { result in
             if case .failure(let error) = result, !errorPath.isEmpty {
                 try? Data(String(describing: error).utf8).write(to: URL(fileURLWithPath: errorPath), options: [.atomic])
             } else if case .success = result, !dumpPath.isEmpty {

@@ -8,11 +8,6 @@ import ScopyKit
 enum MarkdownHTMLDocumentBuilder {
     private static let layout = MarkdownRenderLayoutConstants.self
 
-    /// The document for `source` with the context its profile detector and frozen enrichment select.
-    static func document(source: String) -> String {
-        document(source: source, context: MarkdownRenderContextResolver.defaultContext(for: source))
-    }
-
     /// The document for `source` under `context`. Swift never rewrites the source: every repair runs in the
     /// renderer bundle, gated by the embedded policy.
     static func document(source: String, context: MarkdownRenderContext) -> String {

@@ -21,12 +21,11 @@ final class PinnedPreviewControllerTests: XCTestCase {
 
     // MARK: - Content hand-off
 
-    func testAdoptedContentIsIndependentOfTheSourceModel() {
+    func testAdoptedContentIsIndependentOfTheSourceModel() async {
         let source = HoverPreviewModel()
+        let document = await PreparedMarkdownDocument.prepare(source: "# Title", layoutScale: .percent100)
         source.primeTextPreview(
-            text: "# Title",
-            isMarkdown: true,
-            markdownHTML: "<h1>Title</h1>",
+            content: .markdown(document),
             markdownContentSize: CGSize(width: 400, height: 220),
             markdownHasHorizontalOverflow: false
         )
@@ -39,27 +38,28 @@ final class PinnedPreviewControllerTests: XCTestCase {
 
         XCTAssertEqual(adopted.text, "# Title")
         XCTAssertTrue(adopted.isMarkdown)
-        XCTAssertEqual(adopted.markdownHTML, "<h1>Title</h1>")
+        XCTAssertEqual(adopted.markdownDocument?.html, document.html)
+        XCTAssertEqual(adopted.markdownDocument?.renderKey, document.renderKey)
         XCTAssertEqual(adopted.markdownContentSize, CGSize(width: 400, height: 220))
-        XCTAssertNil(source.markdownHTML)
+        XCTAssertNil(source.markdownDocument)
+        XCTAssertNil(source.textContent)
     }
 
-    func testLiveRenderStampMovesAcrossSoThePinnedHostReusesTheCurrentNavigation() {
+    func testLiveRenderStampMovesAcrossSoThePinnedHostReusesTheCurrentNavigation() async {
         let source = HoverPreviewModel()
+        let document = await PreparedMarkdownDocument.prepare(source: "body", layoutScale: .percent100)
         source.primeTextPreview(
-            text: "body",
-            isMarkdown: true,
-            markdownHTML: "<p>body</p>",
+            content: .markdown(document),
             markdownContentSize: CGSize(width: 300, height: 100),
             markdownHasHorizontalOverflow: false
         )
-        source.markMarkdownRenderSucceeded(for: "render-key")
+        source.markMarkdownRenderSucceeded(for: document.renderKey)
 
         let adopted = HoverPreviewModel()
         adopted.adoptRenderedContent(from: source)
 
         XCTAssertTrue(
-            adopted.isMarkdownRenderLive(for: "render-key"),
+            adopted.isMarkdownRenderLive(for: document.renderKey),
             "Pinning must not put the document back into a pending render state"
         )
     }
@@ -93,7 +93,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
     func testPinKeepsOneSnapshotAndReleasesItsTransferredWebViewOnClose() throws {
         let item = Self.makeItem()
         let source = HoverPreviewModel()
-        source.text = item.plainText
+        source.primeTextPreview(content: .plain(item.plainText))
         let webViewController = MarkdownPreviewWebViewController()
         let ownerID = UUID()
         webViewController.beginOwnership(ownerID)
@@ -114,7 +114,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
     func testInvalidationDuringHandoffPreventsTheWindowFromOpening() async throws {
         let item = Self.makeItem()
         let source = HoverPreviewModel()
-        source.text = item.plainText
+        source.primeTextPreview(content: .plain(item.plainText))
         let preview = try XCTUnwrap(PinnedPreview(
             item: item, revision: ClipboardItemContentRevision(item: item), kind: .text,
             filePreviewKind: nil, filePreviewPath: nil, source: source,
@@ -329,9 +329,7 @@ final class PinnedPreviewControllerTests: XCTestCase {
     private func pin(item: ClipboardItemDTO) {
         let source = HoverPreviewModel()
         source.primeTextPreview(
-            text: item.plainText,
-            isMarkdown: false,
-            markdownHTML: nil,
+            content: .plain(item.plainText),
             markdownContentSize: nil,
             markdownHasHorizontalOverflow: false
         )

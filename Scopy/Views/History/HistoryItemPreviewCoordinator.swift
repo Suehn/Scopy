@@ -11,7 +11,6 @@ final class HistoryItemPreviewCoordinator {
     private(set) var imagePopoverToken = UUID()
     private(set) var textPopoverToken = UUID()
     private(set) var filePopoverToken = UUID()
-    var markdownFilePreviewCacheKey: String?
 
     @ObservationIgnored var hoverDebounceTask: Task<Void, Never>?
     @ObservationIgnored var hoverPreviewTask: Task<Void, Never>?
@@ -29,15 +28,10 @@ final class HistoryItemPreviewCoordinator {
             hoverExitTask != nil || hoverIntentController.isActive
     }
 
-    func presentPreview(_ kind: HoverPreviewPopoverKind, markdownCacheKey: String? = nil) {
+    func presentPreview(_ kind: HoverPreviewPopoverKind) {
         cancelHoverExitTask()
         popoverScreenFrame = nil
         refreshPopoverToken(for: kind)
-        if kind == .file {
-            markdownFilePreviewCacheKey = markdownCacheKey
-        } else {
-            markdownFilePreviewCacheKey = nil
-        }
         cancelPreviewTasks()
     }
 
@@ -171,7 +165,6 @@ final class HistoryItemPreviewCoordinator {
         imagePopoverToken = UUID()
         textPopoverToken = UUID()
         filePopoverToken = UUID()
-        markdownFilePreviewCacheKey = nil
         popoverScreenFrame = nil
         isPopoverHovering = false
         isResizing = false

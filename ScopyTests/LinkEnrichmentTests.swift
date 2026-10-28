@@ -70,33 +70,36 @@ final class LinkEnrichmentTests: XCTestCase {
         XCTAssertNotEqual(a.fingerprint, c.fingerprint)
     }
 
-    func testStoreRoundTripAndMissReturnsNil() throws {
+    func testStoreRoundTripAndMissReturnsNil() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-enrichment-tests-\(UUID().uuidString)")
         let store = LinkEnrichmentStore(directory: directory)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        XCTAssertNil(store.payload(forContentKey: "missing"))
+        let missing = await store.payload(forContentKey: "missing")
+        XCTAssertNil(missing)
         let payload = LinkEnrichmentPayload(
             version: LinkEnrichmentPayload.formatVersion,
             fetchedAt: Date(),
             entries: ["https://example.com": .init(title: "Example", source: "example.com")]
         )
-        store.write(payload, forContentKey: "key1")
-        XCTAssertEqual(store.payload(forContentKey: "key1"), payload)
+        await store.write(payload, forContentKey: "key1")
+        let cached = await store.payload(forContentKey: "key1")
+        XCTAssertEqual(cached, payload)
 
         let fresh = LinkEnrichmentStore(directory: directory)
-        XCTAssertEqual(fresh.payload(forContentKey: "key1"), payload)
+        let reloaded = await fresh.payload(forContentKey: "key1")
+        XCTAssertEqual(reloaded, payload)
     }
 
-    func testStoreMemoryCacheStaysWithinDiskEntryLimit() throws {
+    func testStoreMemoryCacheStaysWithinDiskEntryLimit() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("scopy-enrichment-memory-tests-\(UUID().uuidString)")
         let store = LinkEnrichmentStore(directory: directory)
         defer { try? FileManager.default.removeItem(at: directory) }
 
         for index in 0...LinkEnrichmentStore.maximumEntries {
-            store.write(
+            await store.write(
                 LinkEnrichmentPayload(
                     version: LinkEnrichmentPayload.formatVersion,
                     fetchedAt: Date(),
@@ -111,8 +114,9 @@ final class LinkEnrichmentTests: XCTestCase {
             LinkEnrichmentStore.maximumEntries
         )
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("key-0.json"))
+        let evicted = await store.payload(forContentKey: "key-0")
         XCTAssertNil(
-            store.payload(forContentKey: "key-0"),
+            evicted,
             "the oldest memory entry must be evicted when the shared 500-entry limit is exceeded"
         )
     }
@@ -202,11 +206,13 @@ final class LinkEnrichmentTests: XCTestCase {
         await second.value
 
         XCTAssertEqual(LinkEnrichmentURLProtocolStub.state.requestedHosts, ["public.example"])
-        XCTAssertNil(store.payload(forContentKey: LinkEnrichmentContentKey.make(for: secondMarkdown)))
+        let secondPayload = await store.payload(forContentKey: LinkEnrichmentContentKey.make(for: secondMarkdown))
+        XCTAssertNil(secondPayload)
 
         first.cancel()
         await first.value
-        XCTAssertNil(store.payload(forContentKey: LinkEnrichmentContentKey.make(for: firstMarkdown)))
+        let firstPayload = await store.payload(forContentKey: LinkEnrichmentContentKey.make(for: firstMarkdown))
+        XCTAssertNil(firstPayload)
     }
 
     func testDecodeEntitiesHandlesNamedAndNumericForms() {

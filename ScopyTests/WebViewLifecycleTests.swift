@@ -226,7 +226,7 @@ final class WebViewLifecycleTests: XCTestCase {
         let alt = String(repeating: "a", count: 35)
         let source = "| Image | Note |\n| --- | --- |\n| ![\(alt)](missing-table-image.png) | done |"
 
-        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: source)))
+        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: source, context: MarkdownRenderContextResolver.defaultContext(for: source))))
         XCTAssertTrue(document.isRenderReady)
         XCTAssertEqual(
             document.evaluate("document.querySelector('tbody td').textContent") as? String,
@@ -282,7 +282,8 @@ final class WebViewLifecycleTests: XCTestCase {
         ```
         """
         let mentions = "[PDF](/tmp/report.pdf) [Word](/tmp/report.docx) [Word again](/tmp/report.docx) [图片](/tmp/image.png) [视频](/tmp/movie.mp4) [音频](/tmp/audio.wav) [Google Sheets](app://google-sheets) [Google Sheets again](app://google-sheets)"
-        try document.load(MarkdownHTMLDocumentBuilder.document(source: source + "\n\n" + mentions), timeout: 20)
+        let updatedSource = source + "\n\n" + mentions
+        try document.load(MarkdownHTMLDocumentBuilder.document(source: updatedSource, context: MarkdownRenderContextResolver.defaultContext(for: updatedSource)), timeout: 20)
         guard document.isRenderReady else {
             XCTFail("Real WebKit document did not reach terminal success: \(document.evaluate("JSON.stringify(window.ScopyDocument.state)") ?? "no response")")
             return
@@ -385,7 +386,8 @@ final class WebViewLifecycleTests: XCTestCase {
         let document = try LiveMarkdownDocument()
         defer { document.close() }
         document.window.contentView = nil
-        XCTAssertFalse(try document.load(MarkdownHTMLDocumentBuilder.document(source: "# Prewarmed\n\nBody"), timeout: 2.5))
+        let source = "# Prewarmed\n\nBody"
+        XCTAssertFalse(try document.load(MarkdownHTMLDocumentBuilder.document(source: source, context: MarkdownRenderContextResolver.defaultContext(for: source)), timeout: 2.5))
         XCTAssertEqual(document.evaluate("window.ScopyDocument.state.renderFailed") as? Bool, false)
         XCTAssertEqual(document.evaluate("document.querySelector('#content h1').textContent") as? String, "Prewarmed")
 
@@ -397,7 +399,8 @@ final class WebViewLifecycleTests: XCTestCase {
         let document = try LiveMarkdownDocument()
         defer { document.close() }
         try FileManager.default.removeItem(at: document.assetRoot.appendingPathComponent("katex.min.css"))
-        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: "$$E=mc^2$$")))
+        let source = "$$E=mc^2$$"
+        XCTAssertTrue(try document.load(MarkdownHTMLDocumentBuilder.document(source: source, context: MarkdownRenderContextResolver.defaultContext(for: source))))
 
         XCTAssertFalse(document.isRenderReady)
         XCTAssertEqual(document.evaluate("window.ScopyDocument.state.renderFailed") as? Bool, true)

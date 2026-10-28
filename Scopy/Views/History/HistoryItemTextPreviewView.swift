@@ -7,8 +7,7 @@ struct HistoryItemTextPreviewView: View {
     @Environment(SettingsViewModel.self) private var settingsViewModel
     @Environment(\.hoverPreviewSizeBudget) private var sizeBudget
     @Environment(\.previewWindowActions) private var windowActions
-    /// Bumped when a link-enrichment sidecar lands for the current text so the body
-    /// recomputes its render key and rebuilds the enriched document.
+    /// Notifications restart asynchronous preparation; body evaluation uses only frozen values.
     @State private var linkEnrichmentRevision = 0
     let model: HoverPreviewModel
     let markdownWebViewController: MarkdownPreviewWebViewController?
@@ -41,8 +40,6 @@ struct HistoryItemTextPreviewView: View {
     @State private var exportResolutionPercent: Int
     @State private var previewLayoutScalePercent: Int
     @State private var hasInitializedPreviewLayoutScale = false
-    @State private var overrideMarkdownHTML: String?
-    @State private var overrideMarkdownRenderKey: String?
     @State private var isMarkdownLayoutScaleControlHovered = false
     @State private var isMarkdownLayoutScaleEditing = false
     @State private var exportProgress: MarkdownExportService.ExportProgress?
@@ -89,22 +86,22 @@ struct HistoryItemTextPreviewView: View {
                 let clampedHeight = min(maxHeight, max(1, contentHeight))
                 let shouldScroll = contentHeight > maxHeight
 
-                if model.isMarkdown, model.markdownHTML == nil, showMarkdownPlaceholder {
+                if model.isMarkdown, model.markdownDocument == nil, showMarkdownPlaceholder {
                     ProgressView()
                         .frame(width: width, height: clampedHeight)
-                } else if model.isMarkdown, let html = model.markdownHTML, let controller = markdownWebViewController {
+                } else if model.isMarkdown, let document = model.markdownDocument, let controller = markdownWebViewController {
                     let layoutScale = activeMarkdownLayoutScale
-                    let renderKey = model.markdownRenderKey(for: text, layoutScale: layoutScale)
-                    let isLiveRender = model.isMarkdownRenderLive(for: renderKey)
-                    let displayedDocument = displayedMarkdownDocument(source: text, defaultHTML: html)
+                    let renderKey = document.renderKey
+                    let isPendingScale = document.context.layoutScale != layoutScale
+                    let isLiveRender = !isPendingScale && model.isMarkdownRenderLive(for: renderKey)
                     ZStack(alignment: .topTrailing) {
                         ReusableMarkdownPreviewWebView(
                             controller: controller,
-                            html: displayedDocument.html,
+                            html: document.html,
                             shouldScroll: shouldScroll,
                             onContentSizeChange: { metrics in
-                                guard !displayedDocument.isPendingActiveScale else { return }
-                                applyMarkdownMetrics(metrics, renderKey: displayedDocument.renderKey)
+                                guard !isPendingScale else { return }
+                                applyMarkdownMetrics(metrics, renderKey: renderKey)
                             }
                         )
                         .frame(width: width, height: clampedHeight)
@@ -113,37 +110,29 @@ struct HistoryItemTextPreviewView: View {
                         // The shield covers first paints and real reloads only. While a stale
                         // document intentionally stays on screen (scale change or enrichment
                         // upgrade in flight), the last rendered content remains visible.
-                        if !isLiveRender && !displayedDocument.isPendingActiveScale {
+                        if !isLiveRender && !isPendingScale {
                             markdownReadinessShield(source: text, renderKey: renderKey)
                                 .zIndex(1)
                         }
 
                     }
-                    .task(id: renderKey) {
+                    .task(id: document.contentKey) {
                         initializePreviewLayoutScaleFromSettingsIfNeeded()
-                        await withTaskGroup(of: Void.self) { group in
-                            if settingsViewModel.settings.linkEnrichmentEnabled {
-                                let markdown = text
-                                group.addTask(priority: .utility) {
-                                    await LinkEnrichmentCoordinator.shared.ensureEnrichment(markdown: markdown)
-                                }
-                            }
-                            model.prepareMarkdownRender(for: renderKey)
-                            if model.markdownMetricsLayoutScalePercent != layoutScale.rawValue {
-                                markMarkdownPreviewAwaitingMetrics()
-                            }
-                            await prepareOverrideMarkdownHTMLIfNeeded(
-                                source: text,
-                                defaultHTML: html,
-                                layoutScale: layoutScale,
-                                renderKey: renderKey
-                            )
+                        if settingsViewModel.settings.linkEnrichmentEnabled {
+                            await LinkEnrichmentCoordinator.shared.ensureEnrichment(markdown: document.source)
                         }
+                    }
+                    .task(id: MarkdownPreparationID(
+                        renderKey: document.renderKey,
+                        layoutScalePercent: layoutScale.rawValue,
+                        enrichmentRevision: linkEnrichmentRevision
+                    )) {
+                        await refreshMarkdownDocument(document, layoutScale: layoutScale)
                     }
                     .accessibilityIdentifier("History.Preview.Container")
                     .onReceive(NotificationCenter.default.publisher(for: .scopyLinkEnrichmentDidUpdate)) { notification in
                         guard let key = notification.userInfo?[LinkEnrichmentNotificationKey.contentKey] as? String,
-                              key == LinkEnrichmentContentKey.make(for: text)
+                              key == document.contentKey
                         else { return }
                         linkEnrichmentRevision += 1
                     }
@@ -188,10 +177,10 @@ struct HistoryItemTextPreviewView: View {
 
     // MARK: - Export Button
 
-    private struct MarkdownDisplayDocument {
-        let html: String
+    private struct MarkdownPreparationID: Equatable {
         let renderKey: String
-        let isPendingActiveScale: Bool
+        let layoutScalePercent: Int
+        let enrichmentRevision: Int
     }
 
     private enum MarkdownExportResolution: Int, CaseIterable, Identifiable {
@@ -234,20 +223,15 @@ struct HistoryItemTextPreviewView: View {
         )
     }
 
-    /// The scale the pipeline rendered `model.markdownHTML` at (the active preview scale at hover
-    /// time); a scale switch in the popover re-renders only when it differs from this.
-    private var defaultHTMLLayoutScale: MarkdownChatGPTLayoutScalePercent {
-        model.markdownHTMLLayoutScale ?? settingsMarkdownLayoutScale
-    }
-
     private var isMarkdownLayoutScaleControlExpanded: Bool {
         isMarkdownLayoutScaleControlHovered || isMarkdownLayoutScaleEditing
     }
 
     private func applyMarkdownMetrics(_ metrics: MarkdownContentMetrics, renderKey: String) {
         guard isContentCurrent() else { return }
-        guard let text = model.text else { return }
-        guard model.markdownRenderKey(for: text, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
+        guard let document = model.markdownDocument,
+              document.renderKey == renderKey,
+              document.context.layoutScale == activeMarkdownLayoutScale else { return }
         guard metrics.renderSucceeded else {
             model.markdownMetricsLayoutScalePercent = nil
             model.markMarkdownRenderFailed(
@@ -280,39 +264,18 @@ struct HistoryItemTextPreviewView: View {
         guard model.previewLayoutScalePercent == nil else { return }
         if UserDefaults.standard.object(forKey: Self.previewLayoutScalePercentUserDefaultsKey) == nil {
             let settingsScale = settingsMarkdownLayoutScale
-            if previewLayoutScalePercent != settingsScale.rawValue, let text = model.text {
-                model.prepareMarkdownRender(
-                    for: model.markdownRenderKey(for: text, layoutScale: settingsScale)
-                )
-                previewLayoutScalePercent = settingsScale.rawValue
-            }
+            previewLayoutScalePercent = settingsScale.rawValue
         }
     }
 
     private func selectPreviewLayoutScalePercent(_ percent: Int) {
         let normalized = MarkdownChatGPTLayoutScalePercent(settingsValue: percent).rawValue
         guard previewLayoutScalePercent != normalized else { return }
-        if let text = model.text {
-            model.prepareMarkdownRender(
-                for: model.markdownRenderKey(
-                    for: text,
-                    layoutScale: MarkdownChatGPTLayoutScalePercent(settingsValue: normalized)
-                )
-            )
-        } else {
-            model.invalidateMarkdownLiveRender()
-        }
         previewLayoutScalePercent = normalized
         model.previewLayoutScalePercent = normalized
         if !windowActions.isPinned {
             UserDefaults.standard.set(normalized, forKey: Self.previewLayoutScalePercentUserDefaultsKey)
         }
-    }
-
-    private func markMarkdownPreviewAwaitingMetrics() {
-        model.markdownMetricsLayoutScalePercent = nil
-        model.markdownHasHorizontalOverflow = false
-        model.invalidateMarkdownLiveRender()
     }
 
     @ViewBuilder
@@ -345,73 +308,19 @@ struct HistoryItemTextPreviewView: View {
         }
     }
 
-    /// The document on screen for `source`. It is exactly the active scale's document unless
-    /// `isPendingActiveScale` (a scale change or enrichment upgrade still rendering).
-    private func displayedMarkdownDocument(source: String, defaultHTML: String) -> MarkdownDisplayDocument {
-        let layoutScale = activeMarkdownLayoutScale
-        let activeRenderKey = model.markdownRenderKey(for: source, layoutScale: layoutScale)
-        if layoutScale == defaultHTMLLayoutScale, model.isMarkdownHTMLEnrichmentCurrent(for: source) {
-            return MarkdownDisplayDocument(
-                html: defaultHTML,
-                renderKey: activeRenderKey,
-                isPendingActiveScale: false
-            )
-        }
-        if overrideMarkdownRenderKey == activeRenderKey, let overrideMarkdownHTML {
-            return MarkdownDisplayDocument(
-                html: overrideMarkdownHTML,
-                renderKey: activeRenderKey,
-                isPendingActiveScale: false
-            )
-        }
-        if let overrideMarkdownHTML, let overrideMarkdownRenderKey {
-            return MarkdownDisplayDocument(
-                html: overrideMarkdownHTML,
-                renderKey: overrideMarkdownRenderKey,
-                isPendingActiveScale: true
-            )
-        }
-        return MarkdownDisplayDocument(
-            html: defaultHTML,
-            renderKey: model.markdownRenderKey(for: source, layoutScale: defaultHTMLLayoutScale),
-            isPendingActiveScale: true
-        )
-    }
-
-    private func prepareOverrideMarkdownHTMLIfNeeded(
-        source: String,
-        defaultHTML _: String,
-        layoutScale: MarkdownChatGPTLayoutScalePercent,
-        renderKey: String
+    private func refreshMarkdownDocument(
+        _ document: PreparedMarkdownDocument,
+        layoutScale: MarkdownChatGPTLayoutScalePercent
     ) async {
-        guard isContentCurrent() else { return }
-        if layoutScale == defaultHTMLLayoutScale, model.isMarkdownHTMLEnrichmentCurrent(for: source) {
-            overrideMarkdownHTML = nil
-            overrideMarkdownRenderKey = nil
-            return
+        if document.context.layoutScale != layoutScale {
+            try? await Task.sleep(nanoseconds: Self.markdownLayoutScaleRenderDebounceNanoseconds)
         }
-        if overrideMarkdownRenderKey == renderKey, overrideMarkdownHTML != nil {
-            return
-        }
-
-        try? await Task.sleep(nanoseconds: Self.markdownLayoutScaleRenderDebounceNanoseconds)
-        guard !Task.isCancelled else { return }
-
-        let html = await Task.detached(priority: .userInitiated) {
-            let context = MarkdownRenderContextResolver.defaultContext(
-                for: source,
-                layoutScale: layoutScale
-            )
-            return MarkdownHTMLDocumentBuilder.document(source: source, context: context)
-        }.value
-        guard !Task.isCancelled else { return }
-        guard isContentCurrent() else { return }
-
-        guard model.markdownRenderKey(for: source, layoutScale: activeMarkdownLayoutScale) == renderKey else { return }
-        model.setMarkdownHTMLAwaitingLiveRender(html, layoutScale: layoutScale)
-        overrideMarkdownHTML = html
-        overrideMarkdownRenderKey = renderKey
-        markMarkdownPreviewAwaitingMetrics()
+        guard !Task.isCancelled, isContentCurrent() else { return }
+        let updated = await document.refreshed(layoutScale: layoutScale)
+        guard !Task.isCancelled, isContentCurrent() else { return }
+        guard model.markdownDocument?.renderKey == document.renderKey,
+              updated.renderKey != document.renderKey else { return }
+        model.setMarkdownDocumentAwaitingLiveRender(updated)
     }
 
     private static func initialExportResolutionPercent() -> Int {
@@ -629,11 +538,8 @@ struct HistoryItemTextPreviewView: View {
     private func exportToPNG() {
         guard isContentCurrent() else { return }
         guard !model.isExporting else { return }
-        guard let markdownSource = model.text, let html = model.markdownHTML else { return }
-        // The document on screen is reused when it is exactly the active scale's document;
-        // otherwise export renders the source itself.
-        let displayed = displayedMarkdownDocument(source: markdownSource, defaultHTML: html)
-        let displayedHTML = displayed.isPendingActiveScale ? nil : displayed.html
+        guard let document = model.markdownDocument else { return }
+        let layoutScale = activeMarkdownLayoutScale
 
         let settings = settingsViewModel.settings
 
@@ -651,10 +557,9 @@ struct HistoryItemTextPreviewView: View {
         exportProgress = nil
         model.exportActionTask = Task { @MainActor in
             let result = await HistoryItemMarkdownExportController.exportMarkdownToClipboard(
-                markdownSource: markdownSource,
-                renderedHTML: displayedHTML,
+                document: document,
                 settings: settings,
-                layoutScale: activeMarkdownLayoutScale,
+                layoutScale: layoutScale,
                 resolutionScale: exportResolutionScale,
                 pasteboardWriteLease: pasteboardWriteLease,
                 authorizePasteboardWrite: {

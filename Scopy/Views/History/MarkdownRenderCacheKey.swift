@@ -1,17 +1,15 @@
 import Foundation
 
 enum MarkdownRenderCacheKey {
-    /// `itemKey` identifies the previewed item revision or file preview (not a content hash); `input` is the render
-    /// context, whose renderer version, profile, layout scale and enrichment fingerprint all change the document.
-    static func make(input context: MarkdownRenderContext, itemKey: String) -> String {
-        guard !itemKey.isEmpty else { return "" }
+    /// The exact source digest and frozen context identify both the document and its metrics.
+    static func make(input context: MarkdownRenderContext, contentKey: String) -> String {
         return [
             "md",
             MarkdownRenderContextResolver.rendererVersion,
             context.profile.rawValue,
             context.layoutScale.cacheKey,
             context.linkEnrichment?.fingerprint ?? "plain",
-            itemKey
+            contentKey
         ].joined(separator: "|")
     }
 }

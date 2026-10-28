@@ -27,10 +27,10 @@ actor LinkEnrichmentCoordinator {
     /// Called from the preview path whenever the user has enabled link enrichment.
     func ensureEnrichment(markdown: String) async {
         let contentKey = LinkEnrichmentContentKey.make(for: markdown)
-        guard store.payload(forContentKey: contentKey) == nil, !inFlight.contains(contentKey) else { return }
-        let urls = LinkEnrichmentEligibility.candidateURLs(in: markdown)
-        inFlight.insert(contentKey)
+        guard inFlight.insert(contentKey).inserted else { return }
         defer { inFlight.remove(contentKey) }
+        guard await store.payload(forContentKey: contentKey) == nil, !Task.isCancelled else { return }
+        let urls = LinkEnrichmentEligibility.candidateURLs(in: markdown)
 
         let entries: [String: LinkEnrichmentEntry]
         if urls.isEmpty {
@@ -46,12 +46,14 @@ actor LinkEnrichmentCoordinator {
             fetchedAt: Date(),
             entries: entries
         )
-        store.write(payload, forContentKey: contentKey)
+        await store.write(payload, forContentKey: contentKey)
         guard !entries.isEmpty else { return }
-        NotificationCenter.default.post(
-            name: .scopyLinkEnrichmentDidUpdate,
-            object: nil,
-            userInfo: [LinkEnrichmentNotificationKey.contentKey: contentKey]
-        )
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .scopyLinkEnrichmentDidUpdate,
+                object: nil,
+                userInfo: [LinkEnrichmentNotificationKey.contentKey: contentKey]
+            )
+        }
     }
 }

@@ -18,8 +18,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         state.previewCoordinator.hoverPreviewTask = previewTask
         state.previewCoordinator.hoverMarkdownTask = markdownTask
         state.previewCoordinator.isHovering = true
-        state.previewModel.text = "old text"
-        state.previewModel.markdownHTML = "<p>old</p>"
+        state.previewModel.primeTextPreview(content: .markdownSource("old text"))
         state.rowController.presentNoteEditor(note: "draft")
         let noteSaveRequest = try XCTUnwrap(state.rowController.beginNoteSave())
         let noteSaveTask = sleepingTask()
@@ -39,7 +38,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         XCTAssertNil(state.previewCoordinator.hoverPreviewTask)
         XCTAssertNil(state.previewCoordinator.hoverMarkdownTask)
         XCTAssertNil(state.previewModel.text)
-        XCTAssertNil(state.previewModel.markdownHTML)
+        XCTAssertNil(state.previewModel.markdownDocument)
         XCTAssertTrue(state.rowController.isNoteEditorPresented)
         XCTAssertEqual(state.rowController.noteDraft, "draft")
         XCTAssertTrue(state.rowController.isSavingNote)
@@ -133,7 +132,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
         state.rowController.optimizeImageTask = optimizeTask
         state.rowController.optimizeMessageTask = feedbackTask
         state.previewCoordinator.hoverPreviewTask = previewTask
-        state.previewModel.text = "content"
+        state.previewModel.primeTextPreview(content: .plain("content"))
         state.rowController.presentNoteEditor(note: "draft")
 
         state.tearDown()
@@ -163,7 +162,7 @@ final class HistoryItemInteractionStateTests: XCTestCase {
 
         state.previewCoordinator.hoverPreviewTask = previewTask
         state.previewCoordinator.isHovering = true
-        state.previewModel.text = "rendered preview"
+        state.previewModel.primeTextPreview(content: .plain("rendered preview"))
         state.rowController.presentNoteEditor(note: "keep my draft")
         _ = tryUnwrap(state.beginOptimization())
         state.rowController.isOptimizingImage = true

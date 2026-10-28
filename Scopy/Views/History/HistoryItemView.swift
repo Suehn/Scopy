@@ -234,11 +234,6 @@ struct HistoryItemView: View, Equatable {
         interactionState?.previewCoordinator.filePopoverToken ?? Self.inactivePopoverToken
     }
 
-    private var markdownFilePreviewCacheKey: String? {
-        get { interactionState?.previewCoordinator.markdownFilePreviewCacheKey }
-        nonmutating set { interactionState?.previewCoordinator.markdownFilePreviewCacheKey = newValue }
-    }
-
     private var isOptimizingImage: Bool {
         get { interactionState?.rowController.isOptimizingImage ?? false }
         nonmutating set { interactionState?.rowController.isOptimizingImage = newValue }
@@ -1296,10 +1291,7 @@ struct HistoryItemView: View, Equatable {
             delay: previewDelay,
             settings: settings
         )
-        let markdownCacheKey = isMarkdownFile
-            ? HistoryHoverPreviewPipeline.markdownFileCacheKey(revision: request.revision)
-            : nil
-        state.previewCoordinator.presentPreview(.file, markdownCacheKey: markdownCacheKey)
+        state.previewCoordinator.presentPreview(.file)
         state.previewCoordinator.hoverPreviewTask = Task(priority: .userInitiated) { @MainActor in
             await HistoryHoverPreviewPipeline.run(
                 request: .file(request),
@@ -1598,41 +1590,17 @@ struct HistoryItemView: View, Equatable {
     private func updateMarkdownPreviewMetricsCacheIfNeeded() {
         guard let state = interactionState,
               isViewInteractionCurrent(state, revision: state.revision),
-              state.previewModel.isMarkdown,
-              let text = state.previewModel.text,
+              let document = state.previewModel.markdownDocument,
               let size = state.previewModel.markdownContentSize,
-              let layoutScalePercent = state.previewModel.markdownMetricsLayoutScalePercent else { return }
+              state.previewModel.markdownMetricsLayoutScalePercent == document.context.layoutScale.rawValue,
+              state.previewModel.isMarkdownRenderLive(for: document.renderKey) else { return }
 
-        let layoutScale = MarkdownChatGPTLayoutScalePercent(settingsValue: layoutScalePercent)
-        let renderKey = state.previewModel.markdownRenderKey(for: text, layoutScale: layoutScale)
-        guard state.previewModel.isMarkdownRenderLive(for: renderKey) else { return }
-
-        let contentHash: String
-        if item.type == .file {
-            guard isFilePreviewPresented else { return }
-            guard let cacheKey = markdownFilePreviewCacheKey else { return }
-            guard let current = MarkdownPreviewCache.shared.filePreview(forKey: cacheKey),
-                  current.text == text else { return }
-            contentHash = cacheKey
-        } else if item.type == .text || item.type == .rtf || item.type == .html {
-            guard isTextPreviewPresented else { return }
-            contentHash = contentRevision.cacheKey
-        } else {
-            return
-        }
-
-        let context = MarkdownRenderContextResolver.defaultContext(
-            for: text,
-            layoutScale: layoutScale
-        )
-        let renderCacheKey = MarkdownRenderCacheKey.make(input: context, itemKey: contentHash)
-        guard !renderCacheKey.isEmpty else { return }
         let metrics = MarkdownContentMetrics(
             size: size,
             hasHorizontalOverflow: state.previewModel.markdownHasHorizontalOverflow,
             renderSucceeded: true
         )
-        MarkdownPreviewCache.shared.setMetrics(metrics, forKey: renderCacheKey)
+        MarkdownPreviewCache.shared.setMetrics(metrics, forKey: document.renderKey)
     }
 
     private func applyHoverPreviewEvent(
@@ -1657,20 +1625,17 @@ struct HistoryItemView: View, Equatable {
             state.previewModel.fileIsAvailable = isAvailable
         case .text(let previewState):
             state.previewModel.primeTextPreview(
-                text: previewState.text,
-                isMarkdown: previewState.isMarkdown,
-                markdownHTML: previewState.markdownHTML,
+                content: previewState.content,
                 markdownContentSize: previewState.markdownContentSize,
-                markdownHasHorizontalOverflow: previewState.markdownHasHorizontalOverflow,
-                layoutScale: previewState.layoutScale
+                markdownHasHorizontalOverflow: previewState.markdownHasHorizontalOverflow
             )
-        case .markdownHTML(let html, let layoutScale):
-            state.previewModel.setMarkdownHTMLAwaitingLiveRender(html, layoutScale: layoutScale)
-        case .prewarmMarkdownHTML(let html, let renderCacheKey):
+        case .markdownDocument(let document):
+            state.previewModel.setMarkdownDocumentAwaitingLiveRender(document)
+        case .prewarmMarkdownDocument(let document):
             guard !isAnyPreviewPresented else { return }
             markdownWebViewController.prewarm(
-                html: html,
-                renderCacheKey: renderCacheKey,
+                html: document.html,
+                renderCacheKey: document.renderKey,
                 width: HoverPreviewScreenMetrics.maxMarkdownPopoverWidthPoints()
             )
         case .renderMarkdown(let request):
@@ -1772,7 +1737,7 @@ struct HistoryItemView: View, Equatable {
             return true
         }
         if state.previewModel.previewCGImage != nil || state.previewModel.text != nil ||
-            state.previewModel.markdownHTML != nil {
+            state.previewModel.markdownDocument != nil {
             return true
         }
         if state.previewModel.isExporting || state.previewModel.exportSuccess ||

@@ -62,16 +62,15 @@ enum MarkdownRenderContextResolver {
 
     static func defaultContext(
         for markdown: String,
-        layoutScale: MarkdownChatGPTLayoutScalePercent
+        layoutScale: MarkdownChatGPTLayoutScalePercent,
+        linkEnrichment: LinkEnrichmentPayload? = nil
     ) -> MarkdownRenderContext {
         let profile = MarkdownSourceProfileDetector.detect(markdown)
         return MarkdownRenderContext(
             profile: profile,
             policy: MarkdownRepairPolicy.conservativeDefault(for: profile),
             layoutScale: layoutScale,
-            linkEnrichment: LinkEnrichmentStore.shared.payload(
-                forContentKey: LinkEnrichmentContentKey.make(for: markdown)
-            )
+            linkEnrichment: linkEnrichment
         )
     }
 }

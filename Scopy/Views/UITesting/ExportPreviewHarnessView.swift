@@ -15,11 +15,8 @@ struct ExportPreviewHarnessView: View {
     init() {
         let markdown = Self.loadMarkdown()
         let m = HoverPreviewModel()
-        m.text = markdown
-        // Avoid hosting a live WKWebView inside the export harness: UI testing + multiple WebViews can be flaky.
-        // Export still uses the offscreen export pipeline via `markdownHTML`.
-        m.isMarkdown = false
-        m.markdownHTML = MarkdownHTMLDocumentBuilder.document(source: markdown)
+        // Keep the harness text-only; its export still prepares the production document.
+        m.primeTextPreview(content: .plain(markdown))
         m.markdownContentSize = nil
         m.markdownHasHorizontalOverflow = false
         m.isExporting = false
@@ -92,19 +89,23 @@ struct ExportPreviewHarnessView: View {
     }
 
     private func exportNow() {
-        guard !isExporting else { return }
-        guard let html = model.markdownHTML, !html.isEmpty else { return }
-
+        guard !isExporting, let source = model.text else { return }
         isExporting = true
         let scale = Self.exportResolutionScaleFromEnvironment()
-        MarkdownExportService.exportToPNGClipboard(
-            html: html,
-            targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
-            resolutionScale: scale,
-            pngquantOptions: nil
-        ) { _ in
-            Task { @MainActor in
-                self.isExporting = false
+        Task { @MainActor in
+            let document = await PreparedMarkdownDocument.prepare(
+                source: source,
+                layoutScale: MarkdownRenderLayoutConstants.defaultChatGPTLayoutScale
+            )
+            MarkdownExportService.exportToPNGClipboard(
+                html: document.html,
+                targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
+                resolutionScale: scale,
+                pngquantOptions: nil
+            ) { _ in
+                Task { @MainActor in
+                    self.isExporting = false
+                }
             }
         }
     }

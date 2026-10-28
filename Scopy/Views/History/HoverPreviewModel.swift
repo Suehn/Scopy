@@ -11,15 +11,16 @@ final class HoverPreviewModel {
     var previewPixelSize: CGSize?
     /// Whether the previewed file exists; nil until the pipeline has checked.
     var fileIsAvailable: Bool?
-    var text: String?
-    var markdownHTML: String?
+    private(set) var textContent: HoverPreviewTextContent?
+    var text: String? { textContent?.text }
+    var markdownDocument: PreparedMarkdownDocument? { textContent?.document }
     var markdownContentSize: CGSize?
     var markdownMetricsLayoutScalePercent: Int?
     var markdownHasHorizontalOverflow: Bool = false
     private(set) var markdownLiveRenderKey: String?
     private var markdownRenderErrorKey: String?
     private var markdownRenderErrorReason: String?
-    var isMarkdown: Bool = false
+    var isMarkdown: Bool { textContent?.isMarkdown ?? false }
     var presentationSize: CGSize?
     var previewLayoutScalePercent: Int?
 
@@ -35,114 +36,32 @@ final class HoverPreviewModel {
     @ObservationIgnored private(set) var exportAuthorizationToken: UUID?
 
     var hasContentOrFeedback: Bool {
-        previewCGImage != nil || text != nil || markdownHTML != nil ||
+        previewCGImage != nil || text != nil || markdownDocument != nil ||
             markdownContentSize != nil || markdownHasHorizontalOverflow ||
             markdownLiveRenderKey != nil || markdownRenderErrorReason != nil || isMarkdown ||
             isExporting || exportSuccess || exportSuccessMessage != nil ||
             exportFailed || exportErrorMessage != nil
     }
 
-    nonisolated static func markdownRenderKey(
-        source: String,
-        layoutScale: MarkdownChatGPTLayoutScalePercent
-    ) -> String {
-        markdownRenderKey(
-            layoutScale: layoutScale,
-            enrichmentFingerprint: enrichmentFingerprint(forContentKey: LinkEnrichmentContentKey.make(for: source)),
-            textKey: ClipboardItemContentRevision.deterministicTextCacheKey(source)
-        )
-    }
-
-    nonisolated private static func markdownRenderKey(
-        layoutScale: MarkdownChatGPTLayoutScalePercent,
-        enrichmentFingerprint: String,
-        textKey: String
-    ) -> String {
-        [layoutScale.cacheKey, enrichmentFingerprint, textKey].joined(separator: "|")
-    }
-
-    /// Full-text digests of `text`, computed once per text value: the preview body reads render
-    /// keys on every update, and each digest hashes the whole document.
-    @ObservationIgnored private var textDigests: (text: String, contentKey: String, textKey: String)?
-
-    private func digests(for source: String) -> (contentKey: String, textKey: String) {
-        if let textDigests, textDigests.text == source {
-            return (textDigests.contentKey, textDigests.textKey)
-        }
-        let contentKey = LinkEnrichmentContentKey.make(for: source)
-        let textKey = ClipboardItemContentRevision.deterministicTextCacheKey(source)
-        textDigests = (source, contentKey, textKey)
-        return (contentKey, textKey)
-    }
-
-    /// `markdownRenderKey(source:layoutScale:)` for this model's text, without rehashing it.
-    func markdownRenderKey(for source: String, layoutScale: MarkdownChatGPTLayoutScalePercent) -> String {
-        let digests = digests(for: source)
-        return Self.markdownRenderKey(
-            layoutScale: layoutScale,
-            enrichmentFingerprint: Self.enrichmentFingerprint(forContentKey: digests.contentKey),
-            textKey: digests.textKey
-        )
-    }
-
-    /// Whether `markdownHTML` was built with the enrichment sidecar that is stored now.
-    func isMarkdownHTMLEnrichmentCurrent(for source: String) -> Bool {
-        markdownHTMLEnrichmentFingerprint == enrichmentFingerprint(for: source)
-    }
-
-    private func enrichmentFingerprint(for source: String) -> String {
-        Self.enrichmentFingerprint(forContentKey: digests(for: source).contentKey)
-    }
-
-    /// The link-enrichment fingerprint `markdownHTML` was built with. When a frozen
-    /// sidecar lands after the pipeline render, the live fingerprint moves ahead of this
-    /// stamp and the preview rebuilds the document instead of showing stale default HTML.
-    private(set) var markdownHTMLEnrichmentFingerprint: String?
-    /// Layout scale `markdownHTML` was rendered at; nil until a document arrives.
-    private(set) var markdownHTMLLayoutScale: MarkdownChatGPTLayoutScalePercent?
-
-    nonisolated private static func enrichmentFingerprint(forContentKey contentKey: String) -> String {
-        LinkEnrichmentStore.shared.payload(forContentKey: contentKey)?.fingerprint ?? "plain"
-    }
-
-    /// Cached HTML and metrics may seed the popover geometry, but they do not describe the
-    /// readiness of the reusable WebView currently owned by this preview.
+    /// Cached geometry does not make the reusable WebView live. The document carries the
+    /// identity of the exact input that produced its HTML, including its frozen enrichment.
     func primeTextPreview(
-        text: String?,
-        isMarkdown: Bool,
-        markdownHTML: String?,
-        markdownContentSize: CGSize?,
-        markdownHasHorizontalOverflow: Bool,
-        layoutScale: MarkdownChatGPTLayoutScalePercent? = nil
+        content: HoverPreviewTextContent?,
+        markdownContentSize: CGSize? = nil,
+        markdownHasHorizontalOverflow: Bool = false
     ) {
+        textContent = content
         markdownMetricsLayoutScalePercent = nil
-        self.text = text
-        self.isMarkdown = isMarkdown
-        self.markdownHTML = markdownHTML
-        markdownHTMLLayoutScale = markdownHTML == nil ? nil : layoutScale
         self.markdownContentSize = markdownContentSize
         self.markdownHasHorizontalOverflow = markdownHasHorizontalOverflow
-        markdownHTMLEnrichmentFingerprint = text.flatMap { source in
-            markdownHTML == nil ? nil : enrichmentFingerprint(for: source)
-        }
         invalidateMarkdownLiveRender()
     }
 
-    func setMarkdownHTMLAwaitingLiveRender(_ html: String, layoutScale: MarkdownChatGPTLayoutScalePercent? = nil) {
+    func setMarkdownDocumentAwaitingLiveRender(_ document: PreparedMarkdownDocument) {
+        textContent = .markdown(document)
         markdownMetricsLayoutScalePercent = nil
-        markdownHTML = html
-        markdownHTMLLayoutScale = layoutScale
-        markdownHTMLEnrichmentFingerprint = text.map { enrichmentFingerprint(for: $0) }
+        markdownHasHorizontalOverflow = false
         invalidateMarkdownLiveRender()
-    }
-
-    func prepareMarkdownRender(for renderKey: String) {
-        guard markdownLiveRenderKey != renderKey else { return }
-        markdownLiveRenderKey = nil
-        if markdownRenderErrorKey != renderKey {
-            markdownRenderErrorKey = nil
-            markdownRenderErrorReason = nil
-        }
     }
 
     func invalidateMarkdownLiveRender() {
@@ -214,14 +133,11 @@ final class HoverPreviewModel {
         previewCGImage = nil
         previewPixelSize = nil
         fileIsAvailable = nil
-        text = nil
-        markdownHTML = nil
-        markdownHTMLEnrichmentFingerprint = nil
+        textContent = nil
         markdownContentSize = nil
         markdownMetricsLayoutScalePercent = nil
         markdownHasHorizontalOverflow = false
         invalidateMarkdownLiveRender()
-        isMarkdown = false
     }
 
     func reset() {
@@ -246,11 +162,7 @@ final class HoverPreviewModel {
         previewCGImage = source.previewCGImage
         previewPixelSize = source.previewPixelSize
         fileIsAvailable = source.fileIsAvailable
-        text = source.text
-        isMarkdown = source.isMarkdown
-        markdownHTML = source.markdownHTML
-        markdownHTMLLayoutScale = source.markdownHTMLLayoutScale
-        markdownHTMLEnrichmentFingerprint = source.markdownHTMLEnrichmentFingerprint
+        textContent = source.textContent
         markdownContentSize = source.markdownContentSize
         markdownMetricsLayoutScalePercent = source.markdownMetricsLayoutScalePercent
         markdownHasHorizontalOverflow = source.markdownHasHorizontalOverflow
@@ -261,6 +173,6 @@ final class HoverPreviewModel {
 
     /// Whether anything is available to show without re-running the pipeline.
     var hasRenderedContent: Bool {
-        previewCGImage != nil || text != nil || markdownHTML != nil
+        previewCGImage != nil || text != nil || markdownDocument != nil
     }
 }

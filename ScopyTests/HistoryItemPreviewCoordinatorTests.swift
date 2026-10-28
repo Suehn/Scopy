@@ -10,7 +10,6 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
         let oldTextToken = coordinator.textPopoverToken
         coordinator.hoverPreviewTask = makeSleepingTask()
         coordinator.hoverMarkdownTask = makeSleepingTask()
-        coordinator.markdownFilePreviewCacheKey = "stale"
 
         coordinator.presentPreview(.image)
 
@@ -18,7 +17,6 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.textPopoverToken, oldTextToken)
         XCTAssertNil(coordinator.hoverPreviewTask)
         XCTAssertNil(coordinator.hoverMarkdownTask)
-        XCTAssertNil(coordinator.markdownFilePreviewCacheKey)
     }
 
     func testInvalidatePreviewTokensClearsPreviewIdentity() {
@@ -26,7 +24,6 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
         let imageToken = coordinator.imagePopoverToken
         let textToken = coordinator.textPopoverToken
         let fileToken = coordinator.filePopoverToken
-        coordinator.markdownFilePreviewCacheKey = "cache-key"
         coordinator.isPopoverHovering = true
 
         coordinator.invalidatePreviewTokens()
@@ -34,7 +31,6 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(coordinator.imagePopoverToken, imageToken)
         XCTAssertNotEqual(coordinator.textPopoverToken, textToken)
         XCTAssertNotEqual(coordinator.filePopoverToken, fileToken)
-        XCTAssertNil(coordinator.markdownFilePreviewCacheKey)
         XCTAssertFalse(coordinator.isPopoverHovering)
         XCTAssertNil(coordinator.currentPopoverScreenFrame)
     }
@@ -187,19 +183,17 @@ final class HistoryItemPreviewCoordinatorTests: XCTestCase {
 
 @MainActor
 final class HoverPreviewModelTests: XCTestCase {
-    func testCachedMarkdownGeometryDoesNotMakeReusableWebViewLive() {
+    func testCachedMarkdownGeometryDoesNotMakeReusableWebViewLive() async {
         let model = HoverPreviewModel()
         let source = "# Cached preview"
-        let renderKey = HoverPreviewModel.markdownRenderKey(
+        let document = await PreparedMarkdownDocument.prepare(
             source: source,
             layoutScale: .percent100
         )
         let cachedSize = CGSize(width: 816, height: 420)
 
         model.primeTextPreview(
-            text: source,
-            isMarkdown: true,
-            markdownHTML: "<p>Cached preview</p>",
+            content: .markdown(document),
             markdownContentSize: cachedSize,
             markdownHasHorizontalOverflow: true
         )
@@ -207,63 +201,60 @@ final class HoverPreviewModelTests: XCTestCase {
         XCTAssertEqual(model.markdownContentSize, cachedSize)
         XCTAssertTrue(model.markdownHasHorizontalOverflow)
         XCTAssertNil(model.markdownMetricsLayoutScalePercent)
-        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKey))
+        XCTAssertFalse(model.isMarkdownRenderLive(for: document.renderKey))
     }
 
-    func testRenderKeyChangeRestoresShieldUntilCurrentWebViewSucceeds() {
+    func testRenderKeyChangeRestoresShieldUntilCurrentWebViewSucceeds() async {
         let model = HoverPreviewModel()
         let sourceA = "# A"
         let sourceB = "# B"
-        let renderKeyA = HoverPreviewModel.markdownRenderKey(
+        let documentA = await PreparedMarkdownDocument.prepare(
             source: sourceA,
             layoutScale: .percent100
         )
-        let renderKeyB = HoverPreviewModel.markdownRenderKey(
+        let documentB = await PreparedMarkdownDocument.prepare(
             source: sourceB,
             layoutScale: .percent100
         )
 
-        model.prepareMarkdownRender(for: renderKeyA)
-        model.markMarkdownRenderSucceeded(for: renderKeyA)
-        XCTAssertTrue(model.isMarkdownRenderLive(for: renderKeyA))
+        model.primeTextPreview(content: .markdown(documentA))
+        model.markMarkdownRenderSucceeded(for: documentA.renderKey)
+        XCTAssertTrue(model.isMarkdownRenderLive(for: documentA.renderKey))
 
         model.primeTextPreview(
-            text: sourceB,
-            isMarkdown: true,
-            markdownHTML: "<p>B</p>",
+            content: .markdown(documentB),
             markdownContentSize: CGSize(width: 816, height: 180),
             markdownHasHorizontalOverflow: false
         )
-        model.prepareMarkdownRender(for: renderKeyB)
 
-        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKeyA))
-        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKeyB))
+        XCTAssertFalse(model.isMarkdownRenderLive(for: documentA.renderKey))
+        XCTAssertFalse(model.isMarkdownRenderLive(for: documentB.renderKey))
 
-        model.markMarkdownRenderSucceeded(for: renderKeyB)
+        model.markMarkdownRenderSucceeded(for: documentB.renderKey)
 
-        XCTAssertTrue(model.isMarkdownRenderLive(for: renderKeyB))
-        XCTAssertFalse(model.isMarkdownRenderLive(for: renderKeyA))
+        XCTAssertTrue(model.isMarkdownRenderLive(for: documentB.renderKey))
+        XCTAssertFalse(model.isMarkdownRenderLive(for: documentA.renderKey))
     }
 
-    func testRenderFailureFeedbackIsScopedToCurrentRenderKey() {
+    func testRenderFailureFeedbackIsScopedToCurrentRenderKey() async {
         let model = HoverPreviewModel()
-        let renderKeyA = HoverPreviewModel.markdownRenderKey(
+        let documentA = await PreparedMarkdownDocument.prepare(
             source: "A",
             layoutScale: .percent100
         )
-        let renderKeyB = HoverPreviewModel.markdownRenderKey(
+        let documentB = await PreparedMarkdownDocument.prepare(
             source: "B",
             layoutScale: .percent125
         )
 
-        model.markMarkdownRenderFailed(for: renderKeyA, reason: "A failed")
+        model.markMarkdownRenderFailed(for: documentA.renderKey, reason: "A failed")
 
-        XCTAssertEqual(model.markdownRenderErrorReason(for: renderKeyA), "A failed")
-        XCTAssertNil(model.markdownRenderErrorReason(for: renderKeyB))
+        XCTAssertEqual(model.markdownRenderErrorReason(for: documentA.renderKey), "A failed")
+        XCTAssertNil(model.markdownRenderErrorReason(for: documentB.renderKey))
 
-        model.prepareMarkdownRender(for: renderKeyB)
+        model.setMarkdownDocumentAwaitingLiveRender(documentB)
 
-        XCTAssertNil(model.markdownRenderErrorReason(for: renderKeyA))
-        XCTAssertNil(model.markdownRenderErrorReason(for: renderKeyB))
+        XCTAssertNil(model.markdownRenderErrorReason(for: documentA.renderKey))
+        XCTAssertNil(model.markdownRenderErrorReason(for: documentB.renderKey))
     }
 }

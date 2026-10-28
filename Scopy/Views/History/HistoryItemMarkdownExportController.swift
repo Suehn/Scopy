@@ -89,38 +89,44 @@ enum HistoryItemMarkdownExportController {
         }
     }
 
-    /// `renderedHTML`, when given, must be the document for `markdownSource` at `layoutScale`
-    /// (a preview passes the document it shows); otherwise the source is rendered here.
+    /// Menu and automation exports prepare a document before entering the same export path
+    /// used by an already-visible preview.
     static func exportMarkdownToClipboard(
         markdownSource: String,
-        renderedHTML: String? = nil,
         settings: SettingsDTO,
         layoutScale: MarkdownChatGPTLayoutScalePercent? = nil,
         resolutionScale: CGFloat? = nil,
         pasteboardWriteLease: MarkdownExportService.PasteboardWriteLease? = nil,
         authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true },
         onProgress: @escaping @MainActor (MarkdownExportService.ExportProgress) -> Void = { _ in }
-        ) async -> Result<MarkdownExportService.ExportStats, Error> {
-        let html: String
-        if let renderedHTML {
-            html = renderedHTML
-        } else {
-            let resolvedLayoutScale = layoutScale ?? MarkdownChatGPTLayoutScalePercent(
+    ) async -> Result<MarkdownExportService.ExportStats, Error> {
+        let document = await PreparedMarkdownDocument.prepare(
+            source: markdownSource,
+            layoutScale: layoutScale ?? MarkdownChatGPTLayoutScalePercent(
                 settingsValue: settings.markdownChatGPTLayoutScalePercent
             )
-            let renderTask = Task.detached(priority: .userInitiated) {
-                let context = MarkdownRenderContextResolver.defaultContext(
-                    for: markdownSource,
-                    layoutScale: resolvedLayoutScale
-                )
-                return MarkdownHTMLDocumentBuilder.document(source: markdownSource, context: context)
-            }
-            html = await withTaskCancellationHandler(operation: {
-                await renderTask.value
-            }, onCancel: {
-                renderTask.cancel()
-            })
-        }
+        )
+        return await exportMarkdownToClipboard(
+            document: document,
+            settings: settings,
+            resolutionScale: resolutionScale,
+            pasteboardWriteLease: pasteboardWriteLease,
+            authorizePasteboardWrite: authorizePasteboardWrite,
+            onProgress: onProgress
+        )
+    }
+
+    /// A scale change preserves the source and frozen enrichment captured by the preview.
+    static func exportMarkdownToClipboard(
+        document: PreparedMarkdownDocument,
+        settings: SettingsDTO,
+        layoutScale: MarkdownChatGPTLayoutScalePercent? = nil,
+        resolutionScale: CGFloat? = nil,
+        pasteboardWriteLease: MarkdownExportService.PasteboardWriteLease? = nil,
+        authorizePasteboardWrite: @escaping @MainActor () -> Bool = { true },
+        onProgress: @escaping @MainActor (MarkdownExportService.ExportProgress) -> Void = { _ in }
+    ) async -> Result<MarkdownExportService.ExportStats, Error> {
+        let prepared = await document.withLayoutScale(layoutScale ?? document.context.layoutScale)
         guard !Task.isCancelled else { return .failure(CancellationError()) }
         let pngquantOptions = pngquantOptions(settings: settings)
 
@@ -128,7 +134,7 @@ enum HistoryItemMarkdownExportController {
         return await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 let handle = MarkdownExportService.exportToPNGClipboard(
-                    html: html,
+                    html: prepared.html,
                     targetWidthPixels: MarkdownExportService.defaultTargetWidthPixels,
                     resolutionScale: resolutionScale ?? defaultResolutionScale(),
                     pngquantOptions: pngquantOptions,

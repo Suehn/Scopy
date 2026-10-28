@@ -1,12 +1,12 @@
 import Foundation
-import os
+import ScopyKit
 
-/// Synchronous, lock-guarded sidecar store for link-enrichment artifacts.
+/// Serializes sidecar I/O away from the main actor.
 ///
 /// Artifacts are derived caches keyed by markdown content hash, stored as one JSON file
-/// per key under Application Support. Reads are memory-cached so the render-context
-/// resolver can consult the store synchronously on every context build.
-final class LinkEnrichmentStore: @unchecked Sendable {
+/// per key under Application Support. The bounded memory cache avoids repeated reads while
+/// document preparation awaits a frozen payload; views never consult this store synchronously.
+actor LinkEnrichmentStore {
     static let shared = LinkEnrichmentStore()
 
     static let maximumEntries = 500
@@ -16,11 +16,9 @@ final class LinkEnrichmentStore: @unchecked Sendable {
         case miss
     }
 
-    private let lock = NSLock()
     private var memory: [String: MemoryEntry] = [:]
     private var memoryOrder: [String] = []
     private let directory: URL
-    private static let logger = Logger(subsystem: "com.scopy.app", category: "LinkEnrichment")
 
     init(directory: URL? = nil) {
         self.directory = directory ?? FileManager.default
@@ -29,32 +27,28 @@ final class LinkEnrichmentStore: @unchecked Sendable {
     }
 
     func payload(forContentKey key: String) -> LinkEnrichmentPayload? {
-        lock.lock()
-        defer { lock.unlock() }
         if let cached = memory[key] {
-            touchMemoryEntryLocked(key)
+            touchMemoryEntry(key)
             switch cached {
             case .payload(let payload): return payload
             case .miss: return nil
             }
         }
         let loaded = readFromDisk(key: key)
-        cacheLocked(loaded.map(MemoryEntry.payload) ?? .miss, key: key)
+        cache(loaded.map(MemoryEntry.payload) ?? .miss, key: key)
         return loaded
     }
 
     func write(_ payload: LinkEnrichmentPayload, forContentKey key: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        cacheLocked(.payload(payload), key: key)
+        cache(.payload(payload), key: key)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(payload)
             try data.write(to: fileURL(key: key), options: .atomic)
         } catch {
-            Self.logger.error("Could not persist link enrichment: \(String(describing: error), privacy: .public)")
+            ScopyLog.ui.error("Could not persist link enrichment: \(String(describing: error), privacy: .private)")
         }
-        pruneLocked()
+        prune()
     }
 
     private func fileURL(key: String) -> URL {
@@ -69,7 +63,7 @@ final class LinkEnrichmentStore: @unchecked Sendable {
         return payload
     }
 
-    private func pruneLocked() {
+    private func prune() {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey]
@@ -84,15 +78,15 @@ final class LinkEnrichmentStore: @unchecked Sendable {
         }
     }
 
-    private func cacheLocked(_ entry: MemoryEntry, key: String) {
+    private func cache(_ entry: MemoryEntry, key: String) {
         memory[key] = entry
-        touchMemoryEntryLocked(key)
+        touchMemoryEntry(key)
         while memoryOrder.count > Self.maximumEntries {
             memory.removeValue(forKey: memoryOrder.removeFirst())
         }
     }
 
-    private func touchMemoryEntryLocked(_ key: String) {
+    private func touchMemoryEntry(_ key: String) {
         if let index = memoryOrder.firstIndex(of: key) {
             memoryOrder.remove(at: index)
         }
